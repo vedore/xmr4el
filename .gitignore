@@ -11,6 +11,8 @@
 /.db
 /datasets
 /.pubtor
+/.models
+/.docs
 
 /test/scripts
 /test/test_data
@@ -23,3 +25,7 @@ __pycache__/
 *.pyc
 *.onnx
 
+
+# Unzipped datasets (large, never commit)
+/data_datasets
+/data_datasets.zip

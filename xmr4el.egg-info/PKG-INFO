@@ -1,3 +1,34 @@
+Metadata-Version: 2.4
+Name: xmr4el
+Version: 0.5.3
+Summary: eXtreme Multi-Label Ranking for Entity Linking
+Author-email: João Vedor <fc56311@alunos.fc.ul.pt>
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: joblib
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: psutil
+Requires-Dist: scikit-learn
+Requires-Dist: transformers
+Requires-Dist: sentence-transformers
+Requires-Dist: faiss-cpu
+Requires-Dist: lightgbm
+Requires-Dist: umap-learn
+Requires-Dist: fuzzywuzzy
+Requires-Dist: python-Levenshtein
+Requires-Dist: memory_profiler
+Requires-Dist: biopython
+Requires-Dist: torch>=2.8.0
+Requires-Dist: kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main
+Provides-Extra: rapids
+Requires-Dist: cuml-cu12==25.*; sys_platform == "linux" and extra == "rapids"
+Requires-Dist: cudf-cu12==25.*; sys_platform == "linux" and extra == "rapids"
+Requires-Dist: rmm-cu12==25.*; sys_platform == "linux" and extra == "rapids"
+Requires-Dist: cupy-cuda12x>=13.6; sys_platform == "linux" and extra == "rapids"
+Dynamic: license-file
+
 # XMR4EL
 
 XMR4EL is a research codebase for entity linking with very large label spaces using an extreme multi-label ranking pipeline. The code centers on a configurable `XModel` that combines text featurization, label embedding construction, clustering, matcher training, and per-label ranking into one hierarchical workflow.

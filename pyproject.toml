@@ -2,6 +2,9 @@
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["xmr4el", "xmr4el.*"]
+
 [project]
 name = "xmr4el"
 version = "0.5.3"
@@ -28,13 +31,15 @@ dependencies = [
   "memory_profiler",
   "biopython",
 
-  # RAPIDS (CUDA 12.8 compatible):
-  "cuml-cu12==25.*",
-  "cudf-cu12==25.*",
-  "rmm-cu12==25.*",
-  "cupy-cuda12x>=13.6",
-
   "torch>=2.8.0",
 
   "kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main"
+]
+
+[project.optional-dependencies]
+rapids = [
+  "cuml-cu12==25.*; sys_platform == 'linux'",
+  "cudf-cu12==25.*; sys_platform == 'linux'",
+  "rmm-cu12==25.*; sys_platform == 'linux'",
+  "cupy-cuda12x>=13.6; sys_platform == 'linux'",
 ]

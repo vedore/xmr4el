@@ -3,8 +3,6 @@ import numpy as np
 from collections import Counter
 import time
 
-from xmr4el.featurization.preprocessor import Preprocessor
-from xmr4el.xmr.model import XModel
 
 
 """
@@ -59,6 +57,23 @@ def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
 
     return filtered_labels, filtered_texts
 
+def gold_rank(row, gold_idx):
+    """1-based rank of gold_idx in one CSR score row, 0 if absent."""
+    ranked = row.indices[np.argsort(-row.data)]
+    pos = np.flatnonzero(ranked == gold_idx)
+    return int(pos[0]) + 1 if pos.size else 0
+
+
+def _selfcheck():
+    from scipy.sparse import csr_matrix
+    m = csr_matrix(np.array([[0.1, 0.9, 0.5], [0.0, 0.0, 0.0]]))
+    assert gold_rank(m.getrow(0), 1) == 1
+    assert gold_rank(m.getrow(0), 2) == 2
+    assert gold_rank(m.getrow(0), 0) == 3
+    assert gold_rank(m.getrow(1), 0) == 0, "empty row must report not-found"
+    print("selfcheck ok")
+
+
 # debug_tables: list of DataFrames returned from predict(debug=True)
 def save_debug_tables(debug_tables, filename_prefix="debug_folder/debug_file"):
     """
@@ -74,6 +89,8 @@ def save_debug_tables(debug_tables, filename_prefix="debug_folder/debug_file"):
         # print(f"Saved debug table to {fname}")
 
 def main():
+    from xmr4el.featurization.preprocessor import Preprocessor
+    from xmr4el.xmr.model import XModel
 
     parser = ArgumentParser()
     parser.add_argument("-xmodel_path", type=str, required=True)
@@ -104,36 +121,40 @@ def main():
     
     golden_labels, input_texts = filter_labels_and_inputs(corpus, labels, trained_xtree.initial_labels)
 
-    print(len(golden_labels))
-    print(np.unique(np.array(golden_labels)).shape)
-    # print(input_texts[0], len(input_texts))
-    
-    # exit()
+    n_total = len(labels)
+    n_kept = len(golden_labels)
+    print(f"In-vocabulary mentions: {n_kept}/{n_total} ({n_kept / max(n_total, 1):.1%}) "
+          f"-- {n_total - n_kept} zero-shot mentions dropped before scoring")
+    print("Unique gold CUIs kept:", np.unique(np.array(golden_labels)).shape[0])
 
-    # Counter({0: 18131, 1: 1103})
-    routes, score_csr = trained_xtree.predict(input_texts, 
-                                              beam_size=args.beam_size, 
-                                              topk=args.topk, 
-                                              fusion="lp_fusion", 
-                                              topk_mode="global", 
-                                              topk_inside_global=args.topk)
-    
-    # print(routes)
-    print(score_csr)
-    
+    routes, score_csr = trained_xtree.predict(input_texts,
+                                              beam_size=args.beam_size,
+                                              topk=args.topk,
+                                              fusion="lp_fusion",
+                                              topk_mode="per_leaf")
+
     trained_labels = np.array(trained_xtree.initial_labels)
-    
+    label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
+
+    # Rank of the gold label in each query's score row. 0 = never retrieved.
+    # Single gold CUI per mention (preprocessor.py:113 -> one-hot Y), so acc@1 / MRR /
+    # recall@k are the right metrics; precision@k (the PECOS suite) is not.
+    ranks = np.zeros(len(golden_labels), dtype=int)
     hit_counts = []
     for r in routes:
         qi = r["query_index"]
-        cand = set()
-        cand.update(trained_labels[r.get("final_path").get("leaf_global_labels", [])])
-        gold = golden_labels[qi]
-        hit_counts.append(1 if gold in cand else 0)
-        
-    print("Hit counts per query:", Counter(hit_counts))
-    print("Average hits:", np.mean(hit_counts))
+        ranks[qi] = gold_rank(score_csr.getrow(qi), label_to_idx.get(golden_labels[qi], -1))
+        cand = set(trained_labels[r.get("final_path").get("leaf_global_labels", [])])
+        hit_counts.append(1 if golden_labels[qi] in cand else 0)
 
+    found = ranks > 0
+    print("Hit counts per query:", Counter(hit_counts))
+    print("recall@candidates:", np.mean(hit_counts))
+    print("acc@1:", np.mean(ranks == 1))
+    print("MRR:", np.mean(np.where(found, 1.0 / np.maximum(ranks, 1), 0.0)))
+    for k in (1, 5, 10, 20, 50, 100):
+        print(f"recall@{k}:", np.mean(found & (ranks <= k)))
+    print("candidates/query (mean nnz):", score_csr.nnz / max(score_csr.shape[0], 1))
 
     end = time.time()
 
@@ -141,4 +162,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if "-selfcheck" in sys.argv:
+        _selfcheck()
+    else:
+        main()

@@ -1,0 +1,24 @@
+joblib
+numpy
+pandas
+psutil
+scikit-learn
+transformers
+sentence-transformers
+faiss-cpu
+lightgbm
+umap-learn
+fuzzywuzzy
+python-Levenshtein
+memory_profiler
+biopython
+torch>=2.8.0
+kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main
+
+[rapids]
+
+[rapids:sys_platform == "linux"]
+cuml-cu12==25.*
+cudf-cu12==25.*
+rmm-cu12==25.*
+cupy-cuda12x>=13.6
