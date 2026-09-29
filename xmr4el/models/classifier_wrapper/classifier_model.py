@@ -278,7 +278,6 @@ class SklearnSGDClassifier(ClassifierModel):
             "n_jobs": None,
             "random_state": None,
             "learning_rate": 'optimal',
-            "eta0": 0.0,
             "power_t": 0.5,
             "early_stopping": False,
             "validation_fraction": 0.1,

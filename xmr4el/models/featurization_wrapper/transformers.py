@@ -9,7 +9,6 @@ import torch
 import numpy as np
 
 from gc import collect
-from pathlib import Path
 from os.path import exists
 from numpy import savez_compressed, array
 from torch import no_grad
@@ -166,7 +165,7 @@ class Transformer(metaclass=TransformersMeta):
         
         logger.info(f"Using PyTorch device: {device}")
 
-        batch_dir = f"{cls._get_root_directory()}/{batch_dir}"
+        batch_dir = os.path.abspath(batch_dir)
         emb_file = f"{batch_dir}/{output_prefix}"
         cls._create_batch_dir(batch_dir)
         
@@ -316,16 +315,6 @@ class Transformer(metaclass=TransformersMeta):
         """Delete the batch directory"""
         
         shutil.rmtree(batch_dir)
-
-    @staticmethod
-    def _get_root_directory():
-        """Locate the src path of the project"""
-
-        root_dir = Path(__file__).resolve().parent
-        while not (root_dir / "src").exists() and root_dir != root_dir.parent:
-            root_dir = root_dir.parent
-        return root_dir
-
 
 class BioBert(Transformer):
     """BioBERT-based transformer."""

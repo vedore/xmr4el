@@ -1,67 +1,64 @@
 # Next session — pick up here
 
-State as of 2026-09-29. Code still unchanged; the two sessions so far were read-only analysis plus
-this plan. Branch `repeat`.
+State as of 2026-09-29, **session 3**. Branch `repeat`, all changes uncommitted.
 
-Full defect descriptions live in `CLAUDE.md` ("Known defects" + "PECOS comparison"). This file is
-the work queue and the state you would otherwise re-derive. `TODO.md` is the older list —
-superseded where they overlap, still correct on its own items.
+Full defect descriptions live in `CLAUDE.md` ("Known defects" + "PECOS comparison"). `results.md`
+is the running ablation table. `TODO.md` is the oldest list — superseded where they overlap.
 
 ---
 
-## The one thing to remember
+## Where we actually are
 
-The thesis is **not** wrong. The premise (EL as XMR, tree-routed candidates, PIFA hierarchy) is
-sound. What is broken is the implementation and the measurement — which together mean the thesis
-is currently **untested**, not disproved. Three reasons:
+**Phase 0 done. Phase 1 done (all four items). Nothing is committed yet.**
 
-1. There is no PECOS baseline in the repo at all.
-2. The places where XMR4EL diverges from XR-Linear semantics are accidents, not design choices.
-3. The only metric is candidate-set recall, which cannot see the ranker working or failing.
+Working notes for whoever picks this up:
 
----
+- **The user runs every train/eval themselves.** Do not execute the pipeline. Write the code, then
+  hand over the exact command and wait for pasted output. Keep `-ds_len` small (500–1000).
+- The venv is `.venv/bin/python` (Python 3.12, uv-managed). `python3` alone has no numpy.
+- Self-checks are cheap and safe to run directly:
+  `.venv/bin/python -m xmr4el.ranker.train`, `.venv/bin/python -m xmr4el.clustering.train`,
+  `.venv/bin/python test/xmr4el/test_evaluate_pipeline.py -selfcheck`.
 
-## Datasets — decided
+### Done this session
 
-**Everything runs on `datasets/`, not `data_datasets/`.** MedMentions ST21pv is the headline; it is
-the standard biomedical EL benchmark, has published comparison numbers, and ships its own splits.
-
-```
-datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt   2,635 docs  122,241 mentions  18,520 CUIs
-datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt       878 docs   40,884 mentions   8,643 CUIs
-datasets/MedMentions/st21pv/data/corpus_pubtator_test.txt      879 docs   40,157 mentions   8,457 CUIs
-```
-
-Use **dev** for all iteration; touch **test** only for the final table.
-
-Secondary sets, not drop-in:
-- `datasets/MedMentions/full/` — same corpus, no CUI filtering, ~3x the label space. The scaling
-  run, if one is needed. Splits are PMID lists, not separate files.
-- `datasets/BC5CDR`, `datasets/BioRED`, `datasets/ncbi_disease` — label spaces are MeSH / NCBI-Gene
-  IDs, **not CUIs** (`BioRED/Train.PubTator` col 6 is e.g. `D003924`). Each needs a mapping through
-  MRCONSO before it can share the pipeline. Out of scope until Phase 4.
-
-**Loader caveat:** st21pv col 6 is `UMLS:C1519254`, prefixed. `preprocessor.py:227` takes
-`parts[5]` verbatim, so labels become `"UMLS:Cxxxxxxx"`. Harmless for train/test string matching
-(both sides carry the prefix) but it will not join to the `.pubtor` UMLS KB. Strip the prefix in
-the loader when Phase 4 starts, or earlier if it is cheaper to do once.
-
----
-
-## Diagnostics — three of four already done
-
-Measured on st21pv train/test with shell one-liners. No script needed; the fourth is folded into
-fix #2 below.
-
-| Diagnostic | Result | Means |
+| Item | Where | Note |
 |---|---|---|
-| Labels clearing `n_pos >= 2` | **11,418 / 18,520 (61.6%)** | 38.4% of labels get **no ranker** and fall back to `r = ones(...)` — defect #4 |
-| Mentions per abstract | **46.4** | Defect #1 collapses ~46 rows per abstract into near-identical TF-IDF vectors with different gold CUIs |
-| Test CUIs present in train | **4,867 / 8,457 (57.6%)** | **42.4% of test CUIs are zero-shot and currently deleted by eval** (`test_evaluate_pipeline.py:106`) — defect #10 |
-| Cluster-size distribution | not run | Folded into fix #2: the fix has to log the dropped count anyway |
+| Phase 0 metrics | `test/xmr4el/test_evaluate_pipeline.py` | `gold_rank()` + acc@1 / MRR / recall@k, in-vocab kept/total, `_selfcheck` |
+| Phase 0 `topk_mode` | same file | `"global"` → `"per_leaf"`; scores now come from the hierarchy, not cosine over `Z` |
+| Phase 1 #1 ranker curriculum | `xmr4el/ranker/train.py:310`, `:198` | `ranker_models.update` moved inside the epoch loop; RNG is `seed + epoch`; `E_warm` 3→1 in config |
+| Phase 1 #2 features | `.models/xmr4el_base_config.json` | `emb_flag` 1 → 4 |
+| Phase 1 #3 cluster drop | `xmr4el/clustering/train.py` | orphans reassigned to nearest valid centroid; logs raw/valid/reassigned/sizes; `max_leaf_size` dead computation deleted (param kept) |
+| Phase 1 #4 ranker fallback | `xmr4el/xmr/base.py:555,565,567` | `r = ones(...)` → `_cos_fallback(x, z_label)`, mapped to [0,1] |
+| sklearn 1.9 drift | config + `classifier_wrapper/classifier_model.py` | matcher `eta0: 0.0` removed (now must be > 0); ranker `class_weight: "balanced"` removed (`partial_fit` rejects it) |
+| determinism | `models/cluster_wrapper/clustering_model.py` | `seed: 0` in `balancedkmeans` defaults + `np.random.seed`/`torch.manual_seed` before `fit` |
 
-The zero-shot number is the headline finding. Nearly half the test set is being thrown away before
-scoring, and the result is reported as if it were the whole set.
+### Two findings that change the plan
+
+1. **Rows 0–3 of `results.md` are inside the noise band and are not publishable.** Row 3 changed no
+   routing input yet candidate recall moved −2.1pt. Cause: `kmeans_pytorch` seeded its centroids
+   from the global `np.random` state. Now fixed — runs from here are reproducible. Rows 0–3 cannot
+   be regenerated without reverting code, so they are superseded by the matrix below rather than
+   re-run.
+2. **Defect #2 (dropped small clusters) is inert at this configuration.** The new log says
+   `reassigned 0/500` at the root and `0/83` at every child: `balanced=True`
+   (`clustering_model.py:759`) makes near-equal clusters, so nothing falls under `min_leaf_size: 5`.
+   The fix stays in as XR-Linear equivalence insurance, but it buys no accuracy. Do not spend more
+   time on it.
+
+### Immediate next step
+
+The user is running `./test/xmr4el/run_ablation.sh` — a seeded 2x2 over `emb_flag` {1, 4} x
+`-ds_len` {500, 1000}, logs in `test/test_data/ablation/`. It ends with a summary block.
+
+**When the output is pasted: write those 4 rows into `results.md` as the real baseline table,
+replacing rows 0–3.** Then Phase 2.
+
+Watch for: acc@1 vs the random-ordering floor. With 100 candidates/query, random ordering scores
+acc@1 ≈ recall@100 / 100 ≈ 0.0039. Every row so far sits at or below that — **scoring has never
+beaten random**. If item #4 (cosine fallback) has not lifted acc@1 clearly above the floor, the
+cause is defect #6 (leaf matcher scores are per-cluster, not per-label, `xmr/base.py:547`), and
+#6 should be pulled forward from Phase 3 ahead of the PECOS baseline.
 
 ---
 
@@ -80,7 +77,7 @@ Two deliberate reorderings against the old queue:
 Keep `results.md` with one row per change and the exact command that produced it. That table is the
 ablation appendix, written as a side effect instead of reconstructed at the end.
 
-### Phase 0 — make it measurable
+### Phase 0 — make it measurable — **DONE**
 
 - acc@1, MRR, recall@k from `score_csr` in `test/xmr4el/test_evaluate_pipeline.py` (~15 lines, no
   extra compute). Keep the existing hit count as recall@candidates.
@@ -94,7 +91,7 @@ ablation appendix, written as a side effect instead of reconstructed at the end.
 
 **Exit:** a baseline row in `results.md` from a smoke run (`-ds_len 2000`).
 
-### Phase 1 — Tier 1 bugs
+### Phase 1 — Tier 1 bugs — **DONE** (see table above; #2 turned out inert)
 
 In this order; re-run eval after each and record the delta row.
 
@@ -123,7 +120,7 @@ crashing.
 
 **Exit:** four `results.md` rows, each attributable to one change.
 
-### Phase 2 — PECOS baseline
+### Phase 2 — PECOS baseline — **NEXT**
 
 `pip install libpecos`, train `pecos.xmc.xlinear.XLinearModel` on the same artifacts XModel already
 persists: `self.X`, `self.Y`, `self.Z`. Same `n_clusters`, depth, `min_leaf_size`, beam size,

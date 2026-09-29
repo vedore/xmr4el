@@ -751,6 +751,7 @@ class BalancedKMeans(ClusteringModel):
             "iter_k": None,
             "device": None,
             "gamma_for_soft_dtw": 0.001,
+            "seed": 0,
         }
 
         try:
@@ -773,6 +774,11 @@ class BalancedKMeans(ClusteringModel):
             # You might want to remove or fix these vectors, e.g.:
             trn_corpus = trn_corpus[norms > 0]
         
+        # kmeans_pytorch picks its initial centroids with np.random.choice; without this the
+        # whole tree differs run to run and ablation deltas are unreadable.
+        np.random.seed(config["seed"])
+        torch.manual_seed(config["seed"])
+
         cluster_labels = model.fit(X=trn_corpus, 
                                    distance=config["distance"], 
                                    tol=config["tol"], 

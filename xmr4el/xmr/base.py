@@ -537,6 +537,13 @@ class MLModel():
         # Accumulate all (qi, gid, score) triples; we’ll pack at the end
         triples_qi, triples_gid, triples_sc = [], [], []
 
+        def _cos_fallback(rows, zv):
+            """Score for labels with no ranker (38.4% of them: n_pos < 2 at ranker/train.py:164).
+            Returning ones() collapsed them onto the shared cluster score; cosine at least
+            orders them. Mapped to [0, 1] to match the probability range _fuse expects."""
+            den = np.linalg.norm(rows, axis=1) * np.linalg.norm(zv) + 1e-12
+            return ((rows @ zv) / den + 1.0) / 2.0
+
         for gid, q_indices in queries_per_label.items():
             li = g2l.get(gid)
             mdl = model_dict.get(gid)
@@ -552,7 +559,7 @@ class MLModel():
             batch_inp = np_hstack([X_dense[q_idx], Z_tiled])
 
             if mdl is None:
-                r = ones(len(q_idx), dtype=float)
+                r = _cos_fallback(X_dense[q_idx], zvec)
             else:
                 try:
                     proba_fn = getattr(mdl, "predict_proba", None)
@@ -562,9 +569,9 @@ class MLModel():
                     elif hasattr(mdl, "decision_function"):
                         r = expit(mdl.decision_function(batch_inp))
                     else:
-                        r = ones(len(q_idx), dtype=float)
+                        r = _cos_fallback(X_dense[q_idx], zvec)
                 except Exception:
-                    r = ones(len(q_idx), dtype=float)
+                    r = _cos_fallback(X_dense[q_idx], zvec)
 
             fused = _fuse(m, r)   # branch decided once above
 
