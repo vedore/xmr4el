@@ -22,8 +22,15 @@ for spec in "1 500" "4 500" "1 1000" "4 1000"; do
   TREE=$(ls -td test/test_data/saved_trees/*/ | head -1)
   echo "=== $TAG :: eval ($TREE) ==="
   $PY test/xmr4el/test_evaluate_pipeline.py -xmodel_path "$TREE" -test_path "$DEV" -beam_size 5 -topk 20 2>&1 | tee "$OUT/eval_$TAG.log"
+
+  # topk 0 = no per-leaf truncation -> recall@candidates is the pure routing ceiling,
+  # unaffected by ranker score quality. Separates defect "routing" from defect "ranking".
+  echo "=== $TAG :: eval routing-ceiling ==="
+  $PY test/xmr4el/test_evaluate_pipeline.py -xmodel_path "$TREE" -test_path "$DEV" -beam_size 5 -topk 0 2>&1 | tee "$OUT/ceil_$TAG.log"
 done
 
 echo; echo "=== summary ==="
-grep -H -E "In-vocabulary|^acc@1|^MRR|^recall@(5|20|100|candidates)" "$OUT"/eval_*.log
+grep -H -E "In-vocabulary|^acc@1|^MRR|^recall@(5|20|100|candidates)|^candidates/query" "$OUT"/eval_*.log
+echo "--- routing ceiling (no per-leaf cut) ---"
+grep -H -E "^recall@candidates|^candidates/query" "$OUT"/ceil_*.log
 grep -h "reassigned" "$OUT"/train_*.log | sort | uniq -c

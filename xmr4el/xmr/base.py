@@ -372,10 +372,32 @@ class MLModel():
         
         # Retrieve C
         C = self.cluster_model.c_node
+
+        # Defect #6: a cluster-level matcher makes every label in a cluster tie at predict time
+        # (`m = cluster_scores[q_idx, c]` below), so ordering inside a leaf is decided by CSR index
+        # order. Identity C at the leaf makes the matcher one-vs-rest over labels -- XR-Linear leaf
+        # semantics -- so `M = Y_node @ I = Y_node` and `label_cluster` becomes arange(L), which
+        # makes `m` per-label with no change at the scoring site.
+        if self.is_last_layer:
+            C = sp_eye(self.label_embeddings.shape[0], format="csr", dtype=np.float32)
+            self.cluster_model.c_node = C   # predict() re-reads this and asserts K == C.shape[1]
+
         cluster_labels = np.asarray(C.argmax(axis=1)).flatten()
     
         self.logger.info("Training ML: Matcher Phase")
-    
+
+        # With identity C above, the leaf matcher is one-vs-rest over labels and a leaf label can
+        # have a single positive instance. SGDClassifier's `early_stopping` splits off a validation
+        # set *stratified* on y, which needs >= 2 members per class and raises otherwise. Disabled
+        # for the leaf only, so the non-leaf layers stay byte-identical and the #6 row stays
+        # attributable to #6.
+        matcher_config = self.matcher_config
+        if self.is_last_layer:
+            matcher_config = {
+                **matcher_config,
+                "kwargs": {**matcher_config.get("kwargs", {}), "early_stopping": False},
+            }
+
         # Make the Matcher
         matcher_model = Matcher()  
         matcher_model.train(X_train, 
@@ -383,7 +405,7 @@ class MLModel():
                             local_to_global_idx=self.local_to_global_idx, 
                             global_to_local_idx=self.global_to_local_idx, 
                             C=C,
-                            matcher_config=self.matcher_config,
+                            matcher_config=matcher_config,
                             dtype=np.float32
                             )     
          
@@ -410,7 +432,10 @@ class MLModel():
         
             if self.is_last_layer:
                 P = self.matcher_model.predict_proba(X_train)
-                M_MAN = _topb_sparse(P, b=5)
+                # With identity C above, M_TFN is Y_node, so this top-b mask is the ranker's whole
+                # negative pool (ranker/train.py:284) instead of a cluster's worth of instances.
+                # b=5 leaves too few negatives for neg_mult * n_pos; 20 keeps the pool fed.
+                M_MAN = _topb_sparse(P, b=20)
             
             self.logger.info("Training ML: Ranker Phase")
             
@@ -787,11 +812,20 @@ class HierarchicaMLModel():
         assert len(layer_folders) > 0, "No layer folders found"
         layer_folders.sort(key=lambda x: int(re.search(r'layer_(\d+)', x).group(1)))
             
+        # `child_index_map` indexes the models of a layer by their TRAINING order, which save()
+        # encodes in the `ml_<n>` directory names. plistdir() returns entries in filesystem order,
+        # so without this sort hmodel[layer] is a permutation of the training order and the beam
+        # routes every query to a child holding a different cluster's labels -- chance-level
+        # routing, on train as well as dev. Layers themselves are already sorted above.
+        def _ml_key(name):
+            m = re.match(r'^ml_(\d+)$', name)
+            return (0, int(m.group(1))) if m else (1, name)
+
         # Load models from each layer
         hmodel = []
         for layer_path in layer_folders:
             layer_models = []
-            for subentry in plistdir(layer_path):
+            for subentry in sorted(plistdir(layer_path), key=_ml_key):
                 sub_path = pjoin(layer_path, subentry)
                 if pisdir(sub_path):  # If model is saved via model.save()
                     try:
@@ -810,6 +844,30 @@ class HierarchicaMLModel():
             hmodel.append(layer_models)
 
         setattr(model, "_hmodel", hmodel)
+
+        # Regression guard for the load-order bug above: every parent cluster must hand the beam a
+        # child that holds exactly that cluster's labels. When this silently failed, routing sat at
+        # chance on train as well as dev and every downstream metric was meaningless, so it is
+        # asserted at load rather than left to a test. Cost is one set compare per cluster.
+        cim = getattr(model, "child_index_map", None)
+        if cim:
+            for layer, parent_maps in enumerate(cim):
+                if layer + 1 >= len(hmodel):
+                    continue   # the last layer's map points at a layer that does not exist
+                for parent_idx, cmap in enumerate(parent_maps or []):
+                    parent = hmodel[layer][parent_idx]
+                    C_p = parent.cluster_model.c_node
+                    C_dense = C_p.toarray() if hasattr(C_p, "toarray") else np.asarray(C_p)
+                    l2g = np.asarray(parent.local_to_global_idx)
+                    for c, child_idx in (cmap or {}).items():
+                        want = set(l2g[np.where(C_dense[:, int(c)] > 0)[0]].tolist())
+                        got = set(np.asarray(hmodel[layer + 1][child_idx].local_to_global_idx).tolist())
+                        assert want == got, (
+                            f"child_index_map[{layer}][{parent_idx}][{c}] -> child {child_idx} holds "
+                            f"{len(got)} labels but cluster {c} has {len(want)} "
+                            f"(overlap {len(want & got)}). Layer models are out of training order."
+                        )
+
         return model
     
     def save_ml_temp(self, model, name):

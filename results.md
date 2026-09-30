@@ -14,7 +14,174 @@ comparable. `In-vocabulary mentions` is the ceiling from defect #10 — mentions
 absent from the training label space are deleted before scoring
 (`test/xmr4el/test_evaluate_pipeline.py`), so every row below is an in-vocabulary upper bound.
 
+## ROOT CAUSE FOUND (session 4): layer models were loaded out of training order
+
+**`HierarchicaMLModel.load` appended each layer's models in raw `plistdir()` filesystem order while
+`child_index_map` indexes them by training order.** Layers themselves were sorted
+(`xmr4el/xmr/base.py:813`); the models *inside* a layer never were. So the beam sent every query to a
+child holding a **different cluster's labels**.
+
+Measured on the `flag4_ds500` tree before the fix: `child_index_map[0][0]` is the identity
+`{0:0,...,5:5}`, yet 5 of 6 root clusters mapped to a child whose label set was **entirely disjoint**
+(overlap 0). Exactly 1 of 6 lined up -- which is why routing measured at chance.
+
+Root matcher vs full traversal, same 2000 stored *training* rows, `K=6`:
+
+| beam | chance | root matcher | before fix | after fix |
+|---|---|---|---|---|
+| 1 | 0.167 | 0.797 (**4.79x**) | 0.152 (0.91x) | **0.797 (4.79x)** |
+| 2 | 0.333 | 0.933 (2.80x) | 0.295 (0.89x) | **0.933 (2.80x)** |
+| 3 | 0.500 | 0.976 (1.95x) | 0.501 (1.00x) | **0.976 (1.95x)** |
+
+The root matcher was always a good router -- 80% top-1 cluster accuracy. The traversal discarded it.
+
+Fixed at `xmr4el/xmr/base.py:820` (sort by the `ml_<n>` index `save()` writes at line 778), with the
+invariant asserted at load time so it cannot regress silently.
+
+### Every number in this file predates the fix and is invalid
+
+Evaluation always goes through `XModel.load`, so the permutation affected **all** of it: rows 0-7,
+both beam sweeps, the "routing is at chance" correction and the "`emb_flag` is the routing
+bottleneck" table. The flag1-vs-flag4 delta may well survive -- flag 4 was above chance *despite* a
+1-in-6 router -- but it has to be re-measured, not assumed. Nothing here is citable until the tables
+are regenerated.
+
+The three diagnostics that remain valid are the ones that never touched the traversal: the encoder
+is exact (`cos = 1.0000` re-encoding stored rows, verified only where row order is known), the
+matcher routes train at 4.79x chance, and cosine-over-`Z` routes at 3.81x -- so `Z` and the
+clustering carry real routing signal and **defect #8 is not the bottleneck it looked like**.
+
+Note `_X`, `_Y` and `_training_texts` are in three different orders: `X[i]` pairs with `Y[i]`, but
+re-encoded `_training_texts[i]` matches `X[i]` at only ~0.36 cosine and `Y.argmax` never equals the
+`_training_texts` group index. Any diagnostic pairing texts to rows is wrong.
+
 ## Runs
+
+### Baseline: Phase 1 complete, seeded (rows 4-7)
+
+First reproducible rows. Clustering is seeded from `clustering_model.py`, so these rerun
+byte-identical. Produced by `./test/xmr4el/run_ablation.sh` with the config **as of Phase 1 exit**:
+ranker `loss: hinge`, `neg_mult: 45`, `E_warm: 1`, `emb_flag` set per row. `-beam_size 5 -topk 20`,
+st21pv dev, 100 candidates/query.
+
+| # | Change | Train | in-vocab | acc@1 | MRR | R@5 | R@20 | R@50 | R@100 | R@cand |
+|---|--------|-------|----------|-------|-----|-----|------|------|-------|--------|
+| 4 | `emb_flag 1` | `-ds_len 500` (500 labels) | 7530/40884 (18.4%) | 0.0011 | 0.0125 | 0.0094 | 0.0462 | 0.1473 | 0.3588 | 0.3588 |
+| 5 | `emb_flag 4` | `-ds_len 500` | same | 0.0000 | 0.0131 | 0.0092 | 0.0493 | 0.1166 | 0.3892 | 0.3892 |
+| 6 | `emb_flag 1` | `-ds_len 1000` (1000 labels) | 11661/40884 (28.5%) | 0.0026 | 0.0147 | 0.0213 | 0.0385 | 0.0873 | 0.1907 | 0.1907 |
+| 7 | `emb_flag 4` | `-ds_len 1000` | same | 0.0003 | 0.0126 | 0.0069 | 0.0914 | 0.1691 | 0.2763 | 0.2763 |
+
+**Reading: routing works, scoring is exactly uniform noise.** Against the random-ordering
+prediction `R@cand x k/100`:
+
+| row | R@cand | k=5 pred/act | k=20 pred/act | k=50 pred/act |
+|---|---|---|---|---|
+| 4 | .359 | .018 / .009 | .072 / .046 | .179 / .147 |
+| 5 | .389 | .019 / .009 | .078 / .049 | .195 / .117 |
+| 6 | .191 | .010 / .021 | .038 / .039 | .095 / .087 |
+| 7 | .276 | .014 / .007 | .055 / .091 | .138 / .169 |
+
+Actual tracks the random line at every k, and at `-ds_len 500` sits *below* it. The ranker
+contributes nothing to ordering; all four rows' signal is routing recall alone. **acc@1 and MRR are
+not interpretable in any row above** and must not be reported as results.
+
+Mechanism, confirmed by reading (`xmr4el/xmr/base.py:547-578`): ranker `loss: hinge` selects
+`is_hinge` -> `r = expit(mdl.decision_function(...))`. At 45 negatives per positive with no
+reweighting every margin is strongly negative, so `expit -> ~0`, then `clip(r, eps, 1.0)` floors
+every ranker-backed label at `eps`. Meanwhile the 38.4% of labels with no ranker take
+`_cos_fallback`, which returns `[0,1]`-mapped cosine (~0.5) — so the untrained long tail
+systematically outranks every trained label. `m = cluster_scores[q_idx, c]` (`base.py:553`) is
+cluster-constant, so within a cluster nothing breaks the tie but CSR index order. This is
+`TODO.md:4` ("predict_proba, decision_function, expit and fixed-alpha fusion are mixed without
+calibration") observed end to end.
+
+**`-topk 20` is per-leaf, not global.** `beam_size 5 x topk 20` is the exact `candidates/query =
+100.0`, and `recall@candidates` is measured on `leaf_global_labels` *after* that cut
+(`base.py:1090`), i.e. through the broken scores. At `-ds_len 500` (~14 labels/leaf -> 70 < 100) no
+cut happens, so rows 4-5's `R@cand` is the true beam ceiling; rows 6-7 (~140 candidates) are
+depressed by noise-driven truncation, which is why `R@cand` *falls* from ds500 to ds1000.
+
+### Correction (session 4): the beam does not route
+
+The `-topk 0` ceiling pass at `-ds_len 1000` returns **834 candidates/query out of 1000 labels**
+and `recall@candidates = 0.814`. Chance for a set that size is 834/1000 = **0.834**. Routing is at
+chance — the hierarchy contributes nothing.
+
+The arithmetic is deterministic, not noise: `n_clusters: 6` at the root and `-beam_size 5` keeps
+5/6 of the label space, and the leaf call uses a hardcoded `beam_size=100` (`xmr4el/xmr/base.py:1082`)
+so nothing is pruned below the root. `5/6 x 1000 = 833`. **The tree prunes exactly one cluster.**
+
+This inverts the reading above. `recall@candidates` at `-topk 20` is 0.191 from 100 candidates;
+selecting those 100 from the 834 at random would give `100/834 x 0.814 = 0.098`. So the ~1.9x is
+produced entirely by the **fused score** truncating 834 -> 100, not by the hierarchy. "Routing
+works, scoring is noise" is backwards: **routing is at chance and the fused score carries weak
+signal** (~2x at k=100) that decays to nothing by k=1.
+
+Consequence for the plan: at `beam 5 / n_clusters 6` no ablation can measure routing, because there
+is barely any routing to measure. Routing quality at chance points at defect #8 (PIFA over
+`"mention [SEP] context"`, `xmr/model.py:319`, makes clusters topical rather than semantic), not at
+the ranker.
+
+### Ties are gone and it did not help
+
+Same log: `distinct scores/query: 100.0 of 100.0`. The tie signature that motivated defect #6 is
+absent — every candidate now gets its own score — yet `acc@1 = 0.0017` against a random line of
+0.0019, and `recall@50 = 0.075` against 0.095. **Breaking the ties did not create signal.** Whatever
+ordering the fused score produces is distinct-but-arbitrary, so #6 was not the bottleneck it was
+ranked as.
+
+*Caveat: this run spanned live edits to `base.py` and `test_evaluate_pipeline.py`, so its rows are
+not attributable and are not tabled. The two findings above survive it — one is config arithmetic,
+the other is a qualitative presence/absence.*
+
+**`emb_flag 4` improves candidate selection** (not routing -- see the correction above). Normalized
+by chance (`100 / n_labels`): ds1000 flag 4 is 2.8x chance vs flag 1's 1.9x; ds500 1.9x vs 1.8x. The ds500 pair is a fair comparison (no truncation,
+same label space). ds500 vs ds1000 is **not** comparable — different label spaces and different
+in-vocab filters (18.4% vs 28.5%).
+
+### Routing measured properly: `emb_flag` is the routing bottleneck (defect #1 confirmed)
+
+Beam sweep at `-topk 0` on the two `-ds_len 500` trees, same 500-label space, both trained **before**
+the #6 edit landed, differing only in `emb_flag`. With `depth: 2` the candidate set is exactly the
+union of the beamed root clusters' labels, so this isolates the **root matcher** — no leaf scoring,
+no ranker, immune to everything else changed this session. Chance = `nnz / 500`.
+
+| beam | flag1 meas | chance | ratio | flag4 meas | chance | ratio | delta |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.1420 | 0.1675 | **0.85** | 0.1452 | 0.1664 | **0.87** | +0.3pt |
+| 2 | 0.2818 | 0.3349 | **0.84** | 0.3645 | 0.3326 | **1.10** | +8.3pt |
+| 3 | 0.4576 | 0.5016 | **0.91** | 0.5513 | 0.4989 | **1.11** | +9.4pt |
+| 5 | 0.8250 | 0.8340 | **0.99** | 0.8668 | 0.8319 | **1.04** | +4.2pt |
+
+**`emb_flag 1` routes below chance at every beam.** Defect #1 confirmed end to end: flag 1 TF-IDFs
+`"mention [SEP] title+abstract"` whole (`featurization/preprocessor.py:227`), so the ~5-token mention
+is ~2% of a ~250-token vector, every mention in an abstract gets near-identical features with
+different gold CUIs, and the root matcher cannot route them. The `-ds_len 1000` flag1 tree gives the
+same picture (0.85-0.99).
+
+**`emb_flag 4` crosses above chance** (1.10x at beam 2, 1.11x at beam 3), worth +8 to +9pt of
+candidate recall at the selective beams that matter. This is the first single-variable, same-code,
+same-label-space delta in the project and the first result that is safely attributable.
+
+**But 1.1x chance is a weak router, and it caps everything downstream.** A hierarchy that concentrates
+gold only 10% better than random cluster selection cannot support acc@1, no matter how good the leaf
+scoring is — which explains why the score-domain fix and #6 both landed on the random line. Features
+were necessary but are not sufficient; defect #8 (PIFA over `"mention [SEP] context"`,
+`xmr/model.py:319`, giving topical rather than semantic clusters) is **not** exonerated.
+
+**Also: `beam_size: 5` at `n_clusters: 6` is not a search, it is 83% of the label space.** Every
+`recall@candidates` figure in rows 0-7 was measured at that setting. The meaningful operating points
+are beam 1-2. Note beam 1 is *below* chance even for flag 4 (0.87) while beam 2-3 are above it: the
+matcher's top-1 cluster pick is anti-informative while its top-2/3 are informative, which is a
+calibration symptom worth a look if routing becomes the focus.
+
+### Superseded: rows 0-3 (unseeded clustering)
+
+Kept for traceability only. `kmeans_pytorch` seeded centroids from the global `np.random` state, so
+the tree differed between runs and the +2.8 / +1.6 / -2.1 pt deltas below are inside a >= 2pt noise
+band. Not regenerable without reverting code; superseded by rows 4-7. Defect #2 (dropped small
+clusters) was also found inert here: `reassigned 0/500` at every node, because `balanced=True`
+(`clustering_model.py:759`) never produces a cluster under `min_leaf_size: 5`.
 
 | # | Change | Train | in-vocab | acc@1 | MRR | R@5 | R@20 | R@100 | R@cand |
 |---|--------|-------|----------|-------|-----|-----|------|-------|--------|
@@ -26,7 +193,10 @@ absent from the training label space are deleted before scoring
 Run 0, `xmodel_2026-09-29_11-12-59`, st21pv dev, `-beam_size 5 -topk 20`, 100 candidates/query
 (5 leaves x topk 20). Two config fixes were needed first to make anything run on sklearn 1.9:
 matcher `eta0: 0.0` removed (now required `> 0`) and ranker `class_weight: "balanced"` removed
-(`partial_fit` rejects it; `neg_mult: 45` already fixes the pos:neg ratio).
+(`partial_fit` rejects it). The note originally written here — that `neg_mult: 45` "already fixes
+the pos:neg ratio" — is **wrong**: `N_neg = min(neg_mult * n_pos, n_neg_avail)`
+(`xmr4el/ranker/train.py:91`), so 45 *creates* a 45:1 imbalance with nothing compensating for it.
+That is half the cause of the dead ranker described above.
 
 **Reading of row 0.** `recall@100 == recall@candidates` — every candidate the tree proposes is
 scored, nothing is lost after retrieval. But acc@1 is 0.05% while 34% of gold labels are *in* the

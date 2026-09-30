@@ -156,6 +156,22 @@ def main():
         print(f"recall@{k}:", np.mean(found & (ranks <= k)))
     print("candidates/query (mean nnz):", score_csr.nnz / max(score_csr.shape[0], 1))
 
+    # Defect #6 tie detector. A cluster-level leaf matcher gives every label in a cluster the same
+    # fused score, so ordering is CSR index order and recall@k collapses onto the random line
+    # recall@cand * k/100. Distinct scores per row is the direct read: ~2 means the score is dead,
+    # ~nnz means it discriminates.
+    _rows = range(min(200, score_csr.shape[0]))
+    _d = [np.unique(np.round(score_csr.getrow(i).data, 9)).size for i in _rows]
+    _n = [score_csr.getrow(i).nnz for i in _rows]
+    print(f"distinct scores/query: {np.mean(_d):.1f} of {np.mean(_n):.1f} candidates "
+          f"(first {len(_d)} queries; ~2 = scores are tied, defect #6 alive)")
+
+    # Random-ordering reference: if ranking carries no signal, recall@k ~= recall@cand * k/nnz.
+    _cand = np.mean(hit_counts)
+    _nnz = score_csr.nnz / max(score_csr.shape[0], 1)
+    print("random-ordering line (recall@cand * k/nnz):",
+          {k: round(_cand * k / max(_nnz, 1), 4) for k in (1, 5, 20, 50)})
+
     end = time.time()
 
     print(f"{end - start} secs of running")

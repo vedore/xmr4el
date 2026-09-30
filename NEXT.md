@@ -1,6 +1,10 @@
 # Next session — pick up here
 
-State as of 2026-09-29, **session 3**. Branch `repeat`, all changes uncommitted.
+State as of 2026-09-30, **session 4**. Branch `repeat`, all changes uncommitted.
+
+> **Read first:** a load-order bug made every measurement in `results.md` invalid. It is fixed
+> (`xmr4el/xmr/base.py:820`) but nothing has been re-measured yet. `bash test/xmr4el/run_ablation.sh`
+> is the first run whose numbers can be trusted. Do not cite any existing table.
 
 Full defect descriptions live in `CLAUDE.md` ("Known defects" + "PECOS comparison"). `results.md`
 is the running ablation table. `TODO.md` is the oldest list — superseded where they overlap.
@@ -45,6 +49,40 @@ Working notes for whoever picks this up:
    (`clustering_model.py:759`) makes near-equal clusters, so nothing falls under `min_leaf_size: 5`.
    The fix stays in as XR-Linear equivalence insurance, but it buys no accuracy. Do not spend more
    time on it.
+
+### Session 4 (2026-09-29, later)
+
+Rows 4-7 are in `results.md`. **The verdict `NEXT.md` was waiting for came back negative:** scoring
+never beat the random-ordering line at any k, so per the rule below, defect #6 was pulled forward
+ahead of the PECOS baseline. Done, not just planned:
+
+| Item | Where | Note |
+|---|---|---|
+| Score domain (`TODO.md:4`) | `.models/xmr4el_base_config.json` | ranker `loss: hinge` -> `log_loss`; `neg_mult` 45 -> 5. hinge took the `expit(decision_function)` branch and 45:1 negatives floored every margin at `eps`, while no-ranker labels sat at cosine ~0.5 -- the untrained tail outranked every trained label |
+| **Defect #6** | `xmr4el/xmr/base.py:376` | leaf `C` -> identity, so the leaf matcher is one-vs-rest over labels (XR-Linear leaf semantics) and `m` is per-label. `MatcherTrainer` already took `C`; `label_cluster` becomes `arange(L)`, so the scoring site needed no change |
+| #6 fallout | `xmr4el/xmr/base.py:415` | identity `C` makes `M_TFN == Y_node`, so `_topb_sparse(P, b)` is now the ranker's entire negative pool (`ranker/train.py:284`). `b` 5 -> 20 to keep `neg_mult * n_pos` satisfiable |
+| Tie detector | `test/xmr4el/test_evaluate_pipeline.py` | prints distinct-scores-per-query and the random-ordering line, so "is the score dead" is one line of output instead of a code read |
+
+**Then the actual bug turned up, and it invalidates every measurement in the project.**
+`HierarchicaMLModel.load` appended each layer's models in `plistdir()` filesystem order while
+`child_index_map` indexes them by training order, so the beam routed every query to a child holding
+a different cluster's labels. 5 of 6 root clusters mapped to a fully disjoint label set; 1 of 6 lined
+up, hence chance-level routing. On the same 2000 training rows the root matcher scores 0.797 top-1
+cluster accuracy (4.79x chance) and the traversal scored 0.152 -- after the fix the traversal matches
+the matcher exactly. Fixed at `xmr4el/xmr/base.py:820`, invariant asserted at load.
+
+This reframes the whole session: the score-domain fix, #6, and the two feature ablations were all
+measured through a 1-in-6 router, so none of their deltas mean anything yet. It also **de-prioritises
+defect #8** -- cosine over `Z` routes train at 3.81x chance, so the label embeddings and clustering
+do carry routing signal.
+
+Everything in `results.md` needs regenerating. Start there: `bash test/xmr4el/run_ablation.sh` is now
+the first run whose numbers can be trusted at all.
+
+Two runs are needed and both rows are attributable: the run started **before** the #6 change is the
+clean score-domain row; rerun after it lands for the #6 row. Do not bundle them.
+
+Phase 2 (PECOS) resumes after the #6 row, unchanged.
 
 ### Immediate next step
 
@@ -120,9 +158,20 @@ crashing.
 
 **Exit:** four `results.md` rows, each attributable to one change.
 
-### Phase 2 — PECOS baseline — **NEXT**
+### Phase 2 — PECOS baseline — **NEXT (blocked on packaging)**
 
-`pip install libpecos`, train `pecos.xmc.xlinear.XLinearModel` on the same artifacts XModel already
+**`pip install libpecos` cannot work on this machine.** libpecos 1.2.8 publishes 8 files on PyPI:
+manylinux wheels for x86_64 and `manylinux_2_17_aarch64` only -- **no macOS wheel and no sdist**, so
+there is nothing to build from either. Checked 2026-09-30 against the PyPI JSON API; this machine is
+`macosx-26.0-arm64`. Also note `.venv` is uv-managed and has **no `pip` module** (`python -m pip`
+fails) -- use `uv pip`.
+
+Options, cheapest first: run PECOS in Docker against the `aarch64` wheel (matches this machine's arch
+under Docker Desktop, and the repo already ships `xmr4el.dockerfile`); or build from the `amzn/pecos`
+GitHub source on macOS (needs a C++ toolchain and OpenMP -- historically painful); or run it on a
+Linux box. Docker is the recommended path. Budget this as setup work, not a quick install.
+
+Then, `pip install libpecos`, train `pecos.xmc.xlinear.XLinearModel` on the same artifacts XModel already
 persists: `self.X`, `self.Y`, `self.Z`. Same `n_clusters`, depth, `min_leaf_size`, beam size,
 metric, split. Any of these differing makes the delta uninterpretable.
 
