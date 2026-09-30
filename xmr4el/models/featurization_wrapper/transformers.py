@@ -9,7 +9,6 @@ import torch
 import numpy as np
 
 from gc import collect
-from os.path import exists
 from numpy import savez_compressed, array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
@@ -175,86 +174,55 @@ class Transformer(metaclass=TransformersMeta):
         if batch_size == 0:
             batch_size = 400  # A safe default, or you could implement auto-tuning
 
-        # Process batches with OOM recovery
-        current_batch_idx = 0
-        processed_indices = set()
+        # Process batches with OOM recovery. Files are keyed by start row, so shrinking the batch
+        # size after an OOM cannot skip or duplicate rows.
         original_batch_size = batch_size
+        start = 0
 
-        while current_batch_idx * batch_size < len_corpus:
-            batch_idx = current_batch_idx
-            start = batch_idx * batch_size
-            end = min((batch_idx + 1) * batch_size, len_corpus)
-            
-            # Skip if this batch was already processed successfully
-            if batch_idx in processed_indices:
-                current_batch_idx += 1
-                continue
-                
-            print(f"Processing batch {batch_idx + 1}/{(len_corpus + batch_size - 1) // batch_size} (size: {batch_size})")
-            
-            batch = trn_corpus[start:end]
-            batch_filename = f"{emb_file}_batch{batch_idx}.npz"
-            
-            # Skip if this batch was already processed (from previous OOM)
-            if exists(batch_filename):
-                current_batch_idx += 1
-                processed_indices.add(batch_idx)
-                continue
-                
+        while start < len_corpus:
+            end = min(start + batch_size, len_corpus)
+            print(f"Processing rows {start}-{end} of {len_corpus} (batch size: {batch_size})")
+
             try:
                 with no_grad():  # Disable gradient calculation
-                    # Process batch
                     batch_results = model.encode(
-                        batch,
+                        trn_corpus[start:end],
                         convert_to_tensor=False,
                         device=device,
                         batch_size=batch_size,
                         normalize_embeddings=False,
                         show_progress_bar=False,
                     )
-                    
-                    # Save results
-                    savez_compressed(batch_filename, embeddings=array(batch_results, dtype=dtype))
-                    processed_indices.add(batch_idx)
-                    current_batch_idx += 1
-                    
-                    # Reset batch size if we had reduced it previously
-                    if batch_size != original_batch_size:
-                        batch_size = original_batch_size
-                        # LOGGER.info(f"Resetting batch size to original: {batch_size}")
-                    
+                savez_compressed(f"{emb_file}_batch{start}.npz", embeddings=array(batch_results, dtype=dtype))
+                start = end
+                batch_size = original_batch_size
+
             except OutOfMemoryError as oom:
-                # LOGGER.warning(f"OOM error processing batch {batch_idx} (size: {batch_size})")
-                
-                # Clean up memory
                 empty_cache()
                 collect()
-                
-                # Reduce batch size more aggressively based on error frequency
-                reduction_factor = min(0.5, max(0.1, 1 - (0.2 * max_oom_retries)))
-                new_batch_size = max(1, int(batch_size * reduction_factor))
-                
-                # LOGGER.info(f"Reducing batch size from {batch_size} to {new_batch_size}")
-                batch_size = new_batch_size
-                
-                # Recalculate where we should be in processing
-                current_batch_idx = start // batch_size
-                
-                # If we've retried too many times, give up
+
                 if max_oom_retries <= 0:
                     raise RuntimeError("Failed to process batch after multiple OOM retries") from oom
                 max_oom_retries -= 1
 
+                # Reduce batch size more aggressively based on error frequency
+                reduction_factor = min(0.5, max(0.1, 1 - (0.2 * max_oom_retries)))
+                batch_size = max(1, int(batch_size * reduction_factor))
+
             except Exception as _:
                 cls._del_batch_dir(batch_dir)
                 raise
-        
+
         # Parallel loading of batch files
         def load_embedding_file(file):
             with np.load(file) as data:
                 return data["embeddings"]
         
-        batch_files = sorted(glob.glob(f"{emb_file}_batch*.npz"))
+        # Numeric order: lexicographic puts batch10 before batch2 and permutes rows past 10 batches
+        batch_files = sorted(
+            glob.glob(f"{emb_file}_batch*.npz"),
+            key=lambda f: int(f.rsplit("_batch", 1)[1][: -len(".npz")]),
+        )
         with ThreadPoolExecutor(max_workers=min(4, os.cpu_count())) as executor:
             all_embeddings = list(executor.map(load_embedding_file, batch_files))
         
@@ -396,115 +364,6 @@ class SentenceTBioBert(Transformer):
         """
 
         # LOGGER.info(f"Saving Sentence BioBERT transformer to {save_dir}")
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "transformer.pkl"), "wb") as fout:
-            pickle.dump(self.__dict__, fout)
-
-    @classmethod
-    def load(cls, load_dir):
-        """Load a BioBert Transformer from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            BioBert: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading BioBERT transformer from {load_dir}")
-        transformer_path = os.path.join(load_dir, "transformer.pkl")
-        assert os.path.exists(
-            transformer_path
-        ), f"transformer path {transformer_path} does not exist"
-
-        with open(transformer_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls()
-        model.__dict__.update(model_data)
-        return model
-
-class SentenceTSapBert(Transformer):
-    
-    # cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR Multi Lingual
-    
-    model_name = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
-
-    def __init__(self, config=None, embeddings=None):
-        """Initialization
-
-        Args:
-            config (dict): Dict with key `"type"` and value being the lower-cased name of the specific transformer class to use.
-                Also contains keyword arguments to pass to the specified transformer.
-            embeddings (numpy.ndarray): The Embeddings
-            model_name (str): Transformer name
-        """
-
-        self.config = config
-        self.embeddings = embeddings
-        self.model_name = SentenceTSapBert.model_name
-
-    def save(self, save_dir):
-        """Save trained tfidf transformer to disk.
-
-        Args:
-            save_dir (str): Folder to save the model.
-        """
-
-        # LOGGER.info(f"Saving Sentence SapBERT transformer to {save_dir}")
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "transformer.pkl"), "wb") as fout:
-            pickle.dump(self.__dict__, fout)
-
-    @classmethod
-    def load(cls, load_dir):
-        """Load a BioBert Transformer from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            BioBert: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading Sentence SapBERT transformer from {load_dir}")
-        transformer_path = os.path.join(load_dir, "transformer.pkl")
-        assert os.path.exists(
-            transformer_path
-        ), f"transformer path {transformer_path} does not exist"
-
-        with open(transformer_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls()
-        model.__dict__.update(model_data)
-        return model
-    
-class KRISSBert(Transformer):
-    """BioBERT-based transformer."""
-
-    model_name = "microsoft/BiomedNLP-KRISSBERT-PubMed-UMLS-EL"
-
-    def __init__(self, config=None, embeddings=None):
-        """Initialization
-
-        Args:
-            config (dict): Dict with key `"type"` and value being the lower-cased name of the specific transformer class to use.
-                Also contains keyword arguments to pass to the specified transformer.
-            embeddings (numpy.ndarray): The Embeddings
-            model_name (str): Transformer name
-        """
-
-        self.config = config
-        self.embeddings = embeddings
-        self.model_name = BioBert.model_name
-
-    def save(self, save_dir):
-        """Save trained tfidf transformer to disk.
-
-        Args:
-            save_dir (str): Folder to save the model.
-        """
-
-        # LOGGER.info(f"Saving BioBERT transformer to {save_dir}")
         os.makedirs(save_dir, exist_ok=True)
         with open(os.path.join(save_dir, "transformer.pkl"), "wb") as fout:
             pickle.dump(self.__dict__, fout)

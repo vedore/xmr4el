@@ -16,7 +16,6 @@ from pickle import dump as pkl_dump, load as pkl_load
 from joblib import dump as jdump, load as jload
 from scipy.sparse import hstack as sp_hstack, vstack, csr_matrix, eye as sp_eye
 from scipy.special import expit
-from memory_profiler import profile
 from numpy import (
     asarray, array, concatenate, unique, tile, ones, maximum, clip,
     float32, int32, int64, argsort, argpartition, log, hstack as np_hstack,
@@ -252,7 +251,6 @@ class MLModel():
             f"Ranker Model: {self.ranker_model or 'None'}\n"
         )
     
-    # @profile
     def fused_predict(self, X, Z, C, alpha=0.5, batch_size=32768,
                       fusion: str = "lp_hinge", p: int = 3):
         """Batched matcher/ranker fusion."""
@@ -334,7 +332,6 @@ class MLModel():
         cluster_fused = entity_fused.dot(C)
         return csr_matrix(cluster_fused)
     
-    # @profile
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
         """
             X_train: X_processed
@@ -550,6 +547,7 @@ class MLModel():
         # --- 4) Batch ranker per label and fuse with the label's cluster score ---
         X_dense = X_query.toarray() if hasattr(X_query, "toarray") else np.asarray(X_query)
         model_dict = self.ranker_model.model_dict
+        self.ranker_failed = set()  # gids whose trained ranker silently fell back to cosine
 
         # detect hinge-style rankers (like in your earlier code)
         is_hinge = False
@@ -594,8 +592,10 @@ class MLModel():
                     elif hasattr(mdl, "decision_function"):
                         r = expit(mdl.decision_function(batch_inp))
                     else:
+                        self.ranker_failed.add(gid)
                         r = _cos_fallback(X_dense[q_idx], zvec)
                 except Exception:
+                    self.ranker_failed.add(gid)
                     r = _cos_fallback(X_dense[q_idx], zvec)
 
             fused = _fuse(m, r)   # branch decided once above
@@ -876,7 +876,6 @@ class HierarchicaMLModel():
         model.save(str(sub_dir))
         return str(sub_dir)
             
-    # @profile
     def prepare_layer(self, X, Y, Z, C, fused_scores, local_to_global_idx):
         """
         Returns a list of tuples, one per (non-empty) cluster c:
@@ -935,7 +934,6 @@ class HierarchicaMLModel():
 
         return inputs
             
-    # @profile
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
         """
         Train multiple layers of MLModel; intermediate models are saved in a

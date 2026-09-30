@@ -1,6 +1,6 @@
-.DS_store
-
-# Cache Folders
-__pycache__/
-/.venv
-*.pyc
+# Only dependency metadata enters the image. Source and data are mounted at runtime.
+*
+!xmr4el.dockerfile
+!pyproject.toml
+!uv.lock
+!README.md

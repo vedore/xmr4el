@@ -18,10 +18,6 @@ from lightgbm import LGBMClassifier
 
 classifier_dict = {}
 
-# if torch.cuda.is_available():
-#     from cuml.linear_model import LogisticRegression as CUMLLogisticRegression
-    
-
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -454,63 +450,6 @@ class SklearnSupportVectorClassification(ClassifierModel):
 
     def is_linear_model(self):
         return False
-    
-    def supports_partial_fit(self) -> bool:
-        return False
-
-
-# ---------------------------
-# cuML Logistic Regression (GPU)
-# ---------------------------
-
-class CumlLogisticRegression(ClassifierModel):
-    """cuML Logistic Regression"""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "classifier_model.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        classifier_path = os.path.join(load_dir, "classifier_model.pkl")
-        assert os.path.exists(classifier_path), f"Classifier path {classifier_path} does not exist"
-        with open(classifier_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        return cls(config, model_data)
-
-    @classmethod
-    def init_model(cls, config, onevsrest=False):
-        defaults = {
-            "penalty": "l2",
-            "tol": 0.0001,
-            "C": 1.0,
-            "fit_intercept": True,
-            "class_weight": None,
-            "max_iter": 1000,
-            "linesearch_max_iter": 50,
-            "verbose": False,
-            "l1_ratio": None,
-            "solver": "qn",
-            "handle": None,
-            "output_type": None,
-        }
-        cfg = {**defaults, **(config or {})}
-        est = CUMLLogisticRegression(**cfg)
-        return cls(cfg, est)
-
-    @classmethod
-    def train(cls, X_train, y_train, config=None):
-        wrapper = cls.init_model(config or {}, onevsrest=False)
-        wrapper.model.fit(X_train, y_train)
-        return wrapper
-
-    def predict(self, predict_input):
-        return self.model.predict(predict_input)
     
     def supports_partial_fit(self) -> bool:
         return False

@@ -4,31 +4,6 @@ from collections import Counter
 import time
 
 
-
-"""
-    Depending on the train file, different number of labels, 
-
-    * train_Disease_100.txt -> 13240 labels, 
-    * train_Disease_500.txt -> 13190 labels, 
-    * train_Disease_1000.txt -> 13203 labels,  
-
-    Labels file has,
-
-    * labels.txt -> 13292 labels,
-"""
-
-def read_codes_file(filepath):
-    code_lists = []
-
-    with open(filepath, 'r') as f:
-        for line in f:
-            # Strip whitespace and split by '|'
-            codes = line.strip().split('|')
-            if codes:
-                code_lists.append(codes)
-
-    return code_lists
-
 def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
     """
     Filters out gold_labels (list of lists) and corresponding input_texts
@@ -64,6 +39,11 @@ def gold_rank(row, gold_idx):
     return int(pos[0]) + 1 if pos.size else 0
 
 
+def split_by_ranker(gold_idx, trained):
+    has = np.isin(gold_idx, list(trained))
+    return (("with ranker", has), ("without ranker", ~has))
+
+
 def _selfcheck():
     from scipy.sparse import csr_matrix
     m = csr_matrix(np.array([[0.1, 0.9, 0.5], [0.0, 0.0, 0.0]]))
@@ -71,21 +51,12 @@ def _selfcheck():
     assert gold_rank(m.getrow(0), 2) == 2
     assert gold_rank(m.getrow(0), 0) == 3
     assert gold_rank(m.getrow(1), 0) == 0, "empty row must report not-found"
+    (_, has), (_, no) = split_by_ranker(np.array([0, 2, 2, 5]), {2})
+    assert has.tolist() == [False, True, True, False] and (has ^ no).all()
     print("selfcheck ok")
 
 
 # debug_tables: list of DataFrames returned from predict(debug=True)
-def save_debug_tables(debug_tables, filename_prefix="debug_folder/debug_file"):
-    """
-    Save all debug tables to separate CSV files.
-    """
-    for i, df in enumerate(debug_tables):
-        # build filename with mention/layer index
-        fname = f"{filename_prefix}_{i}.csv"
-        # reset index to keep mention/layer info as a column
-        df_reset = df.reset_index()
-        df_reset.rename(columns={"index": "Mention_Layer"}, inplace=True)
-        df_reset.to_csv(fname, index=False)
         # print(f"Saved debug table to {fname}")
 
 def main():
@@ -97,6 +68,8 @@ def main():
     parser.add_argument("-test_path", type=str, required=True)
     parser.add_argument("-beam_size", type=int, default=5)
     parser.add_argument("-topk", type=int, default=20)
+    parser.add_argument("-alpha", type=float, default=0.5,
+                        help="ranker weight in the leaf fusion; 0 = matcher only (rankers still run)")
     
     args = parser.parse_args()
 
@@ -104,7 +77,7 @@ def main():
 
     load_path = args.xmodel_path
     
-    print(load_path, args.beam_size, args.topk)
+    print(load_path, args.beam_size, args.topk, "alpha", args.alpha)
     
     trained_xtree = XModel.load(load_path)
     
@@ -131,6 +104,7 @@ def main():
                                               beam_size=args.beam_size,
                                               topk=args.topk,
                                               fusion="lp_fusion",
+                                              alpha=args.alpha,
                                               topk_mode="per_leaf")
 
     trained_labels = np.array(trained_xtree.initial_labels)
@@ -155,6 +129,19 @@ def main():
     for k in (1, 5, 10, 20, 50, 100):
         print(f"recall@{k}:", np.mean(found & (ranks <= k)))
     print("candidates/query (mean nnz):", score_csr.nnz / max(score_csr.shape[0], 1))
+
+    # Split by whether the gold label's ranker actually scored. A fused gain alone cannot show that
+    # learned rankers helped: labels without one get a cosine fallback, and so does a trained ranker
+    # that raises at predict time.
+    leaves = trained_xtree.model.hmodel[-1]
+    failed = set().union(*(getattr(m, "ranker_failed", set()) for m in leaves))
+    trained = {g for m in leaves if m.ranker_model for g in m.ranker_model.model_dict} - failed
+    print(f"rankers: {len(trained)} scored, {len(failed)} fell back to cosine at predict time")
+    gold_idx = np.array([label_to_idx[g] for g in golden_labels])
+    for name, mask in split_by_ranker(gold_idx, trained):
+        r = ranks[mask]
+        print(f"  gold {name}: n={mask.sum()}  acc@1 {np.mean(r == 1) if r.size else 0:.4f}  "
+              f"MRR {np.mean(np.where(r > 0, 1.0 / np.maximum(r, 1), 0.0)) if r.size else 0:.4f}")
 
     # Defect #6 tie detector. A cluster-level leaf matcher gives every label in a cluster the same
     # fused score, so ordering is CSR index order and recall@k collapses onto the random line

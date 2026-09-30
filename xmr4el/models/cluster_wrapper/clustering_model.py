@@ -442,102 +442,6 @@ class SklearnMiniBatchKMeans(ClusteringModel):
         return self.model.labels_
 
 
-class CumlKMeans(ClusteringModel):
-    """Cuml KMeans with gpu support"""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        """Save trained Cuml KMeans model to disk.
-
-        Args:
-            save_dir (str): Folder to store serialized object in.
-        """
-
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "clustering.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        """Load a saved Cuml KMeans model from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            CumlKMeans: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading Cuml KMeans Clustering Model from {load_dir}")
-        clustering_path = os.path.join(load_dir, "clustering.pkl")
-        assert os.path.exists(
-            clustering_path
-        ), f"clustering path {clustering_path} does not exist"
-
-        with open(clustering_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls(config, model_data)
-        return model
-
-    @classmethod
-    def train(cls, trn_corpus, config={}, dtype=np.float32):
-        """Train on a corpus.
-
-        Args:
-            trn_corpus (list): Training corpus in the form of a list of strings.
-            config (dict): Dict with keyword arguments to pass to cuml's Kmeans.
-
-        Returns:
-            CumlKMeans: Trained clustering.
-
-        Raises:
-            Exception: If `config` contains keyword arguments that the CumlKmeans does not accept.
-        """
-
-        defaults = {
-            "handle": None,
-            "n_clusters": 8,
-            "max_iter": 300,
-            "tol": 0.0001,
-            "verbose": False,
-            "random_state": 1,
-            "init": "scalable-k-means++",
-            "n_init": 1,
-            "oversampling_factor": 2.0,
-            "max_samples_per_batch": 32768,
-            "convert_dtype": True,
-            "output_type": None,
-        }
-
-        try:
-            config = {**defaults, **config}
-            model = CUMLKMeans(**config)
-        except TypeError:
-            raise Exception(
-                f"clustering config {config} contains unexpected keyword arguments for CumlKMeans Clustering"
-            )
-        model.fit(trn_corpus)
-        return cls(config, model)
-
-    def predict(self, predict_input):
-        """Predict an input.
-
-        Args:
-            corpus (str, list): List of strings to predict.
-
-        Returns:
-            numpy.ndarray: Matrix of features.
-        """
-
-        return self.model.predict(predict_input)
-
-    def labels(self):
-        return self.model.labels_
-    
-    
 class FaissKMeans(ClusteringModel):
     """Faiss Kmeans"""
     
@@ -568,13 +472,13 @@ class FaissKMeans(ClusteringModel):
 
     @classmethod
     def load(cls, load_dir, config):
-        """Load a saved Cuml KMeans model from disk.
+        """Load a saved FAISS KMeans model from disk.
 
         Args:
             load_dir (str): Folder inside which the model is loaded.
 
         Returns:
-            CumlKMeans: The loaded object.
+            FaissKMeans: The loaded object.
         """
 
         # LOGGER.info(f"Loading FAISS KMeans Clustering Model from {load_dir}")
@@ -647,7 +551,7 @@ class FaissKMeans(ClusteringModel):
             
         except TypeError:
             raise Exception(
-                f"clustering config {config} contains unexpected keyword arguments for CumlKMeans Clustering"
+                f"clustering config {config} contains unexpected keyword arguments for FaissKMeans Clustering"
             )
             
         model.train(trn_corpus)
@@ -689,14 +593,14 @@ class FaissKMeans(ClusteringModel):
     
     
 class BalancedKMeans(ClusteringModel):
-    """Cuml KMeans with gpu support"""
+    """Balanced KMeans with gpu support"""
 
     def __init__(self, config=None, model=None):
         self.config = config
         self.model = model
 
     def save(self, save_dir):
-        """Save trained Cuml KMeans model to disk.
+        """Save trained Balanced KMeans model to disk.
 
         Args:
             save_dir (str): Folder to store serialized object in.
@@ -708,16 +612,16 @@ class BalancedKMeans(ClusteringModel):
 
     @classmethod
     def load(cls, load_dir, config):
-        """Load a saved Cuml KMeans model from disk.
+        """Load a saved Balanced KMeans model from disk.
 
         Args:
             load_dir (str): Folder inside which the model is loaded.
 
         Returns:
-            CumlKMeans: The loaded object.
+            BalancedKMeans: The loaded object.
         """
 
-        # LOGGER.info(f"Loading Cuml KMeans Clustering Model from {load_dir}")
+        # LOGGER.info(f"Loading Balanced KMeans Clustering Model from {load_dir}")
         clustering_path = os.path.join(load_dir, "clustering.pkl")
         assert os.path.exists(
             clustering_path
@@ -734,13 +638,13 @@ class BalancedKMeans(ClusteringModel):
 
         Args:
             trn_corpus (list): Training corpus in the form of a list of strings.
-            config (dict): Dict with keyword arguments to pass to cuml's Kmeans.
+            config (dict): Dict with keyword arguments to pass to balanced KMeans.
 
         Returns:
-            CumlKMeans: Trained clustering.
+            BalancedKMeans: Trained clustering.
 
         Raises:
-            Exception: If `config` contains keyword arguments that the CumlKmeans does not accept.
+            Exception: If `config` contains keyword arguments that the BalancedKMeans does not accept.
         """
         defaults = {
             "n_clusters": 8,
@@ -760,7 +664,7 @@ class BalancedKMeans(ClusteringModel):
             model = PyTorchBalancedKMeans(n_clusters=config["n_clusters"], balanced=True, device=device)
         except TypeError:
             raise Exception(
-                f"clustering config {config} contains unexpected keyword arguments for CumlKMeans Clustering"
+                f"clustering config {config} contains unexpected keyword arguments for BalancedKMeans Clustering"
             )
 
         # print(config["n_clusters"])

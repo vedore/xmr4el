@@ -13,7 +13,6 @@ from numpy import asarray, int32, argpartition, argsort, float32
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from memory_profiler import profile
 from scipy.sparse import csr_matrix
 from xmr4el.featurization.label_embedding_factory import LabelEmbeddingFactory
 from xmr4el.featurization.preprocessor import Preprocessor
@@ -271,6 +270,13 @@ class XModel:
             
         model = cls()
         model.__dict__.update(model_data)
+        # Trees saved before the label-order fix stored input order; sorted() is idempotent
+        model.initial_labels = sorted(set(model.initial_labels))
+        # A legacy tree trained with empty label groups cannot be repaired by sorting
+        if model.Z is not None:
+            assert len(model.initial_labels) == model.Z.shape[0], (
+                f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows"
+            )
         
         model_path = os.path.join(load_dir, "hml")
         hml = HierarchicaMLModel.load(model_path)
@@ -295,7 +301,6 @@ class XModel:
     def _fit(self, X_text, Y_text):
         """Returns embeddings: ndarray"""
         
-        self.initial_labels = self.temp_var.save_model_temp(Y_text)
         self.training_set = self.temp_var.save_model_temp(X_text)
         
         self.logger.info("Preparing Data")
@@ -319,12 +324,13 @@ class XModel:
         Y_label_matrix = LabelEmbeddingFactory.generate_label_matrix(Y_label_to_indices)
         
         # Process Labels
-        Y_binazer, _ = LabelEmbeddingFactory.label_binarizer(Y_label_matrix)
+        Y_binazer, classes = LabelEmbeddingFactory.label_binarizer(Y_label_matrix)
+        # Label index j is column j of Y; empty label groups have no column
+        self.initial_labels = classes.tolist()
         Z = LabelEmbeddingFactory.generate_PIFA(X_emb, Y_binazer)
         
         return X_emb, Y_binazer, Z 
     
-    # @profile
     def train(self, X_text, Y_text):
         
         self.logger.info("Started Training")
@@ -360,7 +366,6 @@ class XModel:
 
         self.model = hml
         
-        self.initial_labels = self.temp_var.load_model_temp(self.initial_labels)
         self.training_set = self.temp_var.load_model_temp(self.training_set)
         
         self.temp_var.delete_model_temp()
@@ -369,6 +374,7 @@ class XModel:
                 topk: int = 5, 
                 beam_size: int | None = None, 
                 fusion: str = "geometric", 
+                alpha: float = 0.5,
                 topk_mode: str = "per_leaf", 
                 topk_inside_global: int | None = None,
                 n_jobs: int =-1):
@@ -408,6 +414,7 @@ class XModel:
                                           topk=topk, 
                                           beam_size=beam_size, 
                                           fusion=fusion, 
+                                          alpha=alpha,
                                           n_jobs=n_jobs, 
                                           topk_mode=topk_mode)
             """
@@ -419,6 +426,7 @@ class XModel:
                 topk=topk_inside_global,
                 beam_size=beam_size,
                 fusion=fusion,
+                alpha=alpha,
                 n_jobs=-1,
                 topk_mode="per_leaf",  # do not truncate; gather full union from leaves
             )
@@ -508,4 +516,3 @@ class XModel:
 
             # 6) IMPORTANT: return the SAME 'out' from HMLModel, only scores are replaced by cosine
             return out_h, scores_cos
-    

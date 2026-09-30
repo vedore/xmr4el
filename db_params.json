@@ -1,7 +1,0 @@
-{
-    "dbname": "umls_db",
-    "user": "user",
-    "password": "pass",
-    "host": "umls_postgres",
-    "port": 5432
-}

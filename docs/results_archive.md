@@ -1,18 +1,15 @@
-# Results
+# Results archive (invalid)
 
-One row per change, with the exact command that produced it. This table is the ablation appendix.
+Every dev number here predates the label-mapping and embedding-row-order fixes and is **invalid**.
+Kept only as history of what was tried. Current results: `docs/results.md`.
 
-## Metric choice
+## Session 5: every dev number below is invalid (label order)
 
-Each mention carries exactly one gold CUI (`featurization/preprocessor.py:113` → one-hot `Y` rows),
-so this is extreme multi-**class**, not multi-label. Reported metrics are **acc@1, MRR, recall@k**.
-PECOS's precision@k / propensity-scored suite is **not** reused: with a single gold label,
-precision@k is just recall@k / k and carries no extra information.
-
-`recall@candidates` is the old binary `gold in cand` hit count, kept so earlier numbers stay
-comparable. `In-vocabulary mentions` is the ceiling from defect #10 — mentions whose gold CUI is
-absent from the training label space are deleted before scoring
-(`test/xmr4el/test_evaluate_pipeline.py`), so every row below is an in-vocabulary upper bound.
+Model label index `j` is `sorted(labels)[j]` (`MultiLabelBinarizer.classes_`), but eval mapped names with
+`initial_labels` in input order: 0 of 500 positions matched. Rows 0-11, including the post-fix rows 8-11,
+scored dev against a permuted label list. Fixed in `xmr4el/xmr/model.py` (applies to existing trees on
+load). Train-side routing figures (4.79x matcher, 3.81x cosine) used the internal `Y` and still stand.
+See `STATUS.md` session 5.
 
 ## ROOT CAUSE FOUND (session 4): layer models were loaded out of training order
 
@@ -57,6 +54,36 @@ re-encoded `_training_texts[i]` matches `X[i]` at only ~0.36 cosine and `Y.argma
 
 ## Runs
 
+### Post-fix baseline (valid): eval-only on the 2026-09-29 trees
+
+Eval-only re-runs with the fixed loader (`xmr4el/xmr/base.py:820`), 2026-09-30. The trees predate #6 (cluster-level leaf); their saved configs (`test/test_data/ablation/config_flag*_ds500.json`) already show
+the score-domain fix (ranker `log_loss`, `neg_mult 5`), unverified against the tree itself. st21pv dev, `-ds_len 500` (500 labels), in-vocab 7530/40884 (347 unique gold
+CUIs), `-beam_size 5`. Command: the eval loop in `STATUS.md` "Immediate next step (session 4)".
+
+| # | Tree | `-topk` | cand/q | R@cand | random R@cand | ratio | acc@1 | MRR | R@5 | R@20 | R@50 | R@100 |
+|---|------|---------|--------|--------|---------------|-------|-------|-----|-----|------|------|-------|
+| 8 | flag1 `15-16-12` | 20 | 100 | 0.3934 | 0.204 (100 of 417) | 1.93x | 0.0015 | 0.0145 | 0.0042 | 0.0952 | 0.2040 | 0.3934 |
+| 9 | flag1 `15-16-12` | 0 | 417.0 | 0.8509 | 0.833 (5/6 clusters) | **1.02x** | 0.0003 | 0.0100 | 0.0037 | 0.0463 | 0.0853 | 0.2016 |
+| 10 | flag4 `15-58-50` | 20 | 100 | 0.2641 | 0.176 (100 of 417) | 1.50x | 0.0023 | 0.0120 | 0.0084 | 0.0622 | 0.1537 | 0.2641 |
+| 11 | flag4 `15-58-50` | 0 | 416.9 | 0.7341 | 0.833 (5/6 clusters) | **0.88x** | 0.0013 | 0.0122 | 0.0092 | 0.0507 | 0.1077 | 0.1910 |
+
+Chance at `-topk 0` is exactly 5/6 whatever the cluster sizes are: the beam drops 1 of 6 root clusters, and the leaf layer
+does not prune (hardcoded `beam_size=100`, `base.py:1082`).
+
+Reading:
+- **Root routing on dev is at chance for flag 1 (1.02x) and below chance for flag 4 (0.88x).** Flag 4 misses 2002 of 7530
+  queries against 1255 expected at chance. On *train* rows the same flag-4 root matcher scores 4.79x chance, so the
+  matcher does not generalise from train to dev. The inferred cause is memorising abstract context: 46 mentions share one
+  abstract's TF-IDF, and dev abstracts are unseen. This is inferred, not verified.
+- **The pre-fix beam sweep was measuring noise.** Before the fix, child `c` held a different cluster's labels, so every
+  candidate set was 5 effectively random clusters. That explains why both flags sat at ~0.83-0.87 then. Its conclusion
+  that "flag 4 routes above chance" is **reversed** here: flag 4 is worse than flag 1 on every candidate metric.
+- **The per-leaf cut carries signal and the global order does not.** Leaf-wise top-20 reaches 1.5-1.9x random. A global
+  top-100 over the same 417 candidates is ~1.0x. Leaf scores are not comparable across leaves (`path_logscore` is never
+  folded into the leaf score, defect #5).
+- **Ordering is at or below random in all four rows.** For example, flag 1 acc@1 is 0.0015 against a random line of 0.0039.
+  So the score-domain fix alone did not produce ordering signal; #6 is not measured yet.
+
 ### Baseline: Phase 1 complete, seeded (rows 4-7)
 
 First reproducible rows. Clustering is seeded from `clustering_model.py`, so these rerun
@@ -92,7 +119,7 @@ every ranker-backed label at `eps`. Meanwhile the 38.4% of labels with no ranker
 `_cos_fallback`, which returns `[0,1]`-mapped cosine (~0.5) — so the untrained long tail
 systematically outranks every trained label. `m = cluster_scores[q_idx, c]` (`base.py:553`) is
 cluster-constant, so within a cluster nothing breaks the tie but CSR index order. This is
-`TODO.md:4` ("predict_proba, decision_function, expit and fixed-alpha fusion are mixed without
+STATUS appendix #4 ("predict_proba, decision_function, expit and fixed-alpha fusion are mixed without
 calibration") observed end to end.
 
 **`-topk 20` is per-leaf, not global.** `beam_size 5 x topk 20` is the exact `candidates/query =
@@ -235,23 +262,3 @@ differed between runs. Fixed (`clustering_model.py`, `seed: 0` in the `balancedk
 `np.random.seed` + `torch.manual_seed` before `fit`); from row 4 on, reruns are byte-identical and
 deltas mean something. Rows 0-3 should be regenerated before they go in the write-up.
 
-## Commands
-
-```bash
-./test/xmr4el/run_ablation.sh    # seeded 2x2: emb_flag {1,4} x -ds_len {500,1000}
-```
-
-```bash
-.venv/bin/python test/xmr4el/test_train_pipeline.py \
-  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
-  -model_config .models/xmr4el_base_config.json -ds_len 500
-
-.venv/bin/python test/xmr4el/test_evaluate_pipeline.py \
-  -xmodel_path test/test_data/saved_trees/<run> \
-  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt \
-  -beam_size 5 -topk 20
-
-.venv/bin/python test/xmr4el/test_evaluate_pipeline.py -selfcheck   # asserts on gold_rank
-.venv/bin/python -m xmr4el.ranker.train        # asserts epochs warm-start + draw new negatives
-.venv/bin/python -m xmr4el.clustering.train    # asserts no label is dropped from C_node
-```

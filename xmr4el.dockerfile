@@ -1,32 +1,29 @@
-# Use the official NVIDIA CUDA 11.6.1 development image as the base
-FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
+FROM python:3.12-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:0.12.21 /uv /usr/local/bin/uv
 
-# Set environment variables to non-interactive
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Update package lists and install prerequisites
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    nano \
-    curl \
+    git \
+    procps \
     build-essential \
-    pkg-config \
-    python3 \
-    python3-venv \
-    python3-dev \
-    python3-pip \
     libgomp1 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --upgrade pip setuptools
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    USER=xmr4el \
+    HOME=/tmp
 
-# Create a working directory inside the container
+# Install dependencies outside the source mount; code is supplied at runtime.
+WORKDIR /opt/deps
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --locked --no-dev --no-install-project --no-cache
+
+# Use PYTHONPATH, not the script directory (test/xmr4el shadows the package).
+ENV PYTHONSAFEPATH=1
 WORKDIR /app
-
-# Set environment variable so that the virtual environment is used by default
-ENV PYTHONPATH="/app/xmr4el"
-
-# Verify installation
-RUN python3 --version && pip --version
-
-# Default command
 CMD ["/bin/bash"]

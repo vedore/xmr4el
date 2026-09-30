@@ -19,27 +19,15 @@ dependencies = [
   "joblib",
   "numpy",
   "pandas",
-  "psutil",
+  "scipy",
   "scikit-learn",
   "transformers",
   "sentence-transformers",
   "faiss-cpu",
   "lightgbm",
   "umap-learn",
-  "fuzzywuzzy",
-  "python-Levenshtein",
-  "memory_profiler",
-  "biopython",
 
   "torch>=2.8.0",
 
   "kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main"
-]
-
-[project.optional-dependencies]
-rapids = [
-  "cuml-cu12==25.*; sys_platform == 'linux'",
-  "cudf-cu12==25.*; sys_platform == 'linux'",
-  "rmm-cu12==25.*; sys_platform == 'linux'",
-  "cupy-cuda12x>=13.6; sys_platform == 'linux'",
 ]

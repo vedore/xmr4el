@@ -1,31 +1,18 @@
-/_REEL
-/.plot
-/.ruff_cache
-/data
-/datasets
-/mem_prof
-/tmp
-/.umls
-/.mem_prof
-/.plot
-/.db
-/datasets
-/.pubtor
-/.models
-/.docs
-
-/test/scripts
-/test/test_data
-
-.DS_store
-
-# Cache Folders
+/data/
+/datasets/
+/tmp/
+/test/test_data/
+/.venv/
+/.ruff_cache/
+/.pytest_cache/
+/build/
+/dist/
+*.egg-info/
 __pycache__/
-/.venv
 *.pyc
 *.onnx
+.DS_Store
 
-
-# Unzipped datasets (large, never commit)
-/data_datasets
-/data_datasets.zip
+# Track the runnable base config; keep experiment configs local.
+/.models/*
+!/.models/xmr4el_base_config.json

@@ -32,7 +32,7 @@ When analyzing this repo, assume the main logic is organized around these areas:
 - `xmr4el/xmr/`
   - the hierarchical model, training loop, and persistence utilities
 
-Tests live under `test/` or `_test/`.
+Tests and diagnostic scripts live under `test/`.
 
 ---
 
@@ -75,7 +75,8 @@ Typical expectations:
 - one file enumerates labels
 - one or more files contain training texts associated with label IDs
 - grouped texts for the same label act like synonym sets or multiple positives for that label
-- it can read Pubtator files
+- local inputs live under `data/` and `datasets/`
+- it reads PubTator and grouped TSV + label files
 
 Do not assume full document-level entity linking with mention spans unless such functionality is explicitly present in the code.
 
@@ -205,6 +206,19 @@ If asked why a result is poor, check these first:
 
 Do not jump directly to model replacement before checking pipeline quality.
 
+Then check these known error origins, in pipeline order (state and evidence in `STATUS.md`):
+- label index <-> label name mapping: model indices follow sorted `Y` columns; `XModel.initial_labels`
+  must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
+- `-ds_len` selects the first N labels in file order, not a random sample
+- feature block balance under `emb_flag` 4 (raw-norm weighted concat)
+- PIFA label embeddings built from mention + context
+- per-label rankers whose label-embedding input is constant
+- child matchers trained without out-of-cluster negatives
+- leaf scores not comparable across leaves (`path_logscore` unused)
+
+Measure before fixing: prefer eval-only runs on saved trees and `test/xmr4el/diagnose_routing.py`
+over retraining, and always report the chance line next to routing numbers.
+
 ---
 
 ## Dependency awareness
@@ -213,7 +227,7 @@ This project depends on a Python package setup and includes ML/NLP/vector depend
 Treat environment-sensitive issues carefully, especially:
 - Python version compatibility
 - CPU vs GPU paths
-- FAISS / RAPIDS / Torch compatibility
+- FAISS / Torch compatibility
 - transformer model availability
 - large-memory operations
 
@@ -240,7 +254,6 @@ Focus on:
 - synonym grouping quality
 - candidate recall
 - ranker supervision
-- use of ontology-aware features if the repo already supports extension points
 - fair train/dev/test design
 
-Do not assume biomedical ontology integration already exists unless the code shows it.
+Keep the scope limited to training and evaluating the model on local files.
