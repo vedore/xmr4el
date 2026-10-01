@@ -913,20 +913,10 @@ class HierarchicaMLModel():
             X_aug = sp_hstack([X_node, sparse_feats], format="csr")
             X_aug = normalize(X_aug, norm="l2", axis=1)
 
-            try:
-                X_node_dense = X_node.toarray()
-            except Exception:
-                X_node_dense = asarray(X_node)
-
-            if X_node_dense.size == 0 or Z_node_base.size == 0:
-                label_feats = zeros((Z_node_base.shape[0], 3), dtype=Z_node_base.dtype)
-            else:
-                scores_mat = X_node_dense.dot(Z_node_base.T)
-                mean_per_label = scores_mat.mean(axis=0)
-                sum_per_label = scores_mat.sum(axis=0)
-                max_per_label = scores_mat.max(axis=0)
-                label_feats = np_vstack([mean_per_label, sum_per_label, max_per_label]).T
-
+            # Zero pad keeps Z width == X_aug width (ranker cosine/ip, cosine fallback). The old
+            # pad held mean/sum/max of X.Z over all node rows; the sum grew with node size and after
+            # L2 norm took 1.000 of every leaf z's squared norm, erasing the label embedding.
+            label_feats = zeros((Z_node_base.shape[0], 3), dtype=Z_node_base.dtype)
             Z_node_aug = np_hstack([Z_node_base, label_feats])
             Z_node_aug = normalize(Z_node_aug, norm="l2", axis=1)
 

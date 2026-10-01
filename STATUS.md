@@ -2,29 +2,33 @@
 
 ## Resume here
 
-Last updated 2026-09-30 (end of session 6). A new session starts from this block; update it at the
+Last updated 2026-10-01 (session 7). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-**Code frozen** (user runs in flight). Do not edit code until their output is pasted.
+**Code frozen** while the user retrains (one factor: leaf-Z fix).
 
-Runs the user started:
+Done (session 7, `docs/results.md` Session 7): flag-4 tree `16-37-01` eval at alpha 0 / 0.5 / 1 +
+routing diagnostic; flag-1 `15-16-12` diagnostic + alpha 0 / 1. Rankers rank gold below random at
+alpha 1 on both flags (flag 4 acc@1 0.000 over 7397 ranker-scored gold). Flag 4 routing is good
+(0.879 vs majority 0.351, recall@cand 0.949) but hierarchy acc@1 0.51-0.53 < flat nearest-label 0.767.
 
-1. Retrain flag 4 (`-ds_len 500`, base config) after the batch-order + OOM fixes. Produces a new
-   `test/test_data/saved_trees/xmodel_<timestamp>`; then eval (`-beam_size 2 -topk 0`) and
-   `diagnose_routing.py -max_rows 100000` on it. SGD `ConvergenceWarning`s during training are
-   expected (separable 1-2-positive leaf problems); not a blocker.
-2. Flag-1 tree `xmodel_2026-09-29_15-16-12`: `diagnose_routing.py -max_rows 100000` (identical rows to
-   eval, adds fixed top-2 reference) and eval at `-alpha 0` and `-alpha 0.5`.
+Two causes found (details in results Session 7):
+1. `prepare_layer` padded child Z with node-size-scaled X.Z stats that took 1.000 of every leaf z's
+   norm. **Fixed** (zero pad), regression `test/xmr4el/test_prepare_layer.py`. Uncommitted.
+2. Per-label SGD rankers are under-trained and uncalibrated across labels (untrained ones sit at
+   ~0.5 for every query). **Not fixed**; more epochs alone do not fix it (synthetic).
+
+Run the user is doing: retrain flag 4 (`-ds_len 500`, base config) with fix 1 only, then eval at
+alpha 0, 0.5, 1 and `diagnose_routing.py -max_rows 100000`.
 
 When output is pasted:
 
-- Record rows in `docs/results.md` (new session section; tree id, code state, split, vocab, beam,
-  top-k, alpha, candidates, metrics, chance references).
-- Flag 1: routing top-1/top-2 vs majority/fixed top-2; hierarchy vs flat vs dictionary on identical
-  rows; alpha 0 vs 0.5 overall and split by gold-with/without ranker; count of ranker fallbacks.
-- Flag 4: compare with flag 1 on the same rows. This is a new baseline under current code, not a
-  single-factor delta against `15-58-50`.
-- Then pick one experiment from "Choose further model changes" below.
+- Add rows to `docs/results.md` (new tree id, code = `47ee08b` + leaf-Z fix).
+- Alpha 0 should reproduce 0.510 / MRR 0.686 (leaf matcher and root do not use leaf Z): that is the
+  determinism control. Differences at alpha 0.5 / 1 and in "gold without ranker" are the leaf-Z effect.
+- Then fix 2. Options, one at a time: drop rankers from leaf scoring (alpha 0 as default); or a
+  comparable leaf scorer (cosine to the restored leaf z fused with the matcher); or retrain rankers
+  with balanced classes + per-label convergence. Decide from the alpha 1 row after fix 1.
 
 Commands: `docs/results.md` § Commands. Old invalid runs: `docs/results_archive.md`.
 
@@ -85,6 +89,7 @@ Synthetic checks passed during the latest review:
 .venv/bin/python test/xmr4el/test_data_loading.py
 .venv/bin/python test/xmr4el/test_evaluate_pipeline.py -selfcheck
 .venv/bin/python test/xmr4el/diagnose_routing.py -selfcheck
+.venv/bin/python test/xmr4el/test_prepare_layer.py
 ```
 
 `test_data_loading.py` covers the mapping through the real `XModel.train/save/load` paths
