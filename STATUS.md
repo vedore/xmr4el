@@ -25,10 +25,17 @@ Code not frozen. Latest (results Session 7, "Mention-string breakdown"): tree 0.
 (dict if string seen, else tree) 0.805, beam 3 no acc@1 gain. 72% of tree errors are unseen mention
 strings (acc@1 0.343); seen strings are near-solved by the dictionary.
 
-Next decision (proposed to user): attack unseen strings. First look at what they are (abbreviations,
-synonyms, morphology) with an error sample, then one feature change (e.g. char n-gram TF-IDF on the
-mention, or per-block normalisation so context counts), one retrain, same breakdown. The hybrid is
-kept as a reported line; ranker redesign can use the string prior as a feature.
+Next (user decision 2026-10-01): **explore how mentions and labels are vectorized and used**
+before scaling labels. Scaling waits: any tree trained now is obsolete after a feature change, and a
+user run in flight freezes code. Plan for the new session:
+1. Trace the featurization end to end (code first): `TextEncoder.encode/predict`, flag-4 blocks
+   (TF-IDF 30k -> SVD 1500 + `sentencetbiobert` mention embedding), concatenation/normalisation,
+   PIFA label embeddings Z (what rows build each label), and where X/Z are consumed (root matcher,
+   leaf cosine scorer, `prepare_layer` extras).
+2. Look at a sample of unseen-string errors (72% of tree errors) to see what the encoder misses.
+3. Screen feature changes with flat nearest-label retrieval (no tree training; flat 0.767 = tree
+   0.764 now), same rows + mention-string breakdown. Retrain the tree only for a winner.
+4. Then step 5 (scale: `-ds_len` 1000 -> full) with the chosen features.
 
 Commands: `docs/results.md` § Commands. Old invalid runs: `docs/results_archive.md`.
 
