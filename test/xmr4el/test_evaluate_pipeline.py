@@ -171,7 +171,10 @@ def main():
     leaves = trained_xtree.model.hmodel[-1]
     failed = set().union(*(getattr(m, "ranker_failed", set()) for m in leaves))
     trained = {g for m in leaves if m.ranker_model for g in m.ranker_model.model_dict} - failed
-    print(f"rankers: {len(trained)} scored, {len(failed)} fell back to cosine at predict time")
+    if args.scorer == "cosine":
+        print(f"rankers: {len(trained)} trained, NOT used (-scorer cosine); split below = labels that have one")
+    else:
+        print(f"rankers: {len(trained)} scored, {len(failed)} fell back to cosine at predict time")
     gold_idx = np.array([label_to_idx[g] for g in golden_labels])
     for name, mask in split_by_ranker(gold_idx, trained):
         r = ranks[mask]

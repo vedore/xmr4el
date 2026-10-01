@@ -158,6 +158,32 @@ Reading:
 - Ranker contribution, measured: negative at every alpha. Retain the leaf-Z fix; leaf scoring by
   cosine beats trained rankers by 0.25 acc@1 on this split.
 
+### Mention-string breakdown and beam 3 (eval-only, `11-20-27`, `-scorer cosine -alpha 1`)
+
+Leaf scoring here is cosine only (alpha 1 gives the matcher weight 0); trained rankers unused.
+`-train_path` breakdown; dict = most frequent train label for the exact (lower-cased) mention string.
+
+| group | n | share | tree acc@1 | dict acc@1 | either | tree errors (share of 1776) |
+|---|---|---|---|---|---|---|
+| all | 7530 | 1.000 | 0.764 | 0.717 | 0.811 | 1776 |
+| seen, 1 label | 3631 | 0.482 | 0.952 | 0.984 | 0.989 | 175 (0.10) |
+| seen, >1 label | 1964 | 0.261 | 0.832 | 0.928 | 0.943 | 330 (0.19) |
+| unseen string | 1935 | 0.257 | 0.343 | 0.000 | 0.343 | 1271 (0.72) |
+
+Hybrid (dict if string seen, else tree): **acc@1 0.805** (+0.041 over the tree, training-free; the
+"either" oracle is 0.811). Consistency: "all" reproduces tree 0.764 and dict 0.7165.
+
+Beam 3 (`-beam_size 3`): recall@cand 0.949 -> 0.975, candidates 166 -> 249, acc@1 0.764 -> 0.763,
+MRR 0.822 -> 0.821, R@20 0.936 -> 0.951.
+
+Reading:
+- Routing is not what limits top-1: beam 3 recovers 2.6% more golds but they rank low; acc@1 flat.
+- 72% of tree errors are mentions whose string never appears in train (acc@1 0.343). After the hybrid,
+  ~86% of remaining errors are unseen strings. That is where the next gain is: the mention encoder
+  (flag 4 = TF-IDF/SVD 1500 + `sentencetbiobert`; mention block holds 0.998 of the row norm).
+- On seen strings the most-frequent-label prior beats the tree (0.928 vs 0.832 ambiguous, 0.984 vs
+  0.952 unambiguous). The hybrid captures that; a reranker could learn it as a feature.
+
 ## Commands
 
 Older, invalid runs: `docs/results_archive.md`.

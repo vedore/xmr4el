@@ -21,17 +21,14 @@ User decisions (2026-10-01): commit; rankers left out of prediction (eval `-scor
 `cosine`; `-scorer ranker` reproduces the old rows); user will redesign rankers later. Leaf ranker
 training still runs (cost only).
 
-**Code frozen** while the user runs (eval-only, tree `xmodel_2026-10-01_11-20-27`):
-1. eval `-alpha 1 -train_path ...` -> new mention-string breakdown (seen 1-label / seen >1-label /
-   unseen string: tree vs dictionary acc@1, "either" oracle, hybrid = dict if seen else tree).
-   Consistency: "all" dict must equal 0.7165, tree must equal 0.764.
-2. eval `-beam_size 3 -alpha 1` -> how much of the 0.949 candidate cap is routing.
+Code not frozen. Latest (results Session 7, "Mention-string breakdown"): tree 0.764, hybrid
+(dict if string seen, else tree) 0.805, beam 3 no acc@1 gain. 72% of tree errors are unseen mention
+strings (acc@1 0.343); seen strings are near-solved by the dictionary.
 
-When output is pasted: record in Session 7, then pick the direction before step 5 (scale):
-- gap mostly in seen >1-label strings -> context features / reranker (disambiguation);
-- tree loses on seen 1-label strings -> add the string signal (hybrid or reranker feature);
-- gap mostly unseen strings -> features / routing;
-- hybrid >> 0.764 is a training-free gain to report (dev-selected; confirm at scale).
+Next decision (proposed to user): attack unseen strings. First look at what they are (abbreviations,
+synonyms, morphology) with an error sample, then one feature change (e.g. char n-gram TF-IDF on the
+mention, or per-block normalisation so context counts), one retrain, same breakdown. The hybrid is
+kept as a reported line; ranker redesign can use the string prior as a feature.
 
 Commands: `docs/results.md` § Commands. Old invalid runs: `docs/results_archive.md`.
 
