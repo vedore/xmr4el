@@ -546,7 +546,9 @@ class MLModel():
 
         # --- 4) Batch ranker per label and fuse with the label's cluster score ---
         X_dense = X_query.toarray() if hasattr(X_query, "toarray") else np.asarray(X_query)
-        model_dict = self.ranker_model.model_dict
+        # eval-only switch (set by test_evaluate_pipeline -scorer cosine): skip trained rankers and
+        # score every label by cosine to its leaf z, like the no-ranker fallback.
+        model_dict = {} if getattr(self, "cosine_scorer", False) else self.ranker_model.model_dict
         self.ranker_failed = set()  # gids whose trained ranker silently fell back to cosine
 
         # detect hinge-style rankers (like in your earlier code)

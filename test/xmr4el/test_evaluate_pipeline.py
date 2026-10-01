@@ -70,6 +70,9 @@ def main():
     parser.add_argument("-topk", type=int, default=20)
     parser.add_argument("-alpha", type=float, default=0.5,
                         help="ranker weight in the leaf fusion; 0 = matcher only (rankers still run)")
+    parser.add_argument("-scorer", choices=["ranker", "cosine"], default="cosine",
+                        help="leaf label score fused with the matcher: cosine to leaf z (default; trained "
+                             "rankers anti-rank, docs/results.md Session 7) or the trained rankers")
     
     args = parser.parse_args()
 
@@ -82,6 +85,9 @@ def main():
     trained_xtree = XModel.load(load_path)
     
     print(trained_xtree)
+    for leaf in trained_xtree.model.hmodel[-1]:
+        leaf.cosine_scorer = args.scorer == "cosine"
+    print("scorer", args.scorer)
     
     test_set = Preprocessor.load_pubtator_file(args.test_path)
     

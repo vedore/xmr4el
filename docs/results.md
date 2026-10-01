@@ -123,6 +123,41 @@ Reading (500 labels, in-vocabulary rows only):
   This bundles features, clustering and every trained component; no single factor is attributed.
 - The flag-4 mention block still carries ~all of the row norm; context alone is weak (flat 0.202).
 
+### Leaf-Z fix retrain (single factor)
+
+Tree `xmodel_2026-10-01_11-20-27` (flag 4, `-ds_len 500`, base config); code = `47ee08b` + leaf-Z
+fix in `prepare_layer` (zero pad). Checked on the saved tree: pad share of leaf z norm 0.0000 in all 6
+leaves (old trees: 1.000). Same rows/flags as above.
+
+| Tree | flag | alpha | recall@cand | acc@1 | MRR | R@5 | R@20 | R@100 | gold w/ ranker acc@1 (n=7383) | gold w/o ranker acc@1 (n=147) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `11-20-27` | 4 | 0 | 0.949 | 0.510 | 0.686 | 0.909 | 0.929 | 0.941 | 0.510 | 0.517 |
+| `11-20-27` | 4 | 0.5 | 0.949 | 0.501 | 0.673 | 0.887 | 0.896 | 0.916 | 0.498 | **0.680** |
+| `11-20-27` | 4 | 1 | 0.949 | 0.014 | 0.032 | 0.030 | 0.084 | 0.264 | 0.003 | 0.537 |
+| `11-20-27` cosine | 4 | 0.5 | 0.949 | 0.748 | 0.821 | 0.914 | 0.942 | 0.948 | 0.749 | 0.667 |
+| `11-20-27` cosine | 4 | 1 | 0.949 | **0.764** | 0.822 | 0.888 | 0.936 | 0.948 | 0.765 | 0.735 |
+
+384 rankers (was 387). `diagnose_routing.py` output is identical to `16-37-01` (root not touched).
+
+Reading:
+- Control holds: alpha 0 reproduces `16-37-01` exactly (0.510 / 0.686 / 0.909); root and leaf matcher
+  do not use leaf z, so training is deterministic and the fix is the only factor.
+- The restored leaf z works as a scorer: labels scored by cosine (no ranker, n=147) go 0.068 -> 0.537
+  at alpha 1, and fusing cosine with the matcher lifts them 0.517 (alpha 0) -> 0.680 (alpha 0.5).
+- Trained rankers still anti-rank (alpha 1 gold-with-ranker 0.003), and alpha 0.5 is now slightly worse
+  than before (0.501 vs 0.529): changing hard negatives did not fix ranker calibration (defect 2).
+- `-scorer cosine` (eval-only; every leaf label scored by cosine to its leaf z, rankers ignored):
+  acc@1 0.510 -> 0.764 (alpha 1) / 0.748 (alpha 0.5), MRR 0.686 -> 0.822. "gold w/ ranker" here only
+  marks labels that have a (unused) trained ranker.
+- Hierarchy + cosine now matches flat nearest-label on the same rows (0.764 vs 0.767) and beats the
+  dictionary (0.717). Leaf z = parent z with a zero pad and the 3 query extras only rescale x, so the
+  leaf cosine orders like flat nearest-label within the candidates; acc@1 within candidates
+  0.764/0.949 = 0.805. The remaining gap to flat is routing (recall@cand 0.949).
+- Matcher fusion (alpha 0.5) trades -0.016 acc@1 for +0.026 R@5. Alpha was picked on dev; treat
+  0.5 vs 1 as unresolved until a held-out check.
+- Ranker contribution, measured: negative at every alpha. Retain the leaf-Z fix; leaf scoring by
+  cosine beats trained rankers by 0.25 acc@1 on this split.
+
 ## Commands
 
 Older, invalid runs: `docs/results_archive.md`.
@@ -136,6 +171,7 @@ Older, invalid runs: `docs/results_archive.md`.
 # eval (all in-vocabulary dev rows; -alpha 0 = matcher only)
 .venv/bin/python test/xmr4el/test_evaluate_pipeline.py -xmodel_path test/test_data/saved_trees/<run> \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -beam_size 2 -topk 0 -alpha 0.5
+# leaf scorer defaults to cosine to leaf z; -scorer ranker uses the trained rankers (Session 7 rows before the cosine rows)
 
 # routing / flat / dictionary diagnostic on the same rows as eval
 .venv/bin/python test/xmr4el/diagnose_routing.py -xmodel_path test/test_data/saved_trees/<run> \

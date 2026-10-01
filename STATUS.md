@@ -5,30 +5,21 @@
 Last updated 2026-10-01 (session 7). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-**Code frozen** while the user retrains (one factor: leaf-Z fix).
+Code not frozen (no user run in flight).
 
-Done (session 7, `docs/results.md` Session 7): flag-4 tree `16-37-01` eval at alpha 0 / 0.5 / 1 +
-routing diagnostic; flag-1 `15-16-12` diagnostic + alpha 0 / 1. Rankers rank gold below random at
-alpha 1 on both flags (flag 4 acc@1 0.000 over 7397 ranker-scored gold). Flag 4 routing is good
-(0.879 vs majority 0.351, recall@cand 0.949) but hierarchy acc@1 0.51-0.53 < flat nearest-label 0.767.
+Done (session 7, `docs/results.md` Session 7): flag-4 `16-37-01` alpha sweep + diagnostic; flag-1
+`15-16-12` diagnostic + alpha 0 / 1; leaf-Z fix retrain `xmodel_2026-10-01_11-20-27` with alpha
+sweep, diagnostic and `-scorer cosine` at alpha 0.5 / 1. Uncommitted: leaf-Z fix (`prepare_layer`),
+`test_prepare_layer.py`, eval `-scorer cosine` switch (`MLModel.predict` reads `cosine_scorer`).
 
-Two causes found (details in results Session 7):
-1. `prepare_layer` padded child Z with node-size-scaled X.Z stats that took 1.000 of every leaf z's
-   norm. **Fixed** (zero pad), regression `test/xmr4el/test_prepare_layer.py`. Uncommitted.
-2. Per-label SGD rankers are under-trained and uncalibrated across labels (untrained ones sit at
-   ~0.5 for every query). **Not fixed**; more epochs alone do not fix it (synthetic).
+State (flag 4, 500 labels): hierarchy + cosine leaf scorer acc@1 0.764 (alpha 1) / 0.748 (0.5),
+MRR 0.822, = flat nearest-label 0.767, > dictionary 0.717. recall@cand 0.949 is the remaining cap.
+Trained per-label rankers anti-rank (defect 2: under-trained, uncalibrated; more epochs alone fail).
+Step 4 exit reached: one attributable result (leaf-Z fix) + retain decision.
 
-Run the user is doing: retrain flag 4 (`-ds_len 500`, base config) with fix 1 only, then eval at
-alpha 0, 0.5, 1 and `diagnose_routing.py -max_rows 100000`.
-
-When output is pasted:
-
-- Add rows to `docs/results.md` (new tree id, code = `47ee08b` + leaf-Z fix).
-- Alpha 0 should reproduce 0.510 / MRR 0.686 (leaf matcher and root do not use leaf Z): that is the
-  determinism control. Differences at alpha 0.5 / 1 and in "gold without ranker" are the leaf-Z effect.
-- Then fix 2. Options, one at a time: drop rankers from leaf scoring (alpha 0 as default); or a
-  comparable leaf scorer (cosine to the restored leaf z fused with the matcher); or retrain rankers
-  with balanced classes + per-label convergence. Decide from the alpha 1 row after fix 1.
+User decisions (2026-10-01): commit; rankers left out of prediction (eval `-scorer` defaults to
+`cosine`; `-scorer ranker` reproduces the old rows); user will redesign rankers later. Leaf ranker
+training still runs (cost only). Next: step 5, scale the vocabulary (see results Commands).
 
 Commands: `docs/results.md` § Commands. Old invalid runs: `docs/results_archive.md`.
 
