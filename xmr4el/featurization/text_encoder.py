@@ -181,12 +181,14 @@ class TextEncoder():
         flag == 2 → TF-IDF + Transformer
         flag == 3 → Transformer
         flag == 4 → [Transformer | TF-IDF] formula with [SEP] splitting
+        flag == 5 → [Transformer | TF-IDF], both on the mention (text before [SEP]), each block
+                    L2-normalised before the concat (meant for a char n-gram vectorizer config)
         """
 
         # Determine encoding mode
         use_tfidf = self.flag in [1, 2]
         use_transformer = self.flag in [2, 3]
-        use_formula = self.flag == 4
+        use_formula = self.flag in (4, 5)
 
         # Logging mode
         if self.flag == 1:
@@ -197,6 +199,8 @@ class TextEncoder():
             self.logger.info("Using only Transformer to encode")
         elif self.flag == 4:
             self.logger.info("Using formula encoder (Transformer + TF-IDF via [SEP])")
+        elif self.flag == 5:
+            self.logger.info("Using mention encoder (Transformer + TF-IDF, both on the mention)")
         else:
             raise ValueError(f"Invalid flag {self.flag}")
 
@@ -209,7 +213,7 @@ class TextEncoder():
             X_transformer_raw, X_tfidf_raw = [], []
             for item in X_test:
                 if "[SEP]" not in item:
-                    raise ValueError("Input must contain [SEP] when flag == 4")
+                    raise ValueError("Input must contain [SEP] when flag is 4 or 5")
                 a, b = item.split("[SEP]", 1)
                 X_transformer_raw.append(a)
                 X_tfidf_raw.append(b)
@@ -221,6 +225,8 @@ class TextEncoder():
             X_trans = csr_matrix(X_trans)
 
             # TF-IDF + dimension reduction
+            if self.flag == 5:
+                X_tfidf_raw = X_transformer_raw
             X_tfidf, vec_model = self._encode_text_using_text_vectorizer(
                 X_tfidf_raw, self.vectorizer_config
             )
@@ -237,6 +243,8 @@ class TextEncoder():
             self.dimension_model = dim_model
 
             # Concatenate: [TRANSFORMER | TF-IDF]
+            if self.flag == 5:  # equal block weight; raw transformer norms otherwise take ~all of it
+                X_trans, reduced_x_tfidf = normalize(X_trans), normalize(reduced_x_tfidf)
             concat_emb = hstack([X_trans, reduced_x_tfidf])
 
             # Normalize
@@ -296,7 +304,7 @@ class TextEncoder():
 
         use_tfidf = self.flag in [1, 2]
         use_transformer = self.flag in [2, 3]
-        use_formula = self.flag == 4
+        use_formula = self.flag in (4, 5)
 
         # ------------------------------------------------------------
         # FLAG 4: "[SEP]" formula mode
@@ -307,7 +315,7 @@ class TextEncoder():
             X_transformer_raw, X_tfidf_raw = [], []
             for item in X_text_query:
                 if "[SEP]" not in item:
-                    raise ValueError("Input must contain [SEP] when flag == 4")
+                    raise ValueError("Input must contain [SEP] when flag is 4 or 5")
                 a, b = item.split("[SEP]", 1)
                 X_transformer_raw.append(a)
                 X_tfidf_raw.append(b)
@@ -320,6 +328,8 @@ class TextEncoder():
             X_trans = csr_matrix(X_trans)
 
             # TF-IDF prediction
+            if self.flag == 5:
+                X_tfidf_raw = X_transformer_raw
             X_tfidf = self._predict_text_using_text_vectorizer(
                 X_test=X_tfidf_raw,
                 vec_model=self.vectorizer_model
@@ -334,6 +344,8 @@ class TextEncoder():
                 )
 
             # Concatenate
+            if self.flag == 5:
+                X_trans, reduced_x_tfidf = normalize(X_trans), normalize(reduced_x_tfidf)
             concat_emb = hstack([X_trans, reduced_x_tfidf])
 
             return normalize(concat_emb, norm="l2", axis=1)

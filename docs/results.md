@@ -184,6 +184,82 @@ Reading:
 - On seen strings the most-frequent-label prior beats the tree (0.928 vs 0.832 ambiguous, 0.984 vs
   0.952 unambiguous). The hybrid captures that; a reranker could learn it as a feature.
 
+## Session 8 (2026-10-01): feature screen by flat retrieval (`screen_features.py`)
+
+No training. Vocabulary and dev rows of tree `11-20-27` (500 labels, 7530 in-vocabulary dev rows,
+23512 train rows). Mention-only features; label = PIFA centroid of its train rows;
+score = cosine to every label (flat, no hierarchy). Breakdown groups as in Session 7.
+
+| features | acc@1 | MRR | hybrid | seen, 1 label | seen, >1 label | unseen string |
+|---|---|---|---|---|---|---|
+| `sbiobert` (current flag-4 mention block) | 0.766 | 0.825 | 0.804 | 0.956 | 0.833 | 0.340 |
+| char 2-4 TF-IDF (`char_wb`, sublinear) | 0.743 | 0.797 | 0.808 | 0.926 | 0.789 | 0.355 |
+| `sbiobert` + char, per-block L2 | **0.784** | **0.847** | **0.832** | 0.954 | 0.799 | **0.448** |
+
+Consistency: `sbiobert` 0.766 reproduces tree 0.764 / flat 0.767, so the mention block alone is the
+flag-4 feature.
+
+Round 2 (tie-corrected `screen_features.py`: expected acc@1/MRR under random tie-breaking; breakdown
+uses one random tie-break; round-1 `max`/`word` output was inflated by ties and is discarded):
+
+| features | scorer | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen | gold tied at top |
+|---|---|---|---|---|---|---|---|---|
+| `sbiobert` | centroid | 0.766 | 0.825 | 0.804 | 0.956 | 0.833 | 0.340 | 0.000 |
+| `sbiobert` | max | 0.695 | 0.796 | 0.825 | 0.983 | 0.427 | 0.423 | 0.254 |
+| char | centroid | 0.743 | 0.797 | 0.808 | 0.926 | 0.789 | 0.355 | 0.000 |
+| char | max | 0.678 | 0.782 | 0.815 | 0.984 | 0.421 | 0.385 | 0.279 |
+| word TF-IDF | centroid | 0.726 | 0.785 | 0.798 | 0.911 | 0.790 | 0.315 | 0.093 |
+| word TF-IDF | max | 0.647 | 0.741 | 0.787 | 0.980 | 0.422 | 0.272 | 0.373 |
+| `sbiobert` + char | centroid | **0.784** | **0.847** | 0.832 | 0.954 | 0.799 | 0.448 | 0.000 |
+| `sbiobert` + char | max | 0.704 | 0.803 | 0.832 | 0.984 | 0.431 | 0.451 | 0.262 |
+| `sbiobert` + charsvd 768 | centroid | 0.775 | 0.837 | 0.826 | 0.949 | 0.794 | 0.427 | 0.000 |
+| `sbiobert` + charsvd 768 | max | 0.706 | 0.804 | **0.835** | 0.984 | 0.420 | **0.461** | 0.262 |
+
+Round 3, SapBERT (`cambridgeltl/SapBERT-from-PubMedBERT-fulltext`, [CLS] pooling, max 25 tokens;
+user decision 2026-10-01). Same rows; `sbiobert+charsvd` repeated as the in-run reference.
+
+| features | scorer | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen | gold tied at top |
+|---|---|---|---|---|---|---|---|---|
+| `sapbert` | centroid | 0.780 | 0.842 | 0.820 | 0.953 | 0.833 | 0.404 | 0.000 |
+| `sapbert` | max | 0.729 | 0.820 | **0.839** | 0.984 | 0.514 | 0.476 | 0.215 |
+| `sbiobert` + charsvd 768 | centroid | 0.775 | 0.837 | 0.826 | 0.949 | 0.794 | 0.427 | 0.000 |
+| `sbiobert` + charsvd 768 | max | 0.707 | 0.805 | 0.836 | 0.984 | 0.453 | 0.463 | 0.261 |
+| `sapbert` + charsvd 768 | centroid | 0.793 | 0.851 | 0.836 | 0.961 | 0.804 | 0.466 | 0.000 |
+| `sapbert` + charsvd 768 | max | 0.696 | 0.799 | 0.833 | 0.984 | 0.404 | 0.453 | 0.277 |
+| `sapbert` + char | centroid | **0.799** | **0.857** | 0.841 | 0.962 | 0.804 | **0.486** | 0.000 |
+| `sapbert` + char | max | 0.693 | 0.797 | 0.829 | 0.984 | 0.394 | 0.439 | 0.278 |
+
+Reproducibility: `sbiobert+charsvd / centroid` repeats round 2 exactly (0.7745). `max` rows move by
+up to 0.009 in their breakdown between runs (one random tie-break; ~26% of rows tied).
+
+Reading (round 3):
+- SapBERT beats S-BioBert as the mention encoder, alone (0.780 vs 0.766; unseen 0.404 vs 0.340) and
+  with char-SVD (0.793 vs 0.775; unseen 0.466 vs 0.427). Tree-feasible winner:
+  `sapbert` + charsvd 768 = `.models/xmr4el_flag5_sapbert_config.json`.
+- Char n-grams still add on top of SapBERT (+0.013 with SVD, +0.019 raw), so they are complementary.
+- Seen strings with >1 label stay at 0.80-0.83 for every encoder (dictionary 0.928): a mention-only
+  feature cannot separate labels that share a string; that needs context or a frequency prior.
+- `max` still loses overall (ties); its best hybrid (0.839) is within 0.003 of the centroid winner.
+
+Reading (rounds 1-2):
+- Character n-grams are the first feature gain at this scale: on unseen strings `sbiobert` + char
+  reaches 0.448 vs 0.340 (+0.108); overall +0.018, hybrid +0.028. Char alone is weaker than
+  `sbiobert` overall, so the blocks are complementary, not a replacement.
+- Seen ambiguous strings drop (0.833 -> 0.799), which the hybrid's dictionary covers.
+- 30 sampled unseen-string `sbiobert` errors (label shown by its most frequent train mention):
+  most golds are broad CUIs whose train mentions are heterogeneous ("findings" x6, "proteins" x4,
+  "embase" x3, "population", "regions", "area", "infection", "cells", "words"); a centroid
+  represents those poorly. About 6/30 are abbreviations (IHCC, BarR, FP, hUCB, CHD) that need local
+  context, which no current feature provides (the context block is the whole document, ~0 weight).
+- Raw char TF-IDF cannot go into the tree: tree training densifies X (`base.py` `X.toarray()`).
+  `sbiobert` + charsvd 768 / centroid keeps half the overall gain (+0.009 vs +0.018) and most of the
+  unseen gain (+0.087 of +0.108). It is the tree-feasible winner -> `emb_flag` 5.
+- `max` (1-NN) loses overall: a quarter of dev rows tie at the top (one string under several
+  labels, no frequency prior), collapsing seen ambiguous strings to ~0.42. On unseen strings it
+  gains for `sbiobert` (+0.083) but only +0.003-0.034 once char is in; hybrids differ by <= 0.009.
+  Centroid stays; `max` is not a feature fix.
+- Word TF-IDF on the mention is worst on unseen strings (0.315 / 0.272): no subword overlap.
+
 ## Commands
 
 Older, invalid runs: `docs/results_archive.md`.
@@ -203,6 +279,11 @@ Older, invalid runs: `docs/results_archive.md`.
 .venv/bin/python test/xmr4el/diagnose_routing.py -xmodel_path test/test_data/saved_trees/<run> \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -max_rows 100000
+
+# flat feature screen, no training (vocabulary/rows of the given tree)
+.venv/bin/python test/xmr4el/screen_features.py -xmodel_path test/test_data/saved_trees/<run> \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -features <list>
 ```
 
 Synthetic checks: see `STATUS.md`.

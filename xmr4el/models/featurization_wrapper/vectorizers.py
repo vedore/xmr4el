@@ -240,6 +240,7 @@ class Tfidf(Vectorizer):
 
         try:
             config = {**defaults, **config}
+            config["ngram_range"] = tuple(config["ngram_range"])  # JSON configs give a list
             model = TfidfVectorizer(**config, dtype=dtype)
         except TypeError:
             raise Exception(

@@ -88,9 +88,10 @@ def main():
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
 
     blocks = {"all": slice(None)}
-    if xm.emb_flag == 4:
+    if xm.emb_flag in (4, 5):
         d_t = Z.shape[1] - xm.dimension_config["kwargs"]["n_components"]
-        blocks.update({"mention": slice(0, d_t), "context": slice(d_t, None)})
+        second = "context" if xm.emb_flag == 4 else "char"
+        blocks.update({"mention": slice(0, d_t), second: slice(d_t, None)})
 
     # Train rows: X[i] pairs with Y[i]; Y rows are one-hot over label columns
     Y = xm.Y.tocsr()

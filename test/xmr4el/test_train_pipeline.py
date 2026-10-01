@@ -26,7 +26,7 @@ def main():
     
     xmodel = XModel.load_config(args.model_config)
     if args.labels_path:
-        if xmodel.emb_flag == 4:
+        if xmodel.emb_flag in (4, 5):
             parser.error("Grouped TSV input requires emb_flag 1, 2 or 3 in the model config")
         train_data = Preprocessor.load_data_labels_from_file(args.train_path, args.labels_path)
         X_train, Y_train = train_data["corpus"], train_data["labels"]

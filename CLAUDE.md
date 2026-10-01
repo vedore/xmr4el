@@ -35,7 +35,8 @@ Saved trees are under `test/test_data/saved_trees/`.
 
 ## Current context (2026-09-30)
 
-- Out of scope: UMLS, the KB/Postgres layer, SapBERT/KRISSBERT wrappers — all removed. PubTator is
+- Out of scope: UMLS, the KB/Postgres layer, the old SapBERT/KRISSBERT wrappers — all removed.
+  (User 2026-10-01: SapBERT as a mention encoder is allowed; see `STATUS.md`.) PubTator is
   only a local file format here.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
   binarizer's `classes_` (sorted; labels with no training text have no column). `load` sorts legacy

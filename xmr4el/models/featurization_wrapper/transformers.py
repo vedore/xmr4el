@@ -21,6 +21,21 @@ transformer_dict = {}
 
 logger = logging.getLogger(__name__)
 
+# Plain HF checkpoints that their authors pool by [CLS], with a max token length.
+# SentenceTransformer(name) alone would mean-pool them.
+CLS_POOLED = {"cambridgeltl/SapBERT-from-PubMedBERT-fulltext": 25}
+
+
+def sentence_model(model_name, device="cpu"):
+    """Load the encoder used for every transformer embedding (training, prediction, screening)."""
+    from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
+    if model_name in CLS_POOLED:
+        tok = STTransformer(model_name, max_seq_length=CLS_POOLED[model_name])
+        pool = Pooling(tok.get_embedding_dimension(), pooling_mode="cls")
+        return SentenceTransformer(modules=[tok, pool], device=str(device))
+    return SentenceTransformer(model_name).to(device)
+
+
 class TransformersMeta(ABCMeta):
     """Metaclass for keeping track of all 'Transformer' subclasses"""
 
@@ -168,7 +183,7 @@ class Transformer(metaclass=TransformersMeta):
         emb_file = f"{batch_dir}/{output_prefix}"
         cls._create_batch_dir(batch_dir)
         
-        model = SentenceTransformer(model_name).to(device)
+        model = sentence_model(model_name, device)
         len_corpus = len(trn_corpus)
 
         if batch_size == 0:
@@ -354,7 +369,7 @@ class SentenceTBioBert(Transformer):
 
         self.config = config
         self.embeddings = embeddings
-        self.model_name = SentenceTBioBert.model_name
+        self.model_name = type(self).model_name
 
     def save(self, save_dir):
         """Save trained tfidf transformer to disk.
@@ -390,3 +405,9 @@ class SentenceTBioBert(Transformer):
         model = cls()
         model.__dict__.update(model_data)
         return model
+
+
+class SapBert(SentenceTBioBert):
+    """SapBERT (UMLS synonym-trained PubMedBERT), [CLS] pooling via CLS_POOLED."""
+
+    model_name = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"
