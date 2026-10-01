@@ -19,6 +19,8 @@ class TextEncoder():
         transformer_config: Optional[Dict[str, Any]] = None,
         dimension_config: Optional[Dict[str, Any]] = None,
         flag: int = 2,
+        context_vectorizer_config: Optional[Dict[str, Any]] = None,
+        context_dimension_config: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Create a new :class:`TextEncoder`."""
         
@@ -31,6 +33,11 @@ class TextEncoder():
         self._vectorizer_model: Optional[Vectorizer] = None
         self._dimension_model: Optional[DimensionModel] = None
         self.flag = flag
+        # flag 6 only: TF-IDF -> SVD of the context (text after [SEP])
+        self.context_vectorizer_config = context_vectorizer_config
+        self.context_dimension_config = context_dimension_config
+        self.context_vectorizer_model = None
+        self.context_dimension_model = None
     
     @property
     def vectorizer_model(self) -> Optional[Vectorizer]:
@@ -57,7 +64,7 @@ class TextEncoder():
         os.makedirs(save_dir, exist_ok=True)
 
         state = self.__dict__.copy()
-        models = ["vectorizer_model", "dimension_model"]
+        models = ["vectorizer_model", "dimension_model", "context_vectorizer_model", "context_dimension_model"]
         models_data = [getattr(self, model_name, None) for model_name in models]
 
         for idx, model in enumerate(models_data):
@@ -93,6 +100,8 @@ class TextEncoder():
         model_files = {
             "vectorizer_model": Vectorizer if hasattr(Vectorizer, "load") else None,
             "dimension_model": DimensionModel if hasattr(DimensionModel, "load") else None,
+            "context_vectorizer_model": Vectorizer,
+            "context_dimension_model": DimensionModel,
         }
         
         for model_name, model_class in model_files.items():
@@ -100,7 +109,7 @@ class TextEncoder():
             if os.path.exists(model_path) and model_class is not None:
                 setattr(model, model_name, model_class.load(model_path))
             else:
-                if model.flag == 3:
+                if model.flag == 3 or (model_name.startswith("context_") and model.flag != 6):
                     setattr(model, model_name, None)
                 else:
                     raise Exception("Something with the loading the models is not right")
@@ -183,12 +192,13 @@ class TextEncoder():
         flag == 4 → [Transformer | TF-IDF] formula with [SEP] splitting
         flag == 5 → [Transformer | TF-IDF], both on the mention (text before [SEP]), each block
                     L2-normalised before the concat (meant for a char n-gram vectorizer config)
+        flag == 6 → flag 5 + [TF-IDF -> SVD of the context (text after [SEP])] as a third block
         """
 
         # Determine encoding mode
         use_tfidf = self.flag in [1, 2]
         use_transformer = self.flag in [2, 3]
-        use_formula = self.flag in (4, 5)
+        use_formula = self.flag in (4, 5, 6)
 
         # Logging mode
         if self.flag == 1:
@@ -201,6 +211,8 @@ class TextEncoder():
             self.logger.info("Using formula encoder (Transformer + TF-IDF via [SEP])")
         elif self.flag == 5:
             self.logger.info("Using mention encoder (Transformer + TF-IDF, both on the mention)")
+        elif self.flag == 6:
+            self.logger.info("Using mention encoder + context TF-IDF block")
         else:
             raise ValueError(f"Invalid flag {self.flag}")
 
@@ -213,7 +225,7 @@ class TextEncoder():
             X_transformer_raw, X_tfidf_raw = [], []
             for item in X_test:
                 if "[SEP]" not in item:
-                    raise ValueError("Input must contain [SEP] when flag is 4 or 5")
+                    raise ValueError("Input must contain [SEP] when flag is 4, 5 or 6")
                 a, b = item.split("[SEP]", 1)
                 X_transformer_raw.append(a)
                 X_tfidf_raw.append(b)
@@ -225,7 +237,8 @@ class TextEncoder():
             X_trans = csr_matrix(X_trans)
 
             # TF-IDF + dimension reduction
-            if self.flag == 5:
+            X_context_raw = X_tfidf_raw
+            if self.flag in (5, 6):
                 X_tfidf_raw = X_transformer_raw
             X_tfidf, vec_model = self._encode_text_using_text_vectorizer(
                 X_tfidf_raw, self.vectorizer_config
@@ -243,9 +256,18 @@ class TextEncoder():
             self.dimension_model = dim_model
 
             # Concatenate: [TRANSFORMER | TF-IDF]
-            if self.flag == 5:  # equal block weight; raw transformer norms otherwise take ~all of it
+            if self.flag in (5, 6):  # equal block weight; raw transformer norms otherwise take ~all of it
                 X_trans, reduced_x_tfidf = normalize(X_trans), normalize(reduced_x_tfidf)
-            concat_emb = hstack([X_trans, reduced_x_tfidf])
+            blocks = [X_trans, reduced_x_tfidf]
+            if self.flag == 6:
+                X_ctx, self.context_vectorizer_model = self._encode_text_using_text_vectorizer(
+                    X_context_raw, self.context_vectorizer_config
+                )
+                X_ctx, self.context_dimension_model = self._reduce_dimensions(
+                    X_ctx, self.context_dimension_config
+                )
+                blocks.append(normalize(csr_matrix(X_ctx)))
+            concat_emb = hstack(blocks)
 
             # Normalize
             return normalize(concat_emb, norm="l2", axis=1)
@@ -304,7 +326,7 @@ class TextEncoder():
 
         use_tfidf = self.flag in [1, 2]
         use_transformer = self.flag in [2, 3]
-        use_formula = self.flag in (4, 5)
+        use_formula = self.flag in (4, 5, 6)
 
         # ------------------------------------------------------------
         # FLAG 4: "[SEP]" formula mode
@@ -315,7 +337,7 @@ class TextEncoder():
             X_transformer_raw, X_tfidf_raw = [], []
             for item in X_text_query:
                 if "[SEP]" not in item:
-                    raise ValueError("Input must contain [SEP] when flag is 4 or 5")
+                    raise ValueError("Input must contain [SEP] when flag is 4, 5 or 6")
                 a, b = item.split("[SEP]", 1)
                 X_transformer_raw.append(a)
                 X_tfidf_raw.append(b)
@@ -328,7 +350,8 @@ class TextEncoder():
             X_trans = csr_matrix(X_trans)
 
             # TF-IDF prediction
-            if self.flag == 5:
+            X_context_raw = X_tfidf_raw
+            if self.flag in (5, 6):
                 X_tfidf_raw = X_transformer_raw
             X_tfidf = self._predict_text_using_text_vectorizer(
                 X_test=X_tfidf_raw,
@@ -344,9 +367,15 @@ class TextEncoder():
                 )
 
             # Concatenate
-            if self.flag == 5:
+            if self.flag in (5, 6):
                 X_trans, reduced_x_tfidf = normalize(X_trans), normalize(reduced_x_tfidf)
-            concat_emb = hstack([X_trans, reduced_x_tfidf])
+            blocks = [X_trans, reduced_x_tfidf]
+            if self.flag == 6:
+                X_ctx = self._predict_text_using_text_vectorizer(X_context_raw, self.context_vectorizer_model)
+                if self.context_dimension_model is not None:
+                    X_ctx = self._predict_dimension(X_ctx, self.context_dimension_model)
+                blocks.append(normalize(csr_matrix(X_ctx)))
+            concat_emb = hstack(blocks)
 
             return normalize(concat_emb, norm="l2", axis=1)
 

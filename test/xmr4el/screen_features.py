@@ -68,20 +68,46 @@ def encode_mentions(model_name, texts):
         texts, batch_size=256, normalize_embeddings=False, show_progress_bar=True).astype(np.float32)
 
 
-def featurize(name, tr_m, te_m):
-    """Mention-only features for train/test mention strings."""
-    if name in ("char", "word", "charsvd"):
-        kw = {} if name == "word" else dict(analyzer="char_wb", ngram_range=(2, 4))
-        vec = TfidfVectorizer(lowercase=True, sublinear_tf=True, **kw).fit(tr_m)
-        A, B = vec.transform(tr_m), vec.transform(te_m)
-        if name == "charsvd":  # tree training densifies X (base.py), so the tree needs a dense block
+def context_window(text, span, w):
+    """Window around the mention; text = "mention [SEP] document" as the loader builds it."""
+    from xmr4el.featurization.preprocessor import Preprocessor
+    return Preprocessor.context_window(text.split("[SEP]", 1)[1][1:], span, w)
+
+
+TFIDF = {  # name -> (text field, TfidfVectorizer kwargs)
+    "char": ("m", dict(analyzer="char_wb", ngram_range=(2, 4))),
+    "word": ("m", {}),
+    "ctxwin": ("win", dict(stop_words="english")),
+    "ctxdoc": ("doc", dict(stop_words="english")),
+}
+
+
+def featurize(name, tr, te):
+    """Train/test features. tr/te: {"m": mentions, "win": context windows, "doc": documents}.
+    TF-IDF names take an "svd" suffix (-> SVD 768: tree training densifies X, so the tree needs dense
+    blocks). Encoder names embed the mention; a "win" prefix embeds the context window instead."""
+    base = name[:-3] if name.endswith("svd") else name
+    if base in TFIDF:
+        field, kw = TFIDF[base]
+        vec = TfidfVectorizer(lowercase=True, sublinear_tf=True, **kw).fit(tr[field])
+        A, B = vec.transform(tr[field]), vec.transform(te[field])
+        if name != base:
             svd = TruncatedSVD(n_components=min(768, A.shape[1] - 1), random_state=42).fit(A)
             A, B = svd.transform(A), svd.transform(B)
         return A, B
-    if name in ENCODERS:
-        enc = encode_mentions(ENCODERS[name], list(tr_m) + list(te_m))
-        return enc[:len(tr_m)], enc[len(tr_m):]
+    field, enc = ("win", name[3:]) if name.startswith("win") else ("m", name)
+    if enc in ENCODERS:
+        E = encode_mentions(ENCODERS[enc], list(tr[field]) + list(te[field]))
+        return E[:len(tr[field])], E[len(tr[field]):]
     raise ValueError(name)
+
+
+def combine(parts):
+    """Each block L2-normalised and scaled by its weight, then concatenated."""
+    if len(parts) == 1 and parts[0][2] == 1.0:
+        return parts[0][0], parts[0][1]
+    return tuple(hstack([csr_matrix(w * normalize(p[i])) for *p, w in parts], format="csr")
+                 for i in (0, 1))
 
 
 def show_errors(pred, gold, te_m, unseen, labels, names, n, rng):
@@ -101,8 +127,13 @@ def main():
     ap.add_argument("-xmodel_path", required=True, help="saved tree: label vocabulary + transformer config")
     ap.add_argument("-train_path", required=True)
     ap.add_argument("-test_path", required=True)
-    ap.add_argument("-features", default="sbiobert,sapbert,sbiobert+charsvd,sapbert+charsvd,sapbert+char",
-                    help="comma list; a+b = per-block L2 normalised, equal-weight concat")
+    ap.add_argument("-features", default=",".join(
+        ["sapbert+charsvd"] + [f"sapbert+charsvd+ctxwin*{w}" for w in (0.3, 0.5, 1)]
+        + ["sapbert+charsvd+ctxdoc*0.5", "sapbert+charsvd+winsbiobert*0.5",
+           "sapbert+charsvd+ctxwinsvd*0.5"]),
+                    help="comma list; a+b = per-block L2 normalised concat; a*w scales block a by w")
+    ap.add_argument("-scorers", default="centroid", help="comma list of centroid,max")
+    ap.add_argument("-window", type=int, default=10, help="context words each side of the mention")
     ap.add_argument("-show_errors", type=int, default=30)
     args = ap.parse_args()
     rng = np.random.default_rng(0)
@@ -113,15 +144,17 @@ def main():
 
     def load(path):
         d = Preprocessor.load_pubtator_file(path)
-        pairs = [(t, y) for t, y in zip(d["corpus"], d["labels"]) if y in l2i]
-        return pairs, len(d["labels"])
+        keep = [i for i, y in enumerate(d["labels"]) if y in l2i]
+        pairs = [(d["corpus"][i], d["labels"][i]) for i in keep]
+        fields = {"m": [t.split("[SEP]", 1)[0] for t, _ in pairs],  # what the transformer block sees
+                  "win": [context_window(d["corpus"][i], d["spans"][i], args.window) for i in keep],
+                  "doc": [t.split("[SEP]", 1)[1] for t, _ in pairs]}
+        return pairs, fields, len(d["labels"])
 
-    train_pairs, _ = load(args.train_path)
-    test_pairs, n_test_all = load(args.test_path)
+    train_pairs, tr, _ = load(args.train_path)
+    test_pairs, te, n_test_all = load(args.test_path)
     print(f"labels {len(labels)}  train rows {len(train_pairs)}  dev rows {len(test_pairs)}/{n_test_all}")
-    # Raw text before [SEP], exactly what the flag-4 transformer block sees
-    tr_m = [t.split("[SEP]", 1)[0] for t, _ in train_pairs]
-    te_m = [t.split("[SEP]", 1)[0] for t, _ in test_pairs]
+    te_m = te["m"]
     y_tr = np.array([l2i[y] for _, y in train_pairs])
     gold = np.array([l2i[y] for _, y in test_pairs])
 
@@ -135,16 +168,13 @@ def main():
     cache = {}
     for spec in args.features.split(","):
         parts = []
-        for name in spec.split("+"):
+        for item in spec.split("+"):
+            name, _, w = item.partition("*")
             if name not in cache:
-                cache[name] = featurize(name, tr_m, te_m)
-            parts.append(cache[name])
-        if len(parts) == 1:
-            X_tr, X_te = parts[0]
-        else:
-            X_tr = hstack([csr_matrix(normalize(a)) for a, _ in parts], format="csr")
-            X_te = hstack([csr_matrix(normalize(b)) for _, b in parts], format="csr")
-        for scorer in ("centroid", "max"):
+                cache[name] = featurize(name, tr, te)
+            parts.append((*cache[name], float(w or 1)))
+        X_tr, X_te = combine(parts)
+        for scorer in args.scorers.split(","):
             S = label_scores(X_tr, y_tr, X_te, len(labels), scorer)
             acc, mrr, ties = acc_mrr(S, gold)
             pred = top1(S, rng)
@@ -175,8 +205,23 @@ def _selfcheck():
     assert np.isclose(acc, 0.5) and np.isclose(mrr, 0.75) and ties == 1.0
     picks = top1(np.zeros((2000, 2), dtype=np.float32), np.random.default_rng(0))
     assert 0.4 < picks.mean() < 0.6, "ties must not always go to label 0"
-    Xc_tr, Xc_te = featurize("char", ["aspirin", "tumour"], ["Aspirine"])
+    Xc_tr, Xc_te = featurize("char", {"m": ["aspirin", "tumour"]}, {"m": ["Aspirine"]})
     assert label_scores(Xc_tr, np.array([0, 1]), Xc_te, 2, "max").argmax() == 0
+    import tempfile
+    from xmr4el.featurization.preprocessor import Preprocessor
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("1|t|Aspirin works\n1|a|It lowers fever.\n"
+                "1\t0\t7\tAspirin\tT\tC1\n1\t17\t23\tlowers\tT\tC2\n")
+    d = Preprocessor.load_pubtator_file(f.name)
+    for t, (s, e) in zip(d["corpus"], d["spans"]):
+        assert t.split("[SEP]", 1)[1][1:][s:e] == t.split(" [SEP]", 1)[0], (t, s, e)
+    assert context_window(d["corpus"][1], d["spans"][1], 2) == "works It fever."
+    text = "Ki-67 [SEP] Cells with high Ki-67 staining grew fast"
+    s = text.split("[SEP]", 1)[1][1:].index("Ki-67")
+    assert context_window(text, (s, s + 5), 2) == "with high staining grew"
+    A, B = combine([(np.array([[3.0, 4.0]]), np.array([[1.0, 0.0]]), 1.0),
+                    (np.array([[0.0, 2.0]]), np.array([[5.0, 0.0]]), 0.5)])
+    assert np.allclose(A.toarray(), [[0.6, 0.8, 0.0, 0.5]]) and np.allclose(B.toarray(), [[1, 0, 0.5, 0]])
     print("selfcheck ok")
 
 

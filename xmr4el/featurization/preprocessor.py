@@ -3,7 +3,7 @@ import os
 import pandas as pd
 
 from collections import OrderedDict
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from collections import defaultdict
 
 class Preprocessor:
@@ -73,19 +73,28 @@ class Preprocessor:
         return trn_corpus, label_to_indices
 
     @staticmethod
-    def load_pubtator_file(pubtator_filepath: str) -> Dict[str, List[str]]:
+    def context_window(document: str, span: Tuple[int, int], window: int) -> str:
+        """Up to `window` words left and right of the mention at `span`, mention excluded."""
+        start, end = span
+        return " ".join(document[:start].split()[-window:] + document[end:].split()[:window])
+
+    @staticmethod
+    def load_pubtator_file(pubtator_filepath: str, window: Optional[int] = None) -> Dict[str, List[str]]:
         """
         Load a PubTator file and return flattened corpus and labels lists
         suitable for entity linking training.
 
         Each entry:
-            corpus[i] = "mention [SEP] context"
+            corpus[i] = "mention [SEP] context"; context = title + " " + abstract, or with
+                        `window`, the words around the mention (`context_window`)
             labels[i] = CUI
+            spans[i] = (start, end) of the mention in title + " " + abstract (PubTator offsets)
         """
         assert os.path.exists(pubtator_filepath), f"{pubtator_filepath} does not exist"
 
         corpus: List[str] = []
         labels: List[str] = []
+        spans: List[Tuple[int, int]] = []  # mention offsets into the context after "[SEP] "
 
         title, abstract = "", ""
 
@@ -116,10 +125,14 @@ class Preprocessor:
                         cui = parts[5]
                         context = " ".join(x for x in [title, abstract] if x)
 
+                        span = (int(parts[1]), int(parts[2]))
+                        if window is not None:
+                            context = Preprocessor.context_window(context, span, window)
                         corpus.append(f"{mention_text} [SEP] {context}")
                         labels.append(cui)
+                        spans.append(span)
 
-        return {"corpus": corpus, "labels": labels}
+        return {"corpus": corpus, "labels": labels, "spans": spans}
 
     @staticmethod
     def organize_pubtator_output(pub_output: Dict) -> Tuple[List[List[str]], List[str]]:

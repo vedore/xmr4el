@@ -7,7 +7,7 @@ History and completed steps: `docs/status_log.md`. Valid results: `docs/results.
 Last updated 2026-10-01 (session 8). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-Code not frozen (no user run in flight). Session 7 work committed (`f24b35c`, `31d5486`); session 8 uncommitted.
+Code FROZEN once the user starts the flag-6 1000-label run (see below). Session 8 code committed (`2df6178` and before); results docs may be uncommitted.
 
 State (flag 4, 500 labels, tree `xmodel_2026-10-01_11-20-27`): hierarchy + cosine leaf scorer
 acc@1 0.764, MRR 0.822 = flat nearest-label 0.767 > dictionary 0.717; hybrid (dict if string
@@ -55,11 +55,28 @@ MLModel), `false` in all three `.models` configs. Prediction-neutral under `-sco
 `test/xmr4el/test_no_rankers.py` trains a synthetic tree both ways and asserts identical cosine
 scores. `predict` treats a missing `ranker_model` as all-cosine. Old trees keep their rankers.
 
-Next: user trains `.models/xmr4el_flag5_sapbert_config.json` (500 labels) and evaluates (cosine,
-alpha 1, breakdown). **Freeze code while it runs.** Expect tree ~ flat 0.793. Record against
-`11-20-27` as a bundle (encoder S-BioBert -> SapBERT + flag 4 -> 5), retain/revert, then commit.
-Not screened: local context window (abbreviations; ambiguous seen strings stuck at ~0.80; needs
-PubTator offsets).
+Done: flag-5 SapBERT tree `xmodel_2026-10-01_15-10-04` (results Session 8): acc@1 0.790, MRR 0.844,
+unseen 0.464, hybrid 0.836 vs `11-20-27` 0.764 / 0.822 / 0.343 / 0.805; flat ceiling 0.793.
+Retained: new baseline is `15-10-04` + `xmr4el_flag5_sapbert_config.json`. Weak spot: seen ambiguous
+strings 0.804 (dict 0.928).
+
+User plan (2026-10-01): context screen (done) -> train 1000 labels -> try full.
+
+Context screen recorded (results Session 9): + context TF-IDF adds +0.010-0.012 flat (0.793 -> 0.805),
+seen ambiguous strings 0.804 -> 0.835; hybrid only +0.003. 10-word window = whole document; SVD 768
+loses nothing. Chosen: equal block weights (untuned), window 10.
+
+Implemented (uncommitted): `emb_flag` 6 = flag 5 + third block SVD(TF-IDF(context)), each block
+L2-normalised; persisted as `context_vectorizer_model` / `context_dimension_model`. XModel keys
+`context_vectorizer_config`, `context_dimension_config`, `context_window`; train/eval/diagnose load
+PubTator with `window=model.context_window` (context = +-N words, mention excluded; None = whole
+document, old behaviour). Config `.models/xmr4el_flag6_sapbert_config.json`. Loader also returns
+`spans`. Regression: `test_text_encoder.py` (flag 6 blocks, empty window, save/load, loader window).
+
+In flight: user trains flag 6 at `-ds_len 1000`, evaluates, then runs the flat screen on that tree's
+vocabulary (`sapbert+charsvd` = flag-5 reference, `+ctxwinsvd` = flag-6 flat ceiling). **Freeze code.**
+On output: record Session 9 tree row; tree vs its flat ceiling; 1000 vs 500 is a vocabulary change,
+compare only within 1000. Then plan the full-label run (check memory/time in code first).
 
 Then scale (`-ds_len` 1000 -> full) with the chosen features; see "Scale and external baseline".
 
@@ -83,7 +100,7 @@ Commands: `docs/results.md` § Commands.
 | Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicaMLModel.load`, `xmr4el/xmr/base.py` |
 | Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load sorts legacy first-seen lists and asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmr/model.py` |
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `test/xmr4el/test_evaluate_pipeline.py` |
-| Features | Flag 4: transformer mention + reduced TF-IDF context, then row normalization. Flag 5: transformer + reduced char TF-IDF, both on the mention, per-block L2 | `TextEncoder.encode/predict`, base / flag5 config |
+| Features | Flag 4: transformer mention + reduced TF-IDF context, then row normalization. Flag 5: transformer + reduced char TF-IDF, both on the mention, per-block L2. Flag 6: flag 5 + reduced word TF-IDF of a context window | `TextEncoder.encode/predict`, base / flag5 config |
 | Clustering | Seeded balanced k-means; undersized clusters reassigned instead of dropping labels | `xmr4el/models/cluster_wrapper/clustering_model.py`, `xmr4el/clustering/train.py` |
 | Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker/train.py`, `.models/xmr4el_base_config.json` |
 | Leaf matching | Newly trained leaf matchers are label-level; leaf early stopping is disabled for singleton positives | `MLModel.train`, `xmr4el/xmr/base.py` |

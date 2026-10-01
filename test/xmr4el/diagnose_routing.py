@@ -99,7 +99,7 @@ def main():
     tr = rng.permutation(Y.shape[0])[:args.max_rows]
     report("train", xm.X[tr], Y.indices[tr], root, Z, cluster_of, blocks)
 
-    test = Preprocessor.load_pubtator_file(args.test_path)
+    test = Preprocessor.load_pubtator_file(args.test_path, window=getattr(xm, "context_window", None))
     pairs = [(t, y) for t, y in zip(test["corpus"], test["labels"]) if y in label_to_idx]
     print(f"\nin-vocabulary dev mentions: {len(pairs)}/{len(test['labels'])}")
     pairs = [pairs[i] for i in rng.permutation(len(pairs))[:args.max_rows]]

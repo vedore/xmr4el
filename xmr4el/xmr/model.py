@@ -32,6 +32,9 @@ class XModel:
                  vectorizer_config: dict = None,
                  transformer_config: dict = None,
                  dimension_config: dict = None,
+                 context_vectorizer_config: dict = None,
+                 context_dimension_config: dict = None,
+                 context_window: Optional[int] = None,
                  clustering_config: dict = None,
                  matcher_config: dict = None,
                  ranker_config: dict = None,
@@ -63,6 +66,11 @@ class XModel:
         self.vectorizer_config = vectorizer_config
         self.transformer_config = transformer_config
         self.dimension_config = dimension_config
+        # emb_flag 6: context block configs; PubTator loaders build the context from
+        # `context_window` words around each mention (None = whole document)
+        self.context_vectorizer_config = context_vectorizer_config
+        self.context_dimension_config = context_dimension_config
+        self.context_window = context_window
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
         self.ranker_config = ranker_config
@@ -316,7 +324,9 @@ class XModel:
             vectorizer_config=self.vectorizer_config,
             transformer_config=self.transformer_config,
             dimension_config=self.dimension_config, 
-            flag=self.emb_flag # Needs to be a variable, could have a stop to check
+            flag=self.emb_flag, # Needs to be a variable, could have a stop to check
+            context_vectorizer_config=getattr(self, "context_vectorizer_config", None),
+            context_dimension_config=getattr(self, "context_dimension_config", None),
             )
         
         self.text_encoder = text_encoder

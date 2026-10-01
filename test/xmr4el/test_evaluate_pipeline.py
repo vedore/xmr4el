@@ -118,7 +118,8 @@ def main():
         leaf.cosine_scorer = args.scorer == "cosine"
     print("scorer", args.scorer)
     
-    test_set = Preprocessor.load_pubtator_file(args.test_path)
+    test_set = Preprocessor.load_pubtator_file(
+        args.test_path, window=getattr(trained_xtree, "context_window", None))
     
     corpus = test_set["corpus"]
     labels = test_set["labels"]

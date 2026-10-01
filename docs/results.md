@@ -260,6 +260,63 @@ Reading (rounds 1-2):
   Centroid stays; `max` is not a feature fix.
 - Word TF-IDF on the mention is worst on unseen strings (0.315 / 0.272): no subword overlap.
 
+### Flag-5 SapBERT tree `xmodel_2026-10-01_15-10-04` (bundle)
+
+Config `.models/xmr4el_flag5_sapbert_config.json`, checked on the saved tree: `emb_flag` 5,
+`sapbert`, char_wb 2-4 TF-IDF -> SVD 768, `train_rankers` false; otherwise as `11-20-27` (500 labels,
+depth 2, K 6). Eval: dev, beam 2, `-topk 0`, `-scorer cosine -alpha 1`, `-train_path` breakdown.
+Bundle vs `11-20-27`: encoder S-BioBert -> SapBERT, flag 4 -> 5 (char block, per-block L2, document
+context dropped), rankers not trained (prediction-neutral, `test_no_rankers.py`).
+
+| tree | acc@1 | MRR | R@5 | R@20 | recall@cand | cand/query | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `11-20-27` (flag 4, S-BioBert) | 0.764 | 0.822 | - | 0.936 | 0.949 | 166 | 0.952 | 0.832 | 0.343 | 0.805 |
+| `15-10-04` (flag 5, SapBERT) | **0.790** | **0.844** | 0.915 | 0.935 | 0.942 | 167 | 0.956 | 0.804 | **0.464** | **0.836** |
+| flat screen, `sapbert` + charsvd | 0.793 | 0.851 | | | | 500 | 0.961 | 0.804 | 0.466 | 0.836 |
+
+7530/7530 in-vocabulary dev rows in both trees; dictionary 0.7165 (same rows).
+
+Reading:
+- Retain. +0.026 acc@1, +0.022 MRR, +0.121 on unseen strings, +0.031 hybrid; the gain is where the
+  screen predicted (unseen strings), and the tree lands 0.003 under its flat ceiling.
+- Routing is slightly worse (recall@cand 0.949 -> 0.942), so the hierarchy now costs ~0.003-0.007;
+  still not the bottleneck.
+- Seen ambiguous strings fall 0.832 -> 0.804 (dropping document context and S-BioBert): mention-only
+  features cannot separate labels that share a string. Dictionary gets 0.928 there; the hybrid
+  recovers it. Next feature lever: local context.
+- Attribution is to the bundle; the screen attributes the encoder (+0.018 flat) and the char block
+  (+0.013 flat on SapBERT) separately.
+
+## Session 9 (2026-10-01): context screen (flat, `screen_features.py`)
+
+Same vocabulary/rows as Session 8 (500 labels, 7530 dev rows), centroid scorer. Context blocks are
+added to `sapbert` + charsvd 768; every block L2-normalised, then scaled by `*w`. `ctxwin` = word
+TF-IDF (English stop words, sublinear) of +-10 words around the mention, mention excluded (PubTator
+offsets, verified 122241/122241 train and 40884/40884 dev); `ctxdoc` = same on the whole document;
+`winsbiobert` = S-BioBert of the window; `svd` = SVD 768.
+
+| features | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen |
+|---|---|---|---|---|---|---|
+| `sapbert` + charsvd (baseline) | 0.793 | 0.851 | 0.836 | 0.961 | 0.804 | 0.466 |
+| + ctxwin * 0.3 | 0.795 | 0.852 | 0.838 | 0.961 | 0.807 | 0.471 |
+| + ctxwin * 0.5 | 0.803 | 0.857 | 0.839 | 0.962 | 0.833 | 0.475 |
+| + ctxwin * 1 | **0.805** | **0.860** | 0.839 | 0.963 | **0.835** | 0.478 |
+| + ctxdoc * 0.5 | 0.803 | 0.858 | 0.838 | 0.962 | 0.834 | 0.474 |
+| + winsbiobert * 0.5 | 0.800 | 0.856 | **0.840** | 0.962 | 0.815 | 0.479 |
+| + ctxwinsvd * 0.5 | 0.803 | 0.858 | 0.838 | 0.962 | 0.832 | 0.474 |
+
+Reading:
+- Context adds +0.010-0.012 acc@1, almost all on seen ambiguous strings (0.804 -> 0.835), the
+  group it was meant for. Unseen strings gain +0.008-0.013.
+- The hybrid barely moves (+0.002-0.004): on seen strings the dictionary's frequency prior already
+  gets 0.928, so context and dictionary fix the same rows. Context matters when there is no
+  dictionary (tree alone) and at larger vocabularies where strings are more ambiguous (untested).
+- A 10-word window and the whole document give the same result at weight 0.5 (0.803); TF-IDF beats
+  the S-BioBert window embedding on ambiguous strings (0.833 vs 0.815). SVD 768 loses nothing
+  (0.803 = raw at 0.5), so the tree-feasible block is `ctxwinsvd`.
+- Weight: 1 (equal block weight, the untuned default, as in flag 5) >= 0.5 > 0.3 on raw TF-IDF.
+  Chosen for the tree: equal weights, so no dev-tuned parameter enters.
+
 ## Commands
 
 Older, invalid runs: `docs/results_archive.md`.
