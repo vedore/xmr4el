@@ -88,5 +88,6 @@
     "ranker_every_layer": true,
     "depth": 2,
     "emb_flag": 5,
-    "verbose": 1
+    "verbose": 1,
+    "train_rankers": false
 }

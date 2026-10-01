@@ -48,6 +48,7 @@ class MLModel():
                  is_last_layer=False,
                  layer=None,
                  n_workers=8,
+                 train_rankers=True,
                  ):
         
         self.logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class MLModel():
         self.is_last_layer = is_last_layer
         self.layer = layer
         self.n_workers = n_workers
+        self.train_rankers = train_rankers
         
         self._local_to_global_idx = None
         self._global_to_local_idx = None
@@ -410,7 +412,10 @@ class MLModel():
         del matcher_model
         gc.collect()
         
-        train_ranker = self.ranker_every_layer or self.is_last_layer
+        # Nothing used for prediction depends on the rankers unless eval runs -scorer ranker: the
+        # root's fused_scores are matcher-only, the leaf's feed prepare_layer children that are
+        # never trained. train_rankers=False skips them; predict then scores every label by cosine.
+        train_ranker = self.train_rankers and (self.ranker_every_layer or self.is_last_layer)
         
         def _topb_sparse(P: np.ndarray, b: int) -> csr_matrix:
             # P: (n x K_or_L) dense proba; returns (n x K_or_L) CSR 0/1 mask of top-b per row
@@ -548,7 +553,8 @@ class MLModel():
         X_dense = X_query.toarray() if hasattr(X_query, "toarray") else np.asarray(X_query)
         # eval-only switch (set by test_evaluate_pipeline -scorer cosine): skip trained rankers and
         # score every label by cosine to its leaf z, like the no-ranker fallback.
-        model_dict = {} if getattr(self, "cosine_scorer", False) else self.ranker_model.model_dict
+        no_rankers = getattr(self, "cosine_scorer", False) or self.ranker_model is None
+        model_dict = {} if no_rankers else self.ranker_model.model_dict
         self.ranker_failed = set()  # gids whose trained ranker silently fell back to cosine
 
         # detect hinge-style rankers (like in your earlier code)
@@ -722,7 +728,8 @@ class HierarchicaMLModel():
                  cut_half_cluster=False,
                  ranker_every_layer=False,
                  n_workers=8,
-                 layer=1):
+                 layer=1,
+                 train_rankers=True):
         
         self.logger = logging.getLogger(__name__)
         
@@ -735,6 +742,7 @@ class HierarchicaMLModel():
         self.cut_half_cluster = cut_half_cluster
         self.ranker_every_layer = ranker_every_layer
         self.n_workers = n_workers
+        self.train_rankers = train_rankers
         
         self._hmodel = []
         self._layer = layer
@@ -1002,6 +1010,7 @@ class HierarchicaMLModel():
                         is_last_layer=is_last_layer,
                         layer=layer,
                         n_workers=self.n_workers,
+                        train_rankers=getattr(self, "train_rankers", True),
                     )
 
                     ml.train(

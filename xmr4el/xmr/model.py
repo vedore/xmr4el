@@ -40,6 +40,7 @@ class XModel:
                  max_leaf_size: int = None,
                  cut_half_cluster: bool = False,
                  ranker_every_layer: bool = True,
+                 train_rankers: bool = True,
                  n_workers: int = 8,
                  depth: int = 1,
                  emb_flag: int = 1,
@@ -71,6 +72,7 @@ class XModel:
         self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
         self.ranker_every_layer = ranker_every_layer
+        self.train_rankers = train_rankers
         
         self.n_workers = n_workers
         
@@ -139,7 +141,7 @@ class XModel:
             f"  workers: n_workers={self.n_workers}",
             f"  depth={self.depth}, emb_flag={self.emb_flag}",
             f"  cluster: min_leaf_size={self.min_leaf_size}, max_leaf_size={self.max_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
-            f"  ranker_every_layer={self.ranker_every_layer}",
+            f"  ranker_every_layer={self.ranker_every_layer}, train_rankers={getattr(self, 'train_rankers', True)}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
@@ -353,7 +355,8 @@ class XModel:
             n_workers=self.n_workers,
             cut_half_cluster=self.cut_half_cluster,
             ranker_every_layer=self.ranker_every_layer,
-            layer=self.depth
+            layer=self.depth,
+            train_rankers=getattr(self, "train_rankers", True),
         )
 
         hml.train(

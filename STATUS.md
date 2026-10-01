@@ -49,6 +49,12 @@ encodes through the same loader, bypassing `./batch_dir`.
 Screen round 3 recorded (Session 8): SapBERT wins. `sapbert` + charsvd / centroid 0.793, unseen
 0.466, hybrid 0.836 vs `sbiobert` + charsvd 0.775 / 0.427 / 0.826 (current tree features 0.766).
 
+Rankers off (user decision 2026-10-01): config key `train_rankers` (XModel -> HierarchicaMLModel ->
+MLModel), `false` in all three `.models` configs. Prediction-neutral under `-scorer cosine`: root
+`fused_scores` are matcher-only and the leaf's (only ranker consumer) feed discarded children;
+`test/xmr4el/test_no_rankers.py` trains a synthetic tree both ways and asserts identical cosine
+scores. `predict` treats a missing `ranker_model` as all-cosine. Old trees keep their rankers.
+
 Next: user trains `.models/xmr4el_flag5_sapbert_config.json` (500 labels) and evaluates (cosine,
 alpha 1, breakdown). **Freeze code while it runs.** Expect tree ~ flat 0.793. Record against
 `11-20-27` as a bundle (encoder S-BioBert -> SapBERT + flag 4 -> 5), retain/revert, then commit.
@@ -79,7 +85,7 @@ Commands: `docs/results.md` § Commands.
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `test/xmr4el/test_evaluate_pipeline.py` |
 | Features | Flag 4: transformer mention + reduced TF-IDF context, then row normalization. Flag 5: transformer + reduced char TF-IDF, both on the mention, per-block L2 | `TextEncoder.encode/predict`, base / flag5 config |
 | Clustering | Seeded balanced k-means; undersized clusters reassigned instead of dropping labels | `xmr4el/models/cluster_wrapper/clustering_model.py`, `xmr4el/clustering/train.py` |
-| Ranker training | Epochs reuse models and vary sampling seeds; config uses `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker/train.py`, `.models/xmr4el_base_config.json` |
+| Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker/train.py`, `.models/xmr4el_base_config.json` |
 | Leaf matching | Newly trained leaf matchers are label-level; leaf early stopping is disabled for singleton positives | `MLModel.train`, `xmr4el/xmr/base.py` |
 | Leaf scoring | Cosine by default (`cosine_scorer`, eval `-scorer cosine`); `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising | `MLModel.predict`, `xmr4el/xmr/base.py` |
 
@@ -95,6 +101,7 @@ Synthetic checks passed during the latest review:
 .venv/bin/python test/xmr4el/test_prepare_layer.py
 .venv/bin/python test/xmr4el/screen_features.py -selfcheck
 .venv/bin/python test/xmr4el/test_text_encoder.py
+.venv/bin/python test/xmr4el/test_no_rankers.py
 ```
 
 `test_data_loading.py` covers the mapping through the real `XModel.train/save/load` paths

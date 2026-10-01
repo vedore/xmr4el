@@ -80,6 +80,7 @@
     "max_leaf_size" : 200,
     "cut_half_cluster" : true,
     "ranker_every_layer" : true,
+    "train_rankers" : false,
     "depth" : 2,
     "emb_flag": 4,
     "verbose": 1
