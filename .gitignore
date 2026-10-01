@@ -13,6 +13,3 @@ __pycache__/
 *.onnx
 .DS_Store
 
-# Track the runnable base config; keep experiment configs local.
-/.models/*
-!/.models/xmr4el_base_config.json
