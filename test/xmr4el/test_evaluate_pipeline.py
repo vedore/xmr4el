@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 import numpy as np
-from collections import Counter
+from collections import Counter, defaultdict
 import time
 
 
@@ -44,6 +44,27 @@ def split_by_ranker(gold_idx, trained):
     return (("with ranker", has), ("without ranker", ~has))
 
 
+def string_breakdown(test_texts, gold, tree_top1, train_pairs):
+    """acc@1 of the tree and of the mention dictionary, split by whether the exact mention string
+    occurs in train (and with how many labels). Returns {group: (n, tree, dict, either)} plus the
+    hybrid (dictionary if the string was seen, tree otherwise)."""
+    from diagnose_routing import _mention  # same string normalisation as the dictionary baseline
+    counts = defaultdict(Counter)
+    for t, y in train_pairs:
+        counts[_mention(t)][y] += 1
+    m = [_mention(t) for t in test_texts]
+    n_lab = np.array([len(counts[s]) if s in counts else 0 for s in m])
+    dict_ok = np.array([s in counts and counts[s].most_common(1)[0][0] == g for s, g in zip(m, gold)])
+    tree_ok = np.array([p == g for p, g in zip(tree_top1, gold)])
+    groups = {"all": n_lab >= 0, "seen, 1 label": n_lab == 1,
+              "seen, >1 label": n_lab > 1, "unseen string": n_lab == 0}
+    out = {k: (int(g.sum()), tree_ok[g].mean() if g.any() else 0.0,
+               dict_ok[g].mean() if g.any() else 0.0, (tree_ok | dict_ok)[g].mean() if g.any() else 0.0)
+           for k, g in groups.items()}
+    out["hybrid"] = np.where(n_lab > 0, dict_ok, tree_ok).mean()
+    return out
+
+
 def _selfcheck():
     from scipy.sparse import csr_matrix
     m = csr_matrix(np.array([[0.1, 0.9, 0.5], [0.0, 0.0, 0.0]]))
@@ -53,6 +74,12 @@ def _selfcheck():
     assert gold_rank(m.getrow(1), 0) == 0, "empty row must report not-found"
     (_, has), (_, no) = split_by_ranker(np.array([0, 2, 2, 5]), {2})
     assert has.tolist() == [False, True, True, False] and (has ^ no).all()
+    b = string_breakdown(["Aspirin [SEP] q", "aspirin [SEP] r", "tumor [SEP] s", "new [SEP] t"],
+                         ["A", "B", "T", "N"], ["B", "B", "X", "N"],
+                         [("aspirin [SEP] a", "A"), ("aspirin [SEP] b", "A"), ("aspirin [SEP] c", "B"),
+                          ("tumor [SEP] d", "T")])
+    assert b["seen, >1 label"] == (2, 0.5, 0.5, 1.0) and b["seen, 1 label"] == (1, 0.0, 1.0, 1.0)
+    assert b["unseen string"] == (1, 1.0, 0.0, 1.0) and b["hybrid"] == 0.75
     print("selfcheck ok")
 
 
@@ -70,6 +97,8 @@ def main():
     parser.add_argument("-topk", type=int, default=20)
     parser.add_argument("-alpha", type=float, default=0.5,
                         help="ranker weight in the leaf fusion; 0 = matcher only (rankers still run)")
+    parser.add_argument("-train_path", type=str, default=None,
+                        help="train PubTator file; adds the seen/unseen mention-string breakdown")
     parser.add_argument("-scorer", choices=["ranker", "cosine"], default="cosine",
                         help="leaf label score fused with the matcher: cosine to leaf z (default; trained "
                              "rankers anti-rank, docs/results.md Session 7) or the trained rankers")
@@ -164,6 +193,18 @@ def main():
     _nnz = score_csr.nnz / max(score_csr.shape[0], 1)
     print("random-ordering line (recall@cand * k/nnz):",
           {k: round(_cand * k / max(_nnz, 1), 4) for k in (1, 5, 20, 50)})
+
+    if args.train_path:
+        train = Preprocessor.load_pubtator_file(args.train_path)
+        train_pairs = [(t, y) for t, y in zip(train["corpus"], train["labels"]) if y in label_to_idx]
+        tree_top1 = [trained_labels[r.indices[np.argmax(r.data)]] if r.nnz else None
+                     for r in (score_csr.getrow(i) for i in range(score_csr.shape[0]))]
+        b = string_breakdown(input_texts, golden_labels, tree_top1, train_pairs)
+        print("mention-string breakdown (acc@1; dict = most frequent train label for the exact string):")
+        for k, (n_k, t_k, d_k, e_k) in ((k, v) for k, v in b.items() if k != "hybrid"):
+            print(f"  {k:15s} n={n_k:5d} ({n_k / len(golden_labels):.3f})  tree {t_k:.4f}  "
+                  f"dict {d_k:.4f}  either {e_k:.4f}")
+        print(f"  hybrid (dict if string seen, else tree): acc@1 {b['hybrid']:.4f}")
 
     end = time.time()
 

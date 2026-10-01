@@ -19,7 +19,19 @@ Step 4 exit reached: one attributable result (leaf-Z fix) + retain decision.
 
 User decisions (2026-10-01): commit; rankers left out of prediction (eval `-scorer` defaults to
 `cosine`; `-scorer ranker` reproduces the old rows); user will redesign rankers later. Leaf ranker
-training still runs (cost only). Next: step 5, scale the vocabulary (see results Commands).
+training still runs (cost only).
+
+**Code frozen** while the user runs (eval-only, tree `xmodel_2026-10-01_11-20-27`):
+1. eval `-alpha 1 -train_path ...` -> new mention-string breakdown (seen 1-label / seen >1-label /
+   unseen string: tree vs dictionary acc@1, "either" oracle, hybrid = dict if seen else tree).
+   Consistency: "all" dict must equal 0.7165, tree must equal 0.764.
+2. eval `-beam_size 3 -alpha 1` -> how much of the 0.949 candidate cap is routing.
+
+When output is pasted: record in Session 7, then pick the direction before step 5 (scale):
+- gap mostly in seen >1-label strings -> context features / reranker (disambiguation);
+- tree loses on seen 1-label strings -> add the string signal (hybrid or reranker feature);
+- gap mostly unseen strings -> features / routing;
+- hybrid >> 0.764 is a training-free gain to report (dev-selected; confirm at scale).
 
 Commands: `docs/results.md` § Commands. Old invalid runs: `docs/results_archive.md`.
 
