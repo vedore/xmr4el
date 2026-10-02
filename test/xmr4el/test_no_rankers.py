@@ -46,6 +46,12 @@ def main():
     a, b = a.toarray(), b.toarray()
     assert a.shape == b.shape and np.allclose(a, b), "cosine predictions must not depend on rankers"
     assert (a.argmax(axis=1) == np.arange(L)).mean() > 0.5, "synthetic labels should be easy"
+
+    # per_leaf topk must keep each leaf's best labels: the top-1 under topk=1 equals the top-1 under topk=0
+    (_, t1) = without_r.predict(Xq, beam_size=2, topk=1, alpha=1.0)
+    t1 = t1.toarray()
+    assert (t1 > 0).sum(axis=1).max() <= 2, "topk=1 keeps at most one label per visited leaf"
+    assert (t1.argmax(axis=1) == b.argmax(axis=1)).all(), "per-leaf topk cut the wrong labels"
     print("ok")
 
 

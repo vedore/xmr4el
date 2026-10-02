@@ -1,4 +1,8 @@
 from argparse import ArgumentParser
+import contextlib
+import io
+import logging
+import os
 import numpy as np
 from collections import Counter, defaultdict
 import time
@@ -87,61 +91,56 @@ def _selfcheck():
         # print(f"Saved debug table to {fname}")
 
 def main():
-    from xmr4el.featurization.preprocessor import Preprocessor
-    from xmr4el.xmr.model import XModel
-
     parser = ArgumentParser()
     parser.add_argument("-xmodel_path", type=str, required=True)
     parser.add_argument("-test_path", type=str, required=True)
     parser.add_argument("-beam_size", type=int, default=5)
     parser.add_argument("-topk", type=int, default=20)
-    parser.add_argument("-alpha", type=float, default=0.5,
-                        help="ranker weight in the leaf fusion; 0 = matcher only (rankers still run)")
+    parser.add_argument("-alpha", type=float, default=1.0,
+                        help="leaf score weight in the fusion with the matcher probability; 1 = leaf score "
+                             "only (all Session 8+ rows), 0 = matcher only")
     parser.add_argument("-train_path", type=str, default=None,
                         help="train PubTator file; adds the seen/unseen mention-string breakdown")
     parser.add_argument("-scorer", choices=["ranker", "cosine"], default="cosine",
                         help="leaf label score fused with the matcher: cosine to leaf z (default; trained "
                              "rankers anti-rank, docs/results.md Session 7) or the trained rankers")
-    
+    parser.add_argument("-verbose", action="store_true",
+                        help="show library prints, logs and progress bars (hidden by default)")
     args = parser.parse_args()
 
-    start = time.time()
+    if not args.verbose:  # before the imports below, which pull in transformers/tqdm
+        os.environ.update(TRANSFORMERS_VERBOSITY="error", HF_HUB_VERBOSITY="error",
+                          HF_HUB_DISABLE_PROGRESS_BARS="1", TQDM_DISABLE="1")
+        logging.disable(logging.WARNING)
+    quiet = contextlib.nullcontext if args.verbose else lambda: contextlib.redirect_stdout(io.StringIO())
 
-    load_path = args.xmodel_path
-    
-    print(load_path, args.beam_size, args.topk, "alpha", args.alpha)
-    
-    trained_xtree = XModel.load(load_path)
-    
-    print(trained_xtree)
+    from xmr4el.featurization.preprocessor import Preprocessor
+    from xmr4el.xmr.model import XModel
+
+    start = time.time()
+    print(f"evaluating {args.xmodel_path} on {args.test_path} (library output hidden; -verbose shows it) ...",
+          flush=True)
+
+    with quiet():
+        trained_xtree = XModel.load(args.xmodel_path)
+    if args.verbose:
+        print(trained_xtree)
     for leaf in trained_xtree.model.hmodel[-1]:
         leaf.cosine_scorer = args.scorer == "cosine"
-    print("scorer", args.scorer)
-    
+
     test_set = Preprocessor.load_pubtator_file(
         args.test_path, window=getattr(trained_xtree, "context_window", None))
-    
-    corpus = test_set["corpus"]
     labels = test_set["labels"]
-    
-    print("Corpus", corpus[:1], len(corpus), type(corpus))
-    print("Labels", labels[:1], len(labels), type(labels))
-    print("Initial Labels", len(trained_xtree.initial_labels))
-    
-    golden_labels, input_texts = filter_labels_and_inputs(corpus, labels, trained_xtree.initial_labels)
+    golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
+    n_total, n = len(labels), len(golden_labels)
 
-    n_total = len(labels)
-    n_kept = len(golden_labels)
-    print(f"In-vocabulary mentions: {n_kept}/{n_total} ({n_kept / max(n_total, 1):.1%}) "
-          f"-- {n_total - n_kept} zero-shot mentions dropped before scoring")
-    print("Unique gold CUIs kept:", np.unique(np.array(golden_labels)).shape[0])
-
-    routes, score_csr = trained_xtree.predict(input_texts,
-                                              beam_size=args.beam_size,
-                                              topk=args.topk,
-                                              fusion="lp_fusion",
-                                              alpha=args.alpha,
-                                              topk_mode="per_leaf")
+    with quiet():
+        routes, score_csr = trained_xtree.predict(input_texts,
+                                                  beam_size=args.beam_size,
+                                                  topk=args.topk,
+                                                  fusion="lp_fusion",
+                                                  alpha=args.alpha,
+                                                  topk_mode="per_leaf")
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
@@ -149,7 +148,7 @@ def main():
     # Rank of the gold label in each query's score row. 0 = never retrieved.
     # Single gold CUI per mention (preprocessor.py:113 -> one-hot Y), so acc@1 / MRR /
     # recall@k are the right metrics; precision@k (the PECOS suite) is not.
-    ranks = np.zeros(len(golden_labels), dtype=int)
+    ranks = np.zeros(n, dtype=int)
     hit_counts = []
     for r in routes:
         qi = r["query_index"]
@@ -158,45 +157,44 @@ def main():
         hit_counts.append(1 if golden_labels[qi] in cand else 0)
 
     found = ranks > 0
-    print("Hit counts per query:", Counter(hit_counts))
-    print("recall@candidates:", np.mean(hit_counts))
-    print("acc@1:", np.mean(ranks == 1))
-    print("MRR:", np.mean(np.where(found, 1.0 / np.maximum(ranks, 1), 0.0)))
-    for k in (1, 5, 10, 20, 50, 100):
-        print(f"recall@{k}:", np.mean(found & (ranks <= k)))
-    print("candidates/query (mean nnz):", score_csr.nnz / max(score_csr.shape[0], 1))
+    mrr = lambda r: np.mean(np.where(r > 0, 1.0 / np.maximum(r, 1), 0.0)) if r.size else 0.0
+    nnz = score_csr.nnz / max(score_csr.shape[0], 1)
 
-    # Split by whether the gold label's ranker actually scored. A fused gain alone cannot show that
-    # learned rankers helped: labels without one get a cosine fallback, and so does a trained ranker
-    # that raises at predict time.
-    leaves = trained_xtree.model.hmodel[-1]
-    failed = set().union(*(getattr(m, "ranker_failed", set()) for m in leaves))
-    trained = {g for m in leaves if m.ranker_model for g in m.ranker_model.model_dict} - failed
-    if args.scorer == "cosine":
-        print(f"rankers: {len(trained)} trained, NOT used (-scorer cosine); split below = labels that have one")
-    else:
-        print(f"rankers: {len(trained)} scored, {len(failed)} fell back to cosine at predict time")
-    gold_idx = np.array([label_to_idx[g] for g in golden_labels])
-    for name, mask in split_by_ranker(gold_idx, trained):
-        r = ranks[mask]
-        print(f"  gold {name}: n={mask.sum()}  acc@1 {np.mean(r == 1) if r.size else 0:.4f}  "
-              f"MRR {np.mean(np.where(r > 0, 1.0 / np.maximum(r, 1), 0.0)) if r.size else 0:.4f}")
+    print("-" * 72)
+    print(f"tree     {os.path.basename(os.path.normpath(args.xmodel_path))}  "
+          f"({len(trained_labels)} labels, emb_flag {getattr(trained_xtree, 'emb_flag', '?')})")
+    print(f"rows     {n}/{n_total} gold label in vocabulary ({n / max(n_total, 1):.1%}); "
+          f"{len(set(golden_labels))} distinct gold labels")
+    print(f"search   beam {args.beam_size}, scorer {args.scorer}, alpha {args.alpha}, "
+          f"{nnz:.0f} candidates/query")
+    if args.scorer == "cosine" and args.alpha != 1:
+        print(f"WARNING  alpha {args.alpha} mixes the matcher probability into the cosine score; "
+              f"not comparable with alpha 1 rows")
+    print()
+    print(f"acc@1    {np.mean(ranks == 1):.4f}")
+    print(f"MRR      {mrr(ranks):.4f}")
+    print("recall   " + "  ".join(f"@{k} {np.mean(found & (ranks <= k)):.4f}" for k in (5, 10, 20, 50, 100)))
+    print(f"         @cand {np.mean(hit_counts):.4f}  (gold among the candidates: the cap for every metric)")
 
-    # Defect #6 tie detector. A cluster-level leaf matcher gives every label in a cluster the same
-    # fused score, so ordering is CSR index order and recall@k collapses onto the random line
-    # recall@cand * k/100. Distinct scores per row is the direct read: ~2 means the score is dead,
-    # ~nnz means it discriminates.
+    # Defect #6 tie detector: a cluster-level leaf matcher gives every label in a cluster the same
+    # score. Silent unless scores collapse (~2 distinct values per row instead of ~nnz).
     _rows = range(min(200, score_csr.shape[0]))
-    _d = [np.unique(np.round(score_csr.getrow(i).data, 9)).size for i in _rows]
-    _n = [score_csr.getrow(i).nnz for i in _rows]
-    print(f"distinct scores/query: {np.mean(_d):.1f} of {np.mean(_n):.1f} candidates "
-          f"(first {len(_d)} queries; ~2 = scores are tied, defect #6 alive)")
+    _d = np.mean([np.unique(np.round(score_csr.getrow(i).data, 9)).size for i in _rows])
+    if _d < 0.5 * nnz:
+        print(f"WARNING  {_d:.1f} distinct scores per query of {nnz:.0f} candidates: leaf scores are tied (defect #6)")
 
-    # Random-ordering reference: if ranking carries no signal, recall@k ~= recall@cand * k/nnz.
-    _cand = np.mean(hit_counts)
-    _nnz = score_csr.nnz / max(score_csr.shape[0], 1)
-    print("random-ordering line (recall@cand * k/nnz):",
-          {k: round(_cand * k / max(_nnz, 1), 4) for k in (1, 5, 20, 50)})
+    if args.scorer == "ranker":
+        # A fused gain alone cannot show that rankers helped: labels without one get a cosine fallback,
+        # and so does a trained ranker that raises at predict time.
+        leaves = trained_xtree.model.hmodel[-1]
+        failed = set().union(*(getattr(m, "ranker_failed", set()) for m in leaves))
+        trained = {g for m in leaves if m.ranker_model for g in m.ranker_model.model_dict} - failed
+        print(f"\nrankers  {len(trained)} scored, {len(failed)} fell back to cosine at predict time")
+        gold_idx = np.array([label_to_idx[g] for g in golden_labels])
+        for name, mask in split_by_ranker(gold_idx, trained):
+            r = ranks[mask]
+            print(f"  gold {name:14s} n {mask.sum():6d}  acc@1 {np.mean(r == 1) if r.size else 0:.4f}  "
+                  f"MRR {mrr(r):.4f}")
 
     if args.train_path:
         train = Preprocessor.load_pubtator_file(args.train_path)
@@ -204,15 +202,14 @@ def main():
         tree_top1 = [trained_labels[r.indices[np.argmax(r.data)]] if r.nnz else None
                      for r in (score_csr.getrow(i) for i in range(score_csr.shape[0]))]
         b = string_breakdown(input_texts, golden_labels, tree_top1, train_pairs)
-        print("mention-string breakdown (acc@1; dict = most frequent train label for the exact string):")
+        print("\nacc@1 by mention string (dict = most frequent train label for the exact string)")
+        print(f"  {'':16s} {'n':>6s} {'share':>6s} {'tree':>7s} {'dict':>7s} {'either':>7s}")
         for k, (n_k, t_k, d_k, e_k) in ((k, v) for k, v in b.items() if k != "hybrid"):
-            print(f"  {k:15s} n={n_k:5d} ({n_k / len(golden_labels):.3f})  tree {t_k:.4f}  "
-                  f"dict {d_k:.4f}  either {e_k:.4f}")
-        print(f"  hybrid (dict if string seen, else tree): acc@1 {b['hybrid']:.4f}")
+            print(f"  {k:16s} {n_k:6d} {n_k / n:6.3f} {t_k:7.4f} {d_k:7.4f} {e_k:7.4f}")
+        print(f"  hybrid (dict if string seen, else tree): {b['hybrid']:.4f}")
 
-    end = time.time()
-
-    print(f"{end - start} secs of running")
+    print("-" * 72)
+    print(f"{time.time() - start:.0f} s")
 
 
 if __name__ == "__main__":

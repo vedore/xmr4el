@@ -1103,7 +1103,12 @@ class HierarchicaMLModel():
             return xs[0] if len(xs) == 1 else vstack(xs, format="csr")
 
         def _maybe_leaf_topk(labels, scores, k_norm):
-            return (labels, scores) if k_norm is None else (labels[:k_norm], scores[:k_norm])
+            # Leaf predict returns labels in index order, not score order: sort before cutting.
+            if k_norm is None:
+                return labels, scores
+            labels, scores = asarray(labels), asarray(scores)
+            top = np.argsort(-scores, kind="stable")[:k_norm]
+            return labels[top], scores[top]
 
         def _append_path(paths_per_q, qi, trail, leaf_idx, labels, scores, source=None):
             paths_per_q[qi].append({

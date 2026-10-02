@@ -4,10 +4,34 @@ History and completed steps: `docs/status_log.md`. Valid results: `docs/results.
 
 ## Resume here
 
-Last updated 2026-10-01 (session 8). A new session starts from this block; update it at the
+Last updated 2026-10-02 (session 10). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-Code FROZEN once the user starts the flag-6 1000-label run (see below). Session 8 code committed (`2df6178` and before); results docs may be uncommitted.
+**NEXT (user decision 2026-10-02, session 10 end):** work on (1) abbreviation expansion, then (2) a candidate reranker.
+Both are tested flat first (`screen_features.py` on tree `17-48-39`, 1000 labels), so no training run. Baselines on those
+11661 dev rows: flat flag-6 features 0.800 / MRR 0.852 / hybrid 0.827; tree 0.797 / 0.844 / hybrid 0.824. Seen 1 label 0.951, seen >1
+label 0.844, unseen strings 0.442 (tree).
+
+(1) Abbreviation expansion. Of 2848 unseen dev rows, 524 look like abbreviations; 377 have "(ABBR)" in the same document.
+- Detect "long form (SF)" pairs per document (Schwartz-Hearst style: the short form's characters must appear in order in
+  the preceding words). Where: `Preprocessor.load_pubtator_file` has the document text and spans. Screen first in
+  `screen_features.py` (its loader at `main`/`load`), then move it into the shared loader.
+- Apply the same expansion to train and dev. It also changes the PIFA centroids and the dictionary key; decide whether the
+  dictionary/hybrid uses the raw or the expanded string, and report both.
+- Variants: replace the mention with the long form, or append it ("SSI surgical site infection"). Report the new acc@1 per
+  mention-string group and on the abbreviation rows. Check: number of rows changed in train/dev, plus 30 sampled pairs for
+  precision.
+
+(2) Candidate reranker (replaces the hard hybrid rule; the old per-label rankers stay off).
+- Candidates: top-N (20-50) by cosine. Features per (mention, label): cosine of each block (SapBERT, char, context) and the
+  combined one, candidate rank, log label train frequency, string-label train count/share, string seen, number of labels
+  for the string.
+- Leakage: k-fold over train **documents**. Dictionary, frequency features **and the PIFA centroids** come from the other
+  folds only; otherwise a train row's own embedding sits inside its gold centroid.
+- Model: sklearn LogisticRegression or HistGradientBoosting (pointwise) first; lightgbm is installed (lambdarank) if
+  needed. No new deps. Target: beat hybrid 0.827 flat. Then apply it to the tree's `score_csr` in eval.
+
+Code not frozen: no user run in flight. Session 10 changes are uncommitted (STATUS, results, eval report, topk fix).
 
 State (flag 4, 500 labels, tree `xmodel_2026-10-01_11-20-27`): hierarchy + cosine leaf scorer
 acc@1 0.764, MRR 0.822 = flat nearest-label 0.767 > dictionary 0.717; hybrid (dict if string
@@ -73,10 +97,38 @@ PubTator with `window=model.context_window` (context = +-N words, mention exclud
 document, old behaviour). Config `.models/xmr4el_flag6_sapbert_config.json`. Loader also returns
 `spans`. Regression: `test_text_encoder.py` (flag 6 blocks, empty window, save/load, loader window).
 
-In flight: user trains flag 6 at `-ds_len 1000`, evaluates, then runs the flat screen on that tree's
-vocabulary (`sapbert+charsvd` = flag-5 reference, `+ctxwinsvd` = flag-6 flat ceiling). **Freeze code.**
-On output: record Session 9 tree row; tree vs its flat ceiling; 1000 vs 500 is a vocabulary change,
-compare only within 1000. Then plan the full-label run (check memory/time in code first).
+Flag-6 1000-label tree `xmodel_2026-10-01_17-48-39` recorded (results Session 9): tree 0.797 / MRR 0.844 /
+hybrid 0.824 vs flat ceiling 0.800 / 0.852 / 0.827; gap 0.003, same as 500. Context +0.019 flat at 1000.
+Eval must use `-alpha 1` (alpha 0.5 gave 0.759: the matcher cluster probability gets mixed in).
+
+Full-label plan (session 10, from code): train has 18520 labels, 122241 rows (`-ds_len` = labels; omit = all).
+Same flag-6 config, depth 2, K 6 -> 6 leaves of ~3.1k labels each (balanced k-means). Cost and risk:
+- Leaf matcher = one-vs-rest SGD over every leaf label (`MatcherTrainer`, identity C): ~18.5k binary fits on
+  ~20k rows each, about 60x the 1000-label leaf work. Dominant cost; memory fine (X ~1-2 GB, leaf
+  predict_proba ~0.5 GB dense).
+- New filter: `_predict_one_leaf` keeps the leaf matcher's top 100 labels (hard-coded `beam_size=100`) before cosine
+  scoring. At 1000 labels (167/leaf) it lost 0.003 (recall@cand 0.943 vs root top-2 0.946). At ~3.1k/leaf it is
+  a real cut: measure as root top-2 (diagnose) minus recall@cand (eval).
+- Not chosen: depth 3 (smaller leaves). That would be a second factor; decide after the depth-2 result.
+
+Postponed (user cannot run it now): full run (flag 6, no `-ds_len`), then eval `-alpha 1 -train_path`, diagnose, screen
+`sapbert+charsvd+ctxwinsvd`. **Freeze code.** On output: record the full row (tree vs flat, leaf-cut loss);
+large leaf-cut loss -> leaf top-k / candidate selection by cosine is the next lever.
+
+Error profile, 1000 labels (session 10; tree errors from results Session 9, rest from corpus counts): 2370 errors =
+unseen strings ~1589 (67%), seen ambiguous ~513 (22%), seen single-label ~269 (11%); gold missing from candidates in 668 rows.
+Of 2848 unseen dev rows: 524 look like abbreviations (377 have "(ABBR)" in the same doc); 1038 have a top-20 frequent
+(generic) gold label such as "findings" or "disease". The dictionary beats the tree on seen strings. Candidate levers, in order:
+abbreviation expansion (flat screen) -> candidate reranker (per-block cosines, label frequency, string-label count;
+train it with k-fold so dictionary features are not leaked) -> SapBERT fine-tuning. Hierarchy costs only 0.003: not a lever.
+
+Eval output (session 10): `test_evaluate_pipeline.py` prints one compact report; library prints/logs/progress hidden
+unless `-verbose`. `-alpha` default is now 1 (warns when alpha != 1 under cosine). The ranker split prints only with
+`-scorer ranker`, the defect-#6 tie check only when scores collapse, and the random-ordering line is gone. Metric values unchanged.
+
+Bug fixed (session 10): `per_leaf` `-topk k>0` kept each leaf's first k labels in label-index order, not score order
+(`_maybe_leaf_topk`, `xmr4el/xmr/base.py`); `-topk 1` gave acc@1 0.006 on `17-48-39`. `-topk 0` (every recorded row)
+was unaffected. Regression in `test/xmr4el/test_no_rankers.py`. Confirmed: `-topk 1` now gives acc@1 0.7967 (= topk 0).
 
 Then scale (`-ds_len` 1000 -> full) with the chosen features; see "Scale and external baseline".
 

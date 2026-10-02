@@ -317,6 +317,38 @@ Reading:
 - Weight: 1 (equal block weight, the untuned default, as in flag 5) >= 0.5 > 0.3 on raw TF-IDF.
   Chosen for the tree: equal weights, so no dev-tuned parameter enters.
 
+### Flag-6 SapBERT tree `xmodel_2026-10-01_17-48-39`, 1000 labels
+
+Config `.models/xmr4el_flag6_sapbert_config.json`, checked on the saved tree: `emb_flag` 6,
+`context_window` 10, 1000 labels, K 6. 11661/40884 in-vocabulary dev rows. New vocabulary: compare
+only within 1000 labels.
+
+| features (flat, centroid) | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen |
+|---|---|---|---|---|---|---|
+| `sapbert` + charsvd (flag 5) | 0.781 | 0.838 | 0.822 | 0.951 | 0.796 | 0.435 |
+| + ctxwinsvd (flag 6, tree features) | **0.800** | **0.852** | **0.827** | 0.955 | **0.840** | 0.453 |
+
+n: seen 1 = 5532, seen >1 = 3281, unseen = 2848. Dictionary 0.716 (string coverage 0.756).
+Routing (dev): root matcher cluster acc 0.884, top-2 0.946.
+
+| tree (beam 2, `-alpha 1`) | acc@1 | MRR | R@5 | R@20 | recall@cand | cand/query | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `17-48-39` (flag 6) | 0.797 | 0.844 | 0.905 | 0.932 | 0.943 | 200 | 0.951 | 0.844 | 0.442 | 0.824 |
+| flat screen, flag-6 features | 0.800 | 0.852 | | | | 1000 | 0.955 | 0.840 | 0.453 | 0.827 |
+
+The first eval was run at `-alpha 0.5` (acc@1 0.759, MRR 0.819). That mixes the leaf matcher's cluster probability into
+the score; it cost 0.038.
+
+Reading (tree):
+- The tree lands 0.003 under its flat ceiling, the same gap as flag 5 at 500 labels. At 1000 labels the hierarchy
+  still costs almost nothing; recall@cand 0.943 is the cap.
+- The tree beats the dictionary on all rows (0.797 vs 0.716), but not on seen strings (ambiguous 0.844 vs 0.893).
+  The hybrid adds +0.027.
+
+Reading (flat):
+- Context gains more at 1000 labels (+0.019) than at 500 (+0.012), nearly all on seen ambiguous strings
+  (+0.044), as expected for a larger vocabulary.
+
 ## Commands
 
 Older, invalid runs: `docs/results_archive.md`.
@@ -329,8 +361,10 @@ Older, invalid runs: `docs/results_archive.md`.
 
 # eval (all in-vocabulary dev rows; -alpha 0 = matcher only)
 .venv/bin/python test/xmr4el/test_evaluate_pipeline.py -xmodel_path test/test_data/saved_trees/<run> \
-  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -beam_size 2 -topk 0 -alpha 0.5
-# leaf scorer defaults to cosine to leaf z; -scorer ranker uses the trained rankers (Session 7 rows before the cosine rows)
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -beam_size 2 -topk 0 -alpha 1 \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
+# -alpha 1 = pure cosine to leaf z (all Session 8+ tree rows); alpha < 1 mixes in the leaf matcher's
+# cluster probability. -scorer ranker uses the trained rankers (Session 7 rows before the cosine rows)
 
 # routing / flat / dictionary diagnostic on the same rows as eval
 .venv/bin/python test/xmr4el/diagnose_routing.py -xmodel_path test/test_data/saved_trees/<run> \
