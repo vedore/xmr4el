@@ -6,7 +6,7 @@ import numpy as np
 from unittest.mock import patch
 
 from xmr4el.featurization.text_encoder import TextEncoder
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.models.featurization_wrapper.transformers import CLS_POOLED, MODEL_NAMES, Transformer
 
 

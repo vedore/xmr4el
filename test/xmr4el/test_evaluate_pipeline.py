@@ -17,7 +17,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 from diagnose_routing import _mention  # same string normalisation as the dictionary baseline
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.xmr.model import XModel
 
 

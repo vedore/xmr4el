@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 from scipy.sparse import csr_matrix
 from xmr4el.featurization.label_embedding_factory import LabelEmbeddingFactory
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.featurization.text_encoder import TextEncoder
 from xmr4el.xmr.base import HierarchicaMLModel
 from xmr4el.utils.temp_store import TempVarStore

@@ -16,7 +16,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, load_npz, save_npz
 
 from test_evaluate_pipeline import filter_labels_and_inputs, gold_rank, string_breakdown
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.xmr.model import XModel
 
 

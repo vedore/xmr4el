@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.models.featurization_wrapper.transformers import Transformer
 from xmr4el.xmr.model import XModel
 from torch.cuda import OutOfMemoryError

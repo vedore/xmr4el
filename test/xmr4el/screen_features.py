@@ -20,7 +20,7 @@ from sklearn.preprocessing import normalize
 
 from diagnose_routing import _mention
 from test_evaluate_pipeline import string_breakdown
-from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.data import Preprocessor
 from xmr4el.models.featurization_wrapper.transformers import sentence_model
 from xmr4el.xmr.model import XModel
 
