@@ -6,12 +6,23 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-06 (session 12 end). A new session starts from this block; update it at the
+Last updated 2026-10-06 (session 13, restructure). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-**Nothing in flight. Code not frozen.** Session-12 review fixes are uncommitted (see `docs/status_log.md`
-§ Session 12; none changes recorded numbers). Next: the restructure below, starting at step 0.
-Not done yet: `codemap init .` (no `.codemap/` index exists; the user runs it).
+**Nothing in flight. Code not frozen.** Restructure steps 0-7, 9, 10 done (session 13, commits
+`2e068a1`..HEAD). Waiting on the user: step 8 (`rm -rf test`; old trees no longer load) and step 11
+(retrain one base-config tree, command below). When step-11 output is pasted: compare with the session-12
+1000-label joint row (0.8436 / MRR 0.8827); a match within noise closes the restructure.
+
+```bash
+rm -rf test && python3 scripts/train.py -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt -model_config configs/xmr4el_base_config.json -ds_len 1000 && python3 scripts/evaluate.py -xmodel_path "$(ls -td outputs/saved_trees/xmodel_* | head -1)" -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt -beam_size 2 -topk 0 -alpha 0 -path_score
+```
+
+Restructure notes: `prepare_data_older` was the live flattener, renamed `prepare_data` (not deleted).
+`numba` is now an explicit dep (`kmeans_pytorch` imports it; `umap-learn` used to pull it in). Synthetic
+baseline (flag-1 XModel train/save/load/predict, 2 configs) matched bit-for-bit after every step, except the
+ranker-scored path (`train_rankers` + `alpha 0.5`), which is nondeterministic run to run before the
+restructure too (max |diff| 0.42, argmax stable): parallel ranker training, not investigated.
 
 **Current best (session 11-12):** base config = flag 6 (SapBERT mention | char TF-IDF->SVD 768 | context
 window 10 TF-IDF->SVD 768) + `abbrev_expansion` append + matcher `jointlogisticregression`. Eval with
@@ -79,7 +90,7 @@ encoder swap (flat screen first), training-time stage breakdown.
 
 - Train/evaluate on local PubTator or grouped TSV + label files. UMLS/KB integration is out of scope.
 - The user runs corpus training/evaluation. Agents may run synthetic checks and provide commands.
-- Preserve datasets. Saved trees are preserved until restructure step 8. Dependencies are managed with `uv`.
+- Preserve datasets and `outputs/`. Dependencies are managed with `uv`.
 - Use 500–1000 labels for diagnosis, not for claims about full-label-space performance.
 - Change one experimental factor at a time. Record bundled changes as a bundle without attributing
   the outcome to one component.

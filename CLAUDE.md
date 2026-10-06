@@ -12,20 +12,20 @@ evaluation, and regression checks focused on that workflow.
 
 ```bash
 uv sync --locked
-.venv/bin/python test/xmr4el/test_train_pipeline.py --help
-.venv/bin/python test/xmr4el/test_evaluate_pipeline.py --help
+.venv/bin/python scripts/train.py --help
+.venv/bin/python scripts/evaluate.py --help
 ```
 
 Training accepts PubTator by default, or grouped TSV with `-labels_path`.
-Plain TSV requires `emb_flag` 1 (`.models/xmr4el_flag1_config.json`); PubTator uses 6 (base config).
-The base configuration is `.models/xmr4el_base_config.json`.
-Saved trees are under `test/test_data/saved_trees/`.
+Plain TSV requires `emb_flag` 1 (`configs/xmr4el_flag1_config.json`); PubTator uses 6 (base config).
+The base configuration is `configs/xmr4el_base_config.json`.
+Saved trees are under `outputs/saved_trees/`.
 
 ## Working rules
 
 - The user runs corpus training/evaluation; provide commands instead of launching them.
 - Small synthetic checks listed in `README.md` are safe to run directly.
-- Keep `data/`, `datasets/`, and saved model artifacts intact.
+- Keep `data/`, `datasets/`, and `outputs/` (saved trees, exports) intact.
 - Start every session by reading `STATUS.md` § "Resume here"; it says what is in flight and what to
   do with pasted output. Update that block at the end of each step and before a chat reset.
 - `docs/results.md` holds valid results only. Pre-fix (invalid) results were removed 2026-10-06; recover with `git show b8b7e5a:docs/results_archive.md`.
@@ -40,10 +40,10 @@ Saved trees are under `test/test_data/saved_trees/`.
   only a local file format here.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
   binarizer's `classes_` (sorted; labels with no training text have no column). `load` sorts legacy
-  first-seen lists and refuses a label/`Z` count mismatch; regression in `test/xmr4el/test_data_loading.py`.
+  first-seen lists and refuses a label/`Z` count mismatch; regression in `tests/test_data_loading.py`.
   Before this fix eval scored dev against a permuted label list, so **every pre-fix dev number
   (the deleted `docs/results_archive.md`) is invalid**.
-- Transformer embedding batches are kept in memory in row order (`featurization_wrapper/transformers.py`; no `batch_dir`).
+- Transformer embedding batches are kept in memory in row order (`xmr4el/transformers.py`; no `batch_dir`).
   Before the numeric-order fix, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
   and the old 4.79x/3.81x train-side routing figures are invalid.
 - Any new code that maps indices to label names must use `initial_labels`, never input order.
@@ -52,4 +52,4 @@ Saved trees are under `test/test_data/saved_trees/`.
 
 `STATUS.md` owns the work order and the interpretation rules; `docs/pipeline.md` holds the
 implemented-behavior table, synthetic checks and pipeline observations. Do not
-duplicate them here. `fused_predict` (`xmr4el/xmr/base.py`) is not dead code: leaf training calls it.
+duplicate them here. `fused_predict` (`xmr4el/node.py`) is not dead code: leaf training calls it.

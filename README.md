@@ -14,8 +14,7 @@ The model trains on texts grouped by label and predicts ranked label IDs.
 
 ## Setup
 
-Python 3.12 or later is required. On macOS, install `uv` and the LightGBM
-OpenMP runtime with `brew install uv libomp`, then run:
+Python 3.12 or later is required. On macOS, install `uv` with `brew install uv`, then run:
 
 ```bash
 uv sync --locked
@@ -46,7 +45,7 @@ config separately. First check the mounted code:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" \
-  xmr4el python test/xmr4el/test_data_loading.py
+  xmr4el python scripts/evaluate.py -selfcheck
 ```
 
 For GPU access, the server needs an NVIDIA GPU and NVIDIA Container Toolkit configured.
@@ -69,9 +68,9 @@ docker run -it --name xmr4el-shell --init --gpus all \
 Inside the container, start training:
 
 ```bash
-python test/xmr4el/test_train_pipeline.py \
+python scripts/train.py \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
-  -model_config .models/xmr4el_base_config.json -ds_len 500
+  -model_config configs/xmr4el_base_config.json -ds_len 500
 ```
 
 After `exit`, reopen the same container with `docker start -ai xmr4el-shell`.
@@ -87,14 +86,14 @@ docker run -d --name xmr4el-train --init --gpus all \
   --mount "type=bind,src=$PWD,dst=/app" \
   --mount "type=bind,src=$HOME/.cache/huggingface,dst=/cache/huggingface" \
   -e HF_HOME=/cache/huggingface \
-  xmr4el python test/xmr4el/test_train_pipeline.py \
+  xmr4el python scripts/train.py \
     -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
-    -model_config .models/xmr4el_base_config.json -ds_len 500
+    -model_config configs/xmr4el_base_config.json -ds_len 500
 
 docker logs -f xmr4el-train
 ```
 
-Saved trees appear on the server under `test/test_data/saved_trees/`. The cache mount preserves
+Saved trees appear on the server under `outputs/saved_trees/`. The cache mount preserves
 downloaded transformer models; the user mapping keeps output files owned by your server user.
 No Docker CPU limit is set.
 
@@ -109,7 +108,7 @@ git pull --ff-only
 Repeat the training command. Code-only updates need no rebuild; rebuild the image if
 `pyproject.toml`, `uv.lock`, or the Dockerfile changes. Pull updates between runs so a running
 experiment uses a consistent checkout. Evaluation uses the same mount and image with
-`python test/xmr4el/test_evaluate_pipeline.py` and the arguments below.
+`python scripts/evaluate.py` and the arguments below.
 
 ## Local inputs
 
@@ -123,26 +122,26 @@ Training groups these examples by label. Prediction uses supplied mentions;
 mention detection is not implemented.
 
 ```bash
-python test/xmr4el/test_train_pipeline.py \
+python scripts/train.py \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
-  -model_config .models/xmr4el_base_config.json \
+  -model_config configs/xmr4el_base_config.json \
   -ds_len 500
 ```
 
 `-ds_len` limits the number of label groups, not documents or mentions.
-Saved models go to `test/test_data/saved_trees/xmodel_<timestamp>/`.
+Saved models go to `outputs/saved_trees/xmodel_<timestamp>/`.
 
 ### Grouped TSV
 
 Training rows are `group_id<TAB>text`. A separate file lists one label ID per
 line, aligned with the sorted group IDs. Use a copy of the base configuration
-with `emb_flag` `1` for plain text without `[SEP]` (`.models/xmr4el_flag1_config.json`).
+with `emb_flag` `1` for plain text without `[SEP]` (`configs/xmr4el_flag1_config.json`).
 
 ```bash
-python test/xmr4el/test_train_pipeline.py \
+python scripts/train.py \
   -train_path data/train/chemical/train_Chemical.txt \
   -labels_path data/train/chemical/labels.txt \
-  -model_config .models/xmr4el_flag1_config.json \
+  -model_config configs/xmr4el_flag1_config.json \
   -ds_len 500
 ```
 
@@ -152,8 +151,8 @@ groups; check that the files are aligned before training.
 ## Evaluation
 
 ```bash
-python test/xmr4el/test_evaluate_pipeline.py \
-  -xmodel_path test/test_data/saved_trees/<run> \
+python scripts/evaluate.py \
+  -xmodel_path outputs/saved_trees/<run> \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt \
   -beam_size 5 -topk 20
 ```
@@ -168,7 +167,7 @@ For prediction from Python:
 ```python
 from xmr4el.xmr.model import XModel
 
-model = XModel.load("test/test_data/saved_trees/<run>")
+model = XModel.load("outputs/saved_trees/<run>")
 routes, scores = model.predict(
     ["mention [SEP] context"], beam_size=5, topk=20, topk_mode="per_leaf"
 )
@@ -179,10 +178,10 @@ The `per_leaf` mode returns hierarchy scores. The alternate `global` path in
 
 ## Configuration
 
-`.models/xmr4el_base_config.json` selects component types and parameters.
+`configs/xmr4el_base_config.json` selects component types and parameters.
 `emb_flag` controls features:
 
-- `1`: TF-IDF (-> dimension model) of the whole input (`.models/xmr4el_flag1_config.json`).
+- `1`: TF-IDF (-> dimension model) of the whole input (`configs/xmr4el_flag1_config.json`).
 - `6`: input `mention [SEP] context`; three blocks, each L2-normalised before the concat:
   transformer(mention), char TF-IDF -> SVD(mention), TF-IDF -> SVD(context window).
 
@@ -193,19 +192,20 @@ checkpoint with `"kwargs": {"model_name": "<HF id>"}` (optional `pooling`, e.g. 
 The default uses flag 6 with SapBERT, abbreviation expansion, balanced k-means, and one-vs-rest
 L2 logistic-regression matchers (`jointlogisticregression`: liblinear's objective, all labels of a node solved at once). Evaluate such trees with `-alpha 0 -path_score`
 (leaf matcher probability x routing path probability).
-Use the available sklearn, FAISS, and PyTorch clustering/classifier wrappers
+Use the available sklearn and PyTorch clustering/classifier wrappers
 through the existing configuration registries.
 
 ## Layout
 
-- `xmr4el/featurization/`: local readers, text encoders, and label embeddings.
-- `xmr4el/clustering/`: label hierarchy construction.
-- `xmr4el/matcher/`: cluster and leaf-label classifiers.
-- `xmr4el/ranker/`: per-label scoring and negative sampling.
-- `xmr4el/models/`: component wrappers and registries.
-- `xmr4el/xmr/`: training, traversal, persistence, and the `XModel` API.
-- `xmr4el/utils/`: temporary array storage and local PubTator splitting.
-- `test/`: train/evaluate scripts and small regression checks.
+- `xmr4el/data.py`: local readers (`Preprocessor`) and PubTator splitting (`python -m xmr4el.data`).
+- `xmr4el/encoder.py`: text encoder and PIFA label embeddings; `vectorizers.py` (TF-IDF, SVD), `transformers.py`.
+- `xmr4el/clusterers.py`: clustering backends and label hierarchy construction.
+- `xmr4el/classifiers.py`: classifier backends and the cluster/leaf matcher.
+- `xmr4el/ranker.py`: per-label scoring and negative sampling.
+- `xmr4el/node.py`, `tree.py`: one tree node (`MLModel`) and the hierarchy (`HierarchicalMLModel`): training, traversal, persistence.
+- `xmr4el/xmodel.py`: the `XModel` API. `xmr4el/eval.py`: evaluation metrics.
+- `scripts/`: train/evaluate and diagnostic scripts. `tests/`: pytest regression checks. `configs/`: model configs.
+- `outputs/`: saved trees, ablation logs, PECOS exports (gitignored).
 - `STATUS.md`: current state, next step. `docs/pipeline.md`: implemented behavior, observations. `docs/status_log.md`: history. `docs/results.md`: results.
 - `data/`, `datasets/`: local inputs, excluded from version control.
 
@@ -214,12 +214,10 @@ through the existing configuration registries.
 These checks use synthetic inputs and do not run corpus training:
 
 ```bash
-python test/xmr4el/test_data_loading.py
-python -m xmr4el.clustering.train
-python -m xmr4el.matcher.train
-python -m xmr4el.ranker.train
-python test/xmr4el/test_evaluate_pipeline.py -selfcheck
-python test/xmr4el/diagnose_routing.py -selfcheck
+python -m pytest tests/
+python scripts/evaluate.py -selfcheck
+python scripts/diagnose_routing.py -selfcheck
+python scripts/screen_features.py -selfcheck
 ```
 
 The user runs full training and evaluation. Keep experiment configurations and

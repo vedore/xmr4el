@@ -1,20 +1,20 @@
 # Pipeline reference
 
 What is implemented, synthetic checks, pipeline observations and the external-baseline notes.
-Moved out of `STATUS.md` (2026-10-06). Paths are pre-restructure; update them at restructure step 10.
+Moved out of `STATUS.md` (2026-10-06).
 
 ## What is implemented
 
 | Area | Current behavior | Evidence |
 |---|---|---|
-| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicalMLModel.load`, `xmr4el/xmr/base.py` |
-| Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load sorts legacy first-seen lists and asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmr/model.py` |
-| Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `test/xmr4el/test_evaluate_pipeline.py` |
+| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicalMLModel.load`, `xmr4el/tree.py` |
+| Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load sorts legacy first-seen lists and asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmodel.py` |
+| Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `scripts/evaluate.py` |
 | Features | Flag 1: TF-IDF (-> dimension model) of the whole text (TSV). Flag 6: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Flags 2-5 raise | `TextEncoder._encode`, base / flag1 config |
-| Clustering | Seeded balanced k-means; undersized clusters reassigned instead of dropping labels | `xmr4el/models/cluster_wrapper/clustering_model.py`, `xmr4el/clustering/train.py` |
-| Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker/train.py`, `.models/xmr4el_base_config.json` |
-| Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/xmr/base.py`, `classifier_model.py` |
-| Leaf scoring | Cosine by default (`cosine_scorer`, eval `-scorer cosine`); `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising | `MLModel.predict`, `xmr4el/xmr/base.py` 
+| Clustering | Seeded balanced k-means; undersized clusters reassigned instead of dropping labels | `xmr4el/clusterers.py` |
+| Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker.py`, `configs/xmr4el_base_config.json` |
+| Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/node.py`, `xmr4el/classifiers.py` |
+| Leaf scoring | Cosine by default (`cosine_scorer`, eval `-scorer cosine`); `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising | `MLModel.predict`, `xmr4el/node.py` 
 | Path score | `-path_score`: leaf score x exp(path_logscore); current trees eval with `-beam_size 2 -alpha 0 -path_score` | `HierarchicalMLModel.predict`, `XModel.predict` |
 
 Implemented does not mean validated on dev. Saved trees retain their trained classifiers and leaf
@@ -23,13 +23,10 @@ structure; loading them with current code does not apply training changes retroa
 Synthetic checks passed during the latest review:
 
 ```bash
-.venv/bin/python test/xmr4el/test_data_loading.py
-.venv/bin/python test/xmr4el/test_evaluate_pipeline.py -selfcheck
-.venv/bin/python test/xmr4el/diagnose_routing.py -selfcheck
-.venv/bin/python test/xmr4el/test_prepare_layer.py
-.venv/bin/python test/xmr4el/screen_features.py -selfcheck
-.venv/bin/python test/xmr4el/test_text_encoder.py
-.venv/bin/python test/xmr4el/test_no_rankers.py
+.venv/bin/python -m pytest tests/
+.venv/bin/python scripts/evaluate.py -selfcheck
+.venv/bin/python scripts/diagnose_routing.py -selfcheck
+.venv/bin/python scripts/screen_features.py -selfcheck
 ```
 
 `test_data_loading.py` covers the mapping through the real `XModel.train/save/load` paths

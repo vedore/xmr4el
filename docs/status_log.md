@@ -4,6 +4,16 @@ Completed steps and history moved out of `STATUS.md`. Not a work order; results 
 `docs/results.md`.
 
 
+## Session 13 (2026-10-06)
+
+Restructure (STATUS.md plan) steps 0-7, 9, 10, one commit each. Flat package (`data`, `encoder`, `vectorizers`,
+`transformers`, `classifiers`, `clusterers`, `ranker`, `node`, `tree`, `xmodel`, `temp_store`, `eval`); `scripts/`,
+pytest `tests/`, `configs/`, gitignored `outputs/`. Deleted RandomForest/SVC/LightGBM, FAISS/MiniBatch/Agglomerative,
+`force_multi_core_processing_clustering_models`, faiss-cpu/lightgbm/umap-learn deps; added numba (kmeans_pytorch
+needs it) and dev pytest. `HierarchicaMLModel` -> `HierarchicalMLModel`; `prepare_data_older` -> `prepare_data`.
+Synthetic flag-1 baseline identical before/after every step (ranker-scored path: argmax only; it is nondeterministic
+pre-restructure). Old trees no longer load; user deletes them (step 8) and retrains one (step 11).
+
 ## Session 12 (2026-10-06)
 
 **Session 12 (2026-10-06): nothing in flight.** Joint retrain `xmodel_1000_flag6_sapbert_abbrev_joint`: acc@1 0.8436 /

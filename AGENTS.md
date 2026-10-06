@@ -17,22 +17,16 @@ This project is research-oriented. Prefer clarity, traceability, and small safe 
 
 When analyzing this repo, assume the main logic is organized around these areas:
 
-- `xmr4el/featurization/`
-  - text preprocessing
-  - text encoders
-  - label embedding construction
-- `xmr4el/clustering/`
-  - clustering wrappers used to build the hierarchical label tree
-- `xmr4el/matcher/`
-  - candidate generation / matcher models
-- `xmr4el/ranker/`
-  - ranking models for candidate or leaf scoring
-- `xmr4el/models/`
-  - factories, wrappers, and configuration helpers
-- `xmr4el/xmr/`
-  - the hierarchical model, training loop, and persistence utilities
+- `xmr4el/data.py`: local readers and PubTator splitting
+- `xmr4el/encoder.py`, `vectorizers.py`, `transformers.py`: text encoders and label embeddings
+- `xmr4el/clusterers.py`: clustering backends and hierarchy construction
+- `xmr4el/classifiers.py`: classifier backends and the matcher
+- `xmr4el/ranker.py`: ranking models for leaf scoring
+- `xmr4el/node.py`, `tree.py`: tree node and hierarchical model (training, traversal, persistence)
+- `xmr4el/xmodel.py`: the `XModel` API; `xmr4el/eval.py`: evaluation metrics
 
-Tests and diagnostic scripts live under `test/`.
+Scripts live under `scripts/`, pytest checks under `tests/`, configs under `configs/`,
+saved trees and exports under `outputs/` (gitignored).
 
 ---
 
@@ -88,13 +82,12 @@ When asked to explain, debug, extend, or document this repository, inspect in th
 
 1. `README.md`
 2. `pyproject.toml`
-3. `xmr4el/xmr/`
-4. `xmr4el/models/`
-5. `xmr4el/featurization/`
-6. `xmr4el/matcher/`
-7. `xmr4el/ranker/`
-8. `xmr4el/clustering/`
-9. `test/`
+3. `xmr4el/xmodel.py`, `tree.py`, `node.py`
+4. `xmr4el/encoder.py`, `vectorizers.py`, `transformers.py`
+5. `xmr4el/classifiers.py`
+6. `xmr4el/ranker.py`
+7. `xmr4el/clusterers.py`
+8. `scripts/`, `tests/`
 
 Before making claims, verify them against the implementation.
 
@@ -216,7 +209,7 @@ Then check these known error origins, in pipeline order (state in `STATUS.md`, e
 - child matchers trained without out-of-cluster negatives
 - leaf scores not comparable across leaves (`path_logscore` unused)
 
-Measure before fixing: prefer eval-only runs on saved trees and `test/xmr4el/diagnose_routing.py`
+Measure before fixing: prefer eval-only runs on saved trees and `scripts/diagnose_routing.py`
 over retraining, and always report the chance line next to routing numbers.
 
 ---
@@ -227,7 +220,7 @@ This project depends on a Python package setup and includes ML/NLP/vector depend
 Treat environment-sensitive issues carefully, especially:
 - Python version compatibility
 - CPU vs GPU paths
-- FAISS / Torch compatibility
+- Torch compatibility
 - transformer model availability
 - large-memory operations
 

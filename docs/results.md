@@ -2,16 +2,20 @@
 
 One row per change, with the exact command that produced it. This table is the ablation appendix.
 
+The trees behind the rows below were deleted in the 2026-10-06 restructure (their pickles store the old
+module paths and no longer load). Rows stay as records; reproducing one needs a retrain. Paths in rows are
+as they were at the time; the Commands section uses the current layout.
+
 ## Metric choice
 
-Each mention carries exactly one gold CUI (`featurization/preprocessor.py:113` → one-hot `Y` rows),
+Each mention carries exactly one gold CUI (`Preprocessor.load_pubtator_file` in `xmr4el/data.py` → one-hot `Y` rows),
 so this is extreme multi-**class**, not multi-label. Reported metrics are **acc@1, MRR, recall@k**.
 PECOS's precision@k / propensity-scored suite is **not** reused: with a single gold label,
 precision@k is just recall@k / k and carries no extra information.
 
 `recall@candidates` is the binary `gold in cand` hit count. `In-vocabulary mentions` is the vocabulary ceiling — mentions whose gold CUI is
 absent from the training label space are deleted before scoring
-(`test/xmr4el/test_evaluate_pipeline.py`), so every row below is an in-vocabulary upper bound.
+(`scripts/evaluate.py`), so every row below is an in-vocabulary upper bound.
 
 ## Session 6 (2026-09-30): first dev rows with the corrected label mapping
 
@@ -495,26 +499,26 @@ Older, invalid runs: removed 2026-10-06; recover with `git show b8b7e5a:docs/res
 
 ```bash
 # train (500-label diagnosis scale)
-.venv/bin/python test/xmr4el/test_train_pipeline.py \
+.venv/bin/python scripts/train.py \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
-  -model_config .models/xmr4el_base_config.json -ds_len 500
+  -model_config configs/xmr4el_base_config.json -ds_len 500
 
 # eval (all in-vocabulary dev rows; -alpha 0 = matcher only)
-.venv/bin/python test/xmr4el/test_evaluate_pipeline.py -xmodel_path test/test_data/saved_trees/<run> \
+.venv/bin/python scripts/evaluate.py -xmodel_path outputs/saved_trees/<run> \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -beam_size 2 -topk 0 -alpha 1 \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
 # -alpha 1 = pure cosine to leaf z (all Session 8+ tree rows); alpha < 1 mixes in the leaf matcher's
 # cluster probability. -scorer ranker uses the trained rankers (Session 7 rows before the cosine rows)
 
 # routing / flat / dictionary diagnostic on the same rows as eval
-.venv/bin/python test/xmr4el/diagnose_routing.py -xmodel_path test/test_data/saved_trees/<run> \
+.venv/bin/python scripts/diagnose_routing.py -xmodel_path outputs/saved_trees/<run> \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -max_rows 100000
 
 # flat feature screen, no training (vocabulary/rows of the given tree)
-.venv/bin/python test/xmr4el/screen_features.py -xmodel_path test/test_data/saved_trees/<run> \
+.venv/bin/python scripts/screen_features.py -xmodel_path outputs/saved_trees/<run> \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -features <list>
 ```
 
-Synthetic checks: see `STATUS.md`.
+Synthetic checks: see `docs/pipeline.md`.
