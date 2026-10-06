@@ -18,7 +18,7 @@ from scipy.sparse import csr_matrix
 
 from diagnose_routing import _mention  # same string normalisation as the dictionary baseline
 from xmr4el.data import Preprocessor
-from xmr4el.xmr.model import XModel
+from xmr4el.xmodel import XModel
 
 
 def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
@@ -156,7 +156,7 @@ def main():
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
 
     # Rank of the gold label in each query's score row. 0 = never retrieved.
-    # Single gold CUI per mention (preprocessor.py:113 -> one-hot Y), so acc@1 / MRR /
+    # Single gold CUI per mention (Preprocessor.load_pubtator_file -> one-hot Y), so acc@1 / MRR /
     # recall@k are the right metrics; precision@k (the PECOS suite) is not.
     ranks = np.zeros(n, dtype=int)
     hit_counts = []

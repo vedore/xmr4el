@@ -1,17 +1,18 @@
-import importlib
 import os
 import json
 import pickle
-import pkgutil
-import sys
 import torch
-
 import numpy as np
-
+import logging
+import joblib
 from abc import ABCMeta
 from joblib import parallel_backend
 from sklearn.cluster import KMeans
 from kmeans_pytorch import KMeans as PyTorchBalancedKMeans
+from typing import Any, Dict, Optional, Tuple, Counter, List
+from numpy import ones, ndarray, asarray, argmax
+from scipy.sparse import csr_matrix
+from collections import defaultdict
 
 
 cluster_dict = {}
@@ -28,14 +29,6 @@ class ClusterMeta(ABCMeta):
         if name != "ClusteringModel":
             cluster_dict[name.lower()] = new_cls
         return new_cls
-
-    @classmethod
-    def load_subclasses(cls, package_name):
-        """Dynamically imports all modules in the package to register subclasses."""
-
-        package = sys.modules[package_name]
-        for _, modname, _ in pkgutil.iter_modules(package.__path__):
-            importlib.import_module(f"{package_name}.{modname}")
 
 
 class ClusteringModel(metaclass=ClusterMeta):
@@ -366,3 +359,217 @@ class BalancedKMeans(ClusteringModel):
     
     # def centroids(self):
     #     return self.model["cluster_centers"]
+
+
+logger = logging.getLogger(__name__)
+
+
+class ClusteringTrainer:
+    """Utility class providing the clustering training routine."""
+    
+    @staticmethod
+    def train(
+        Z: np.ndarray,
+        config: Dict[str, Any],
+        min_leaf_size: int = 20,
+        max_leaf_size: Optional[int] = None,
+        dtype: Any = np.float32,
+    ) -> Tuple[Optional[csr_matrix], Optional[ClusteringModel]]:
+        """Train clustering without recursive partitioning."""
+        
+        n_points = Z.shape[0]
+        n_clusters = config["kwargs"]["n_clusters"]
+
+        if n_points <= min_leaf_size:
+            # print(f"Too few points ({n_points}), stopping clustering.")
+            return None, None
+
+        # Train clustering model
+        clustering_model = ClusteringModel.train(Z, config, dtype)
+        cluster_labels = clustering_model.labels()
+        cluster_counts = Counter(cluster_labels)
+        # print(f"Cluster sizes: {cluster_counts}")
+
+        # Filter out invalid clusters
+        valid_clusters = [cid for cid, cnt in cluster_counts.items() if cnt >= min_leaf_size]
+        if len(valid_clusters) <= 1:
+            # print(f"Only {len(valid_clusters)} valid clusters after pruning, stopping clustering.")
+            return None, None
+
+        assert len(cluster_labels) == n_points, (
+            f"clustering returned {len(cluster_labels)} labels for {n_points} points; "
+            "C_node rows would be misaligned with Z"
+        )
+
+        # Points in undersized clusters are reassigned to the nearest valid centroid.
+        # Dropping them would leave an all-zero C_node row, i.e. a label that can never be
+        # proposed (tree.py) and never reaches the next layer (tree.py).
+        cluster_to_col = {cid: i for i, cid in enumerate(valid_clusters)}
+        cols = np.array([cluster_to_col.get(int(c), -1) for c in cluster_labels])
+
+        orphans = cols < 0
+        n_orphans = int(orphans.sum())
+        if n_orphans:
+            Zn = Z / (np.linalg.norm(Z, axis=1, keepdims=True) + 1e-12)
+            centroids = np.vstack([Zn[cluster_labels == cid].mean(axis=0) for cid in valid_clusters])
+            centroids /= np.linalg.norm(centroids, axis=1, keepdims=True) + 1e-12
+            cols[orphans] = np.argmax(Zn[orphans] @ centroids.T, axis=1)
+
+        logger.info(
+            f"Clusters: {len(cluster_counts)} raw -> {len(valid_clusters)} valid "
+            f"(min_leaf_size={min_leaf_size}); reassigned {n_orphans}/{n_points} points "
+            f"from undersized clusters. Sizes: {sorted(Counter(cols.tolist()).values(), reverse=True)}"
+        )
+
+        C_node = csr_matrix(
+            (ones(n_points, dtype=dtype), (np.arange(n_points), cols)),
+            shape=(n_points, len(valid_clusters)),
+        )
+        return C_node, clustering_model
+
+
+def _clustering_selfcheck():
+    """No label may be dropped: every C_node row must have exactly one cluster."""
+    rs = np.random.RandomState(0)
+    # 3 tight blobs of 20 + a stray pair far away: unbalanced kmeans gives the pair its own
+    # cluster, which is below min_leaf_size and would otherwise be dropped.
+    Z = np.vstack([rs.normal(c, 0.01, size=(20, 4)) for c in (0.0, 5.0, 10.0)]
+                  + [rs.normal(40.0, 0.01, size=(2, 4))]).astype(np.float32)
+    cfg = {"type": "sklearnkmeans", "kwargs": {"n_clusters": 4, "random_state": 0}}
+    C, _ = ClusteringTrainer.train(Z, cfg, min_leaf_size=5)
+    assert C is not None, "clustering returned nothing"
+    assert C.shape == (Z.shape[0], 3), f"expected 3 valid clusters, got {C.shape}"
+    per_row = np.asarray(C.sum(axis=1)).ravel()
+    assert (per_row == 1).all(), f"{int((per_row == 0).sum())} labels dropped from C_node"
+    # the strays must land in the blob they are actually nearest to
+    assert C[60].indices[0] == C[61].indices[0] == C[40].indices[0]
+    print("clustering selfcheck ok")
+
+
+class Clustering:
+    """Pipeline that encapsulates label clustering."""
+
+    def __init__(
+        self,
+    ) -> None:
+        """Initialize the clustering pipeline."""
+        self._C_node: Optional[ndarray] = None
+        self._model: Optional[ClusteringModel] = None
+        self._cluster_to_labels: Optional[Dict[int, List[int]]] = None
+
+    @property
+    def c_node(self) -> Optional[ndarray]:
+        """Sparse cluster assignment matrix."""
+        return self._C_node
+    
+    @c_node.setter
+    def c_node(self, value: ndarray) -> None:
+        """Set the cluster assignment matrix."""
+        self._C_node = value
+        
+    @property
+    def model(self) -> Optional[ClusteringModel]:
+        """Return the underlying clustering model."""
+        return self._model
+    
+    @model.setter
+    def model(self, value: ClusteringModel) -> None:
+        """Set the underlying clustering model."""
+        self._model = value
+        
+    @property
+    def cluster_to_labels(self) -> Optional[Dict[int, List[int]]]:
+        """Mapping from cluster id to list of label indices."""
+        return self._cluster_to_labels
+    
+    @cluster_to_labels.setter
+    def cluster_to_labels(self, value: Dict[int, List[int]]) -> None:
+        """Set the cluster to label mapping."""
+        self._cluster_to_labels = value
+    
+    @property
+    def is_empty(self) -> bool:
+        """Return ``True`` if clustering was not trained."""
+        return self.c_node is None
+
+    def save(self, save_dir: str) -> None:
+        """Persist the clustering object to disk."""
+        os.makedirs(save_dir, exist_ok=True)
+
+        state = self.__dict__.copy()
+        model = self.model
+
+        if model is not None:
+            model_path = os.path.join(save_dir, "clustering")
+
+            if hasattr(model, "save") and callable(model.save):
+                model.save(model_path)
+            else:
+                joblib.dump(model, f"{model_path}.joblib")
+
+            state.pop("_model", None)
+
+        # Save remaining state
+        with open(os.path.join(save_dir, "clustering.pkl"), "wb") as fout:
+            pickle.dump(state, fout)
+    
+    @classmethod
+    def load(cls, load_dir: str) -> "Clustering":
+        """Load a clustering object from ``load_dir``."""
+        cluster_path = os.path.join(load_dir, "clustering.pkl")
+        assert os.path.exists(cluster_path), f"Clustering path {cluster_path} does not exist"
+
+        with open(cluster_path, "rb") as fin:
+            model_data = pickle.load(fin)
+
+        model = cls()
+        model.__dict__.update(model_data)
+        
+        model_path = os.path.join(load_dir, "clustering")
+        # A leaf too small to cluster saves no model (identity C only)
+        if os.path.exists(model_path):
+            setattr(model, "_model", ClusteringModel.load(model_path))
+        
+        return model
+    
+    def train(
+        self,
+        Z: np.ndarray,
+        local_to_global_idx: List[int],
+        min_leaf_size: int,
+        max_leaf_size: Optional[int],
+        clustering_config: Optional[Dict[str, any]],
+        dtype: float
+    ) -> None:
+        """Train the clustering model and populate cluster assignments."""
+        
+        C_node, model = ClusteringTrainer.train(
+            Z=Z,
+            config=clustering_config,
+            min_leaf_size=min_leaf_size,
+            max_leaf_size=max_leaf_size,
+            dtype=dtype,
+        )
+        
+        if C_node is None or model is None:
+            return
+        
+        self.c_node = C_node
+        self.model = model
+        
+        self.cluster_to_labels = defaultdict(list)
+        for local_idx in range(C_node.shape[0]):
+            cluster_vector = (
+                C_node[local_idx].toarray().ravel()
+                if hasattr(C_node[local_idx], "toarray")
+                else asarray(C_node[local_idx]).ravel()
+            )
+            cid = int(argmax(cluster_vector))
+        
+            gidx = local_to_global_idx[local_idx]
+            self.cluster_to_labels[cid].append(int(gidx))
+        
+
+
+if __name__ == "__main__":
+    _clustering_selfcheck()

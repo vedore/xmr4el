@@ -9,8 +9,8 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
-from xmr4el.featurization.label_embedding_factory import LabelEmbeddingFactory
-from xmr4el.xmr.base import HierarchicaMLModel, MLModel
+from xmr4el.encoder import LabelEmbeddingFactory
+from xmr4el.tree import HierarchicaMLModel, MLModel
 
 
 def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):

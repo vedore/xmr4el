@@ -11,8 +11,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from xmr4el.data import Preprocessor
-from xmr4el.models.featurization_wrapper.transformers import Transformer
-from xmr4el.xmr.model import XModel
+from xmr4el.transformers import Transformer
+from xmr4el.xmodel import XModel
 from torch.cuda import OutOfMemoryError
 
 
@@ -85,8 +85,8 @@ def test_label_mapping():
     owner = {t: label for label, texts in groups.items() for t in texts}
     encoder = Mock()
     encoder.return_value.encode.side_effect = lambda texts: np.eye(len(texts))  # row i = text i
-    with patch("xmr4el.xmr.model.TextEncoder", encoder), patch(
-        "xmr4el.xmr.model.HierarchicaMLModel"
+    with patch("xmr4el.xmodel.TextEncoder", encoder), patch(
+        "xmr4el.xmodel.HierarchicaMLModel"
     ):
         xm = XModel()
         xm.train(list(groups.values()), list(groups))
@@ -100,8 +100,8 @@ def test_label_mapping():
         assert set(Z[j].nonzero()[0]) == set(rows), (j, label)
 
     xm.text_encoder = None  # the Mock cannot be pickled; TextEncoder.load is stubbed below
-    with TemporaryDirectory() as tmp, patch("xmr4el.xmr.model.TextEncoder"), patch(
-        "xmr4el.xmr.model.HierarchicaMLModel"
+    with TemporaryDirectory() as tmp, patch("xmr4el.xmodel.TextEncoder"), patch(
+        "xmr4el.xmodel.HierarchicaMLModel"
     ):
         xm.save(tmp)
         (saved,) = Path(tmp).iterdir()
@@ -147,7 +147,7 @@ def test_embedding_row_order():
     for oom_at in (None, "4"):  # "4": third batch OOMs once, then the batch size shrinks
         fake = Fake()
         fake.oom_at = oom_at
-        with patch("xmr4el.models.featurization_wrapper.transformers.SentenceTransformer", lambda name: fake):
+        with patch("xmr4el.transformers.SentenceTransformer", lambda name: fake):
             emb = Transformer._predict("fake", texts, batch_size=2)
         assert emb[:, 0].tolist() == list(range(23)), (oom_at, emb[:, 0].tolist())
         assert fake.oom_at is None, "OOM path was not exercised"
@@ -159,14 +159,14 @@ def test_embedding_row_order():
                 raise OutOfMemoryError("fake")
             return [[float(t)] for t in batch]
 
-    with patch("xmr4el.models.featurization_wrapper.transformers.SentenceTransformer", lambda name: Big()):
+    with patch("xmr4el.transformers.SentenceTransformer", lambda name: Big()):
         emb = Transformer._predict("fake", texts, batch_size=8, max_oom_retries=3)
     assert emb[:, 0].tolist() == list(range(23))
     print("embedding row order ok")
 
 
 def test_mps_oom():
-    prefix = "xmr4el.models.featurization_wrapper.transformers"
+    prefix = "xmr4el.transformers"
     oom = RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")
     texts = ["0", "1", "2", "3"]
     batches = []

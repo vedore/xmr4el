@@ -29,9 +29,9 @@ from uuid import uuid4
 from heapq import nlargest
 from pathlib import Path
 from xmr4el import get_logger
-from xmr4el.clustering.model import Clustering
-from xmr4el.matcher.model import Matcher
-from xmr4el.ranker.model import Ranker
+from xmr4el.clusterers import Clustering
+from xmr4el.classifiers import Matcher
+from xmr4el.ranker import Ranker
 
 
 model_dir = Path(tempfile.mkdtemp(prefix="ml_model_dir"))
@@ -436,7 +436,7 @@ class MLModel():
             if self.is_last_layer:
                 P = self.matcher_model.predict_proba(X_train)
                 # With identity C above, M_TFN is Y_node, so this top-b mask is the ranker's whole
-                # negative pool (ranker/train.py:284) instead of a cluster's worth of instances.
+                # negative pool (ranker.py) instead of a cluster's worth of instances.
                 # b=5 leaves too few negatives for neg_mult * n_pos; 20 keeps the pool fed.
                 M_MAN = _topb_sparse(P, b=20)
             
@@ -568,7 +568,7 @@ class MLModel():
         triples_qi, triples_gid, triples_sc = [], [], []
 
         def _cos_fallback(rows, zv):
-            """Score for labels with no ranker (38.4% of them: n_pos < 2 at ranker/train.py:164).
+            """Score for labels with no ranker (38.4% of them: n_pos < 2 in ranker.py).
             Returning ones() collapsed them onto the shared cluster score; cosine at least
             orders them. Mapped to [0, 1] to match the probability range _fuse expects."""
             den = np.linalg.norm(rows, axis=1) * np.linalg.norm(zv) + 1e-12

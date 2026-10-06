@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
-from xmr4el.xmr.base import HierarchicaMLModel
+from xmr4el.tree import HierarchicaMLModel
 
 rs = np.random.RandomState(0)
 n, D, L, K = 3000, 20, 6, 2

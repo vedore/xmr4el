@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import numpy as np
 from sklearn.preprocessing import normalize
 from xmr4el.data import Preprocessor
-from xmr4el.xmr.model import XModel
+from xmr4el.xmodel import XModel
 
 
 def cluster_centroids(Z, cluster_of):

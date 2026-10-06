@@ -8,7 +8,7 @@ if platform.machine() == 'aarch64':  # ARM only
 # LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1
 from argparse import ArgumentParser
 from xmr4el.data import Preprocessor
-from xmr4el.xmr.model import XModel
+from xmr4el.xmodel import XModel
 
 
 def main():

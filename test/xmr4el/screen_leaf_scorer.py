@@ -26,8 +26,8 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import normalize
 from sklearn.svm import LinearSVC
 
-from xmr4el.models.classifier_wrapper.classifier_model import JointOvRLogistic
-from xmr4el.xmr.model import XModel
+from xmr4el.classifiers import JointOvRLogistic
+from xmr4el.xmodel import XModel
 
 from test_evaluate_pipeline import string_breakdown
 
