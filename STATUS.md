@@ -7,13 +7,18 @@ History and completed steps: `docs/status_log.md`. Valid results: `docs/results.
 Last updated 2026-10-06 (session 11 end). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-**IN FLIGHT (user, on a Linux machine):** timed 1000-label retrain with the base config:
-`time python3 test/xmr4el/test_train_pipeline.py -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
--model_config .models/xmr4el_base_config.json -ds_len 1000`. **Freeze code while it runs.** Session 11 work is uncommitted
-on branch `repeat` (the user moves it to Linux). On output: rename the new tree to
-`xmodel_1000_flag6_sapbert_abbrev_joint` (rename is safe: trees load by listing their folder), eval
-`-beam_size 2 -alpha 0 -path_score` (+ `-alpha 1`), record train secs vs the old ~100 s at 500 labels / PECOS 12.4 s at
-1000. Expect acc@1 0.843 within float noise (same objective as `xmodel_1000_flag6_sapbert_abbrev_logreg`).
+**Session 12 (2026-10-06): nothing in flight.** Joint retrain `xmodel_1000_flag6_sapbert_abbrev_joint`: acc@1 0.8436 /
+MRR 0.8827 (`-alpha 0 -path_score`, beam 2), cosine 0.803 / 0.845; same as the liblinear tree (0.843 / 0.884). Train
+375.7 s (6m34 real, 158 min CPU, Linux) vs PECOS 12.4 s; stage breakdown not yet seen (suspect SapBERT on CPU or BLAS
+thread oversubscription). Recorded in `docs/results.md`. External-review bugs fixed (uncommitted; none changes recorded
+numbers): label matrix in row order (`generate_label_matrix`); leaves too small to cluster keep identity C instead of
+dropping the last layer (`MLModel.train`, `Clustering.load` without model); `XModel.predict` beam default 5; predict
+CSR width = root's label count. Regression in `test/xmr4el/test_no_rankers.py`.
+Second review round (also uncommitted, prediction-neutral for depth-2 trees): transformer batches kept in memory (no
+`batch_dir`, nothing deleted; `test_transformer_batch_dir.py` removed); OOM keeps the reduced batch size; leaves are no
+longer clustered at all; `cut_half_cluster` now really halves (it was a no-op; matters only at depth >= 3); an
+internal node that cannot split raises `ValueError` instead of truncating the tree; `XModel.predict`'s global cosine
+rerank branch deleted (unused; topk_mode "global" goes to the hierarchy, whose final_path matches its scores).
 
 **Current best (session 11):** base config = flag 6 (SapBERT mention | char TF-IDF->SVD 768 | context window 10
 TF-IDF->SVD 768) + `abbrev_expansion` append + matcher `jointlogisticregression` (liblinear's OvR L2 logistic objective,

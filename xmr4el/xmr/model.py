@@ -9,7 +9,6 @@ import logging
 import numpy as np
 
 from xmr4el import get_logger, set_verbosity
-from numpy import asarray, int32, argpartition, argsort, float32
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -388,11 +387,10 @@ class XModel:
         
     def predict(self, X_text, 
                 topk: int = 5, 
-                beam_size: int | None = None, 
+                beam_size: int = 5, 
                 fusion: str = "geometric", 
                 alpha: float = 0.5,
                 topk_mode: str = "per_leaf", 
-                topk_inside_global: int | None = None,
                 n_jobs: int =-1,
                 path_score: bool = False):
             """Predict label scores for given text inputs.
@@ -426,112 +424,12 @@ class XModel:
             
             print("Encoding: ", time_end_encoding - time_start_encoding)
             
-            if topk_mode == "per_leaf":
-                return self.model.predict(X_query, 
-                                          topk=topk, 
-                                          beam_size=beam_size, 
-                                          fusion=fusion, 
-                                          alpha=alpha,
-                                          n_jobs=n_jobs, 
-                                          topk_mode=topk_mode,
-                                          path_score=path_score)
-            """
-                Nice touch, it makes it evaluate all the leaf labels, could be problematic if beam size to great, 
-                Maybe prune anyway ? could be a option
-            """   
-            out_h, _ = self.model.predict(
-                X_query,
-                topk=topk_inside_global,
-                beam_size=beam_size,
-                fusion=fusion,
-                alpha=alpha,
-                n_jobs=-1,
-                topk_mode="per_leaf",  # do not truncate; gather full union from leaves
-                path_score=path_score,
-            )
-            
-            time_start_reranking = time.time()
-            
-            n_queries = X_query.shape[0]
-            
-            # 3) prepare label embedding bank Z (must be same space as X_query) and L2-normalize once
-            if getattr(self, "_Z", None) is None:
-                raise RuntimeError("label_embeddings (Z) not found on hierarchical model.")
-            Z = self.Z
-            n_labels, D = Z.shape
-
-
-            Zf = Z.astype(np.float32, copy=False)
-            norms = np.linalg.norm(Zf, axis=1, keepdims=True) + 1e-12
-            Z_norm = Zf / norms  # (n_labels, D)
-
-            # 4) collect union of candidate label IDs per query from leaf paths
-            cand_ids_per_q = []
-            for qi in range(n_queries):
-                lids_set = set()
-                for p in out_h[qi].get("paths", []):
-                    for lid in p.get("leaf_global_labels", []):
-                        lid_int = int(lid)
-                        if 0 <= lid_int < n_labels:
-                            lids_set.add(lid_int)
-                cand_ids_per_q.append(sorted(lids_set))
-
-            # If no candidates at all, return empty CSR with same 'out'
-            if all(len(lids) == 0 for lids in cand_ids_per_q):
-                return out_h, csr_matrix((n_queries, n_labels), dtype=np.float32)
-
-            # build cosine scores per query over the candidate subset and assemble CSR
-            indptr = [0]
-            indices = []
-            data = []
-
-            use_topk = (topk is not None and topk > 0)
-
-            def _row_to_dense_norm(xrow):
-                if hasattr(xrow, "toarray"):  # sparse
-                    v = xrow.toarray().ravel().astype(np.float32, copy=False)
-                else:
-                    v = np.asarray(xrow, dtype=np.float32).ravel()
-                n = np.linalg.norm(v) + self.EPS
-                return v / n
-
-            for qi in range(n_queries):
-                cands = cand_ids_per_q[qi]
-                if not cands:
-                    indptr.append(len(indices))
-                    continue
-
-                qv = _row_to_dense_norm(X_query[qi])
-                cands_arr = asarray(cands, dtype=int32)
-                Lsub = Z_norm[asarray(cands, dtype=int32)]  # (K, D), already L2-normed
-                sims = Lsub @ qv                                  # (K,), cosine = dot
-
-                # global top-k (per query)
-                if use_topk and sims.size > topk:
-                    idx = argpartition(sims, sims.size - topk)[-topk:]
-                    ord_ = argsort(-sims[idx])
-                    sel = idx[ord_]
-                else:
-                    sel = argsort(-sims)
-
-                chosen_ids = cands_arr[sel]
-                chosen_scores = sims[sel].astype(float32, copy=False)
-
-                indices.extend(chosen_ids.tolist())
-                data.extend(chosen_scores.tolist())
-                indptr.append(len(indices))
-
-            scores_cos = csr_matrix(
-                (np.asarray(data, dtype=np.float32),
-                np.asarray(indices, dtype=np.int32),
-                np.asarray(indptr, dtype=np.int32)),
-                shape=(n_queries, n_labels),
-                dtype=np.float32
-            )
-            
-            time_end_reranking = time.time()
-            
-            print("Reranking: ", time_end_reranking - time_start_reranking)
-
-            # 6) IMPORTANT: return the SAME 'out' from HMLModel, only scores are replaced by cosine
-            return out_h, scores_cos
+            # topk_mode "global" is handled by the hierarchy too; its final_path follows its scores
+            return self.model.predict(X_query,
+                                      topk=topk,
+                                      beam_size=beam_size,
+                                      fusion=fusion,
+                                      alpha=alpha,
+                                      n_jobs=n_jobs,
+                                      topk_mode=topk_mode,
+                                      path_score=path_score)

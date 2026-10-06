@@ -1,16 +1,12 @@
 import logging
-import os
-import glob
-import shutil
 import torch
 import numpy as np
 
 from gc import collect
-from numpy import savez_compressed, array
+from numpy import array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
 from sentence_transformers import SentenceTransformer
-from concurrent.futures import ThreadPoolExecutor
 
 
 logger = logging.getLogger(__name__)
@@ -51,13 +47,13 @@ class Transformer:
     @classmethod
     def transform(cls, trn_corpus, config=None, dtype=np.float32):
         """Returns (run config, embeddings ndarray). kwargs: model_name (overrides type), pooling,
-        max_seq_length, batch_size, batch_dir, output_prefix, max_oom_retries."""
+        max_seq_length, batch_size, max_oom_retries."""
         config = config if config is not None else {"type": "sentencetbiobert", "kwargs": {}}
-        kwargs = {"batch_size": 1000, "batch_dir": "batch_dir", "output_prefix": "st_emb",
-                  "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
+        kwargs = {"batch_size": 1000, "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
         model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
         assert model_name, f"transformer config {config} needs a known 'type' or kwargs.model_name"
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
+        kwargs.pop("batch_dir", None), kwargs.pop("output_prefix", None)  # obsolete: batches stay in memory
         print(kwargs)
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
@@ -70,8 +66,6 @@ class Transformer:
         trn_corpus,
         dtype=np.float32,
         batch_size=100,
-        batch_dir="batch_dir",
-        output_prefix="st_emb",
         max_oom_retries=3,
         pooling=None,
         max_seq_length=None,
@@ -84,19 +78,14 @@ class Transformer:
         
         logger.info(f"Using PyTorch device: {device}")
 
-        batch_dir = os.path.abspath(batch_dir)
-        emb_file = f"{batch_dir}/{output_prefix}"
-        cls._create_batch_dir(batch_dir)
-        
         model = sentence_model(model_name, device, pooling, max_seq_length)
         len_corpus = len(trn_corpus)
 
         if batch_size == 0:
             batch_size = 400  # A safe default, or you could implement auto-tuning
 
-        # Process batches with OOM recovery. Files are keyed by start row, so shrinking the batch
-        # size after an OOM cannot skip or duplicate rows.
-        original_batch_size = batch_size
+        # Process batches in row order with OOM recovery; a batch size reduced by an OOM is kept
+        batches = []
         start = 0
 
         while start < len_corpus:
@@ -113,9 +102,8 @@ class Transformer:
                         normalize_embeddings=False,
                         show_progress_bar=False,
                     )
-                savez_compressed(f"{emb_file}_batch{start}.npz", embeddings=array(batch_results, dtype=dtype))
+                batches.append(array(batch_results, dtype=dtype))
                 start = end
-                batch_size = original_batch_size
 
             except OutOfMemoryError as oom:
                 empty_cache()
@@ -129,46 +117,4 @@ class Transformer:
                 reduction_factor = min(0.5, max(0.1, 1 - (0.2 * max_oom_retries)))
                 batch_size = max(1, int(batch_size * reduction_factor))
 
-            except Exception as _:
-                cls._del_batch_dir(batch_dir)
-                raise
-
-        # Parallel loading of batch files
-        def load_embedding_file(file):
-            with np.load(file) as data:
-                return data["embeddings"]
-        
-        # Numeric order: lexicographic puts batch10 before batch2 and permutes rows past 10 batches
-        batch_files = sorted(
-            glob.glob(f"{emb_file}_batch*.npz"),
-            key=lambda f: int(f.rsplit("_batch", 1)[1][: -len(".npz")]),
-        )
-        with ThreadPoolExecutor(max_workers=min(4, os.cpu_count())) as executor:
-            all_embeddings = list(executor.map(load_embedding_file, batch_files))
-        
-        # Clean up
-        cls._del_batch_dir(batch_dir)
-        
-        return np.vstack(all_embeddings).astype(dtype)
-
-
-    @staticmethod
-    def _create_batch_dir(batch_dir):
-        """
-        Create the batch dir if it does not exist,
-        if it exists, remove any file inside
-        """
-
-        if os.path.exists(batch_dir):
-            for item in os.listdir(batch_dir):
-                emb_path = os.path.join(batch_dir, item)
-                os.remove(emb_path)
-        else:
-            # LOGGER.warning("Directory does not exist, Creating")
-            os.makedirs(batch_dir)
-
-    @staticmethod
-    def _del_batch_dir(batch_dir):
-        """Delete the batch directory"""
-        
-        shutil.rmtree(batch_dir)
+        return np.vstack(batches).astype(dtype)

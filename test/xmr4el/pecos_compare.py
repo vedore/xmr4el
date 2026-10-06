@@ -41,9 +41,6 @@ def export(args):
     test = Preprocessor.load_pubtator_file(args.test_path, window=window, abbrev=abbrev)
     dev_labels, dev_texts = filter_labels_and_inputs(test["corpus"], test["labels"], labels)
     enc = xm.text_encoder
-    if enc.transformer_config:  # own batch dir: ./batch_dir belongs to any concurrent training run
-        enc.transformer_config = {**enc.transformer_config, "kwargs": {
-            **enc.transformer_config.get("kwargs", {}), "batch_dir": os.path.join(args.out, "batch_dir")}}
     X_dev = csr_matrix(enc.predict(dev_texts), dtype=np.float32)
 
     for name, M in (("X_trn", X), ("Y_trn", Y), ("X_dev", X_dev)):

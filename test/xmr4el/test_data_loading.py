@@ -144,16 +144,24 @@ def test_embedding_row_order():
             return [[float(t)] for t in batch]
 
     texts = [str(i) for i in range(23)]  # 12 batches of 2
-    for oom_at in (None, "4"):  # "4": third batch OOMs once, then batch size shrinks and resets
+    for oom_at in (None, "4"):  # "4": third batch OOMs once, then the batch size shrinks
         fake = Fake()
         fake.oom_at = oom_at
-        with TemporaryDirectory() as tmp, patch(
-            "xmr4el.models.featurization_wrapper.transformers.SentenceTransformer",
-            lambda name: fake,
-        ):
-            emb = Transformer._predict("fake", texts, batch_size=2, batch_dir=f"{tmp}/b")
+        with patch("xmr4el.models.featurization_wrapper.transformers.SentenceTransformer", lambda name: fake):
+            emb = Transformer._predict("fake", texts, batch_size=2)
         assert emb[:, 0].tolist() == list(range(23)), (oom_at, emb[:, 0].tolist())
         assert fake.oom_at is None, "OOM path was not exercised"
+
+    # A batch size reduced by OOM is kept: retrying the size that failed would burn the retry budget
+    class Big(Fake):
+        def encode(self, batch, **kwargs):
+            if len(batch) > 2:
+                raise OutOfMemoryError("fake")
+            return [[float(t)] for t in batch]
+
+    with patch("xmr4el.models.featurization_wrapper.transformers.SentenceTransformer", lambda name: Big()):
+        emb = Transformer._predict("fake", texts, batch_size=8, max_oom_retries=3)
+    assert emb[:, 0].tolist() == list(range(23))
     print("embedding row order ok")
 
 

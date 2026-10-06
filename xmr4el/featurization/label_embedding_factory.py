@@ -12,12 +12,12 @@ class LabelEmbeddingFactory():
         
     @staticmethod
     def generate_label_matrix(label_to_indices: Dict[int, List[int]]) -> List[List[int]]:
-        """Expand a mapping from labels to corpus indices into a label matrix."""
-        # PERF (W8402): build in one pass instead of loop+append
-        label_to_matrix: List[List[int]] = [
-            [key] for key, ids in label_to_indices.items() for _ in ids
-        ]
-        return label_to_matrix 
+        """Expand a mapping from labels to corpus indices into a label matrix (row i = corpus row i)."""
+        label_to_matrix: List[List[int]] = [None] * sum(len(ids) for ids in label_to_indices.values())
+        for key, ids in label_to_indices.items():
+            for i in ids:
+                label_to_matrix[i] = [key]
+        return label_to_matrix
         
     @staticmethod
     def label_binarizer(labels: Sequence[Sequence[int]]) -> Tuple[np.ndarray, np.ndarray]:

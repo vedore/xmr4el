@@ -91,8 +91,9 @@ class Clustering:
         model.__dict__.update(model_data)
         
         model_path = os.path.join(load_dir, "clustering")
-        matcher = ClusteringModel.load(model_path)
-        setattr(model, "_model", matcher)
+        # A leaf too small to cluster saves no model (identity C only)
+        if os.path.exists(model_path):
+            setattr(model, "_model", ClusteringModel.load(model_path))
         
         return model
     

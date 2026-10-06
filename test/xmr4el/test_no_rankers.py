@@ -10,12 +10,12 @@ from xmr4el.featurization.label_embedding_factory import LabelEmbeddingFactory
 from xmr4el.xmr.base import HierarchicaMLModel
 
 
-def train(X, Y, Z, cfg, train_rankers):
+def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
     hml = HierarchicaMLModel(
-        clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": 3, "iter_limit": 50}},
+        clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": n_clusters, "iter_limit": 50}},
         matcher_config=cfg["matcher_config"], ranker_config=cfg["ranker_config"],
-        cur_config=cfg["cur_config"], min_leaf_size=2, max_leaf_size=20,
-        cut_half_cluster=False, ranker_every_layer=True, n_workers=1, layer=2,
+        cur_config=cfg["cur_config"], min_leaf_size=min_leaf_size, max_leaf_size=20,
+        cut_half_cluster=cut_half, ranker_every_layer=True, n_workers=1, layer=layer,
         train_rankers=train_rankers,
     )
     L = Z.shape[0]
@@ -63,6 +63,33 @@ def main():
                 expect[r["query_index"], p["leaf_global_labels"]] *= np.exp(p["trail"][-1]["path_logscore"])
     assert np.allclose(on.toarray(), expect), "path_score must scale each leaf by exp(path_logscore)"
     assert not np.allclose(on.toarray(), off.toarray()), "beam 2 visits leaves with different path scores"
+
+    # score matrix width is the label count, not the highest retrieved label + 1
+    assert without_r.predict(Xq[:1], beam_size=1, topk=1)[1].shape == (1, L)
+
+    # leaves too small to cluster (8 labels, min_leaf_size 8) still train with identity C
+    small = train(X, Y, Z, cfg, False, min_leaf_size=8)
+    assert len(small.hmodel) == 2 and small.predict(Xq, beam_size=2, topk=0)[1].shape == (L, L)
+
+    # targets follow row order when a label repeats across groups
+    assert LabelEmbeddingFactory.generate_label_matrix({"A": [0, 2], "B": [1]}) == [["A"], ["B"], ["A"]]
+
+    # an internal node that cannot split fails loudly instead of returning a truncated tree
+    try:
+        train(X, Y, Z, cfg, False, min_leaf_size=30)
+        raise AssertionError("unsplittable root must raise")
+    except ValueError:
+        pass
+
+    # cut_half_cluster halves n_clusters below the root: 4 root clusters of 6 labels, then 2 per node
+    deep = train(X, Y, Z, cfg, False, n_clusters=4, layer=3, cut_half=True)
+    assert [m.cluster_model.c_node.shape[1] for m in deep.hmodel[1]] == [2] * 4
+
+    # global topk: final_path ranks the same labels as the returned scores
+    routes, g = without_r.predict(Xq, beam_size=2, topk=1, topk_mode="global")
+    for r in routes:
+        row = g.getrow(r["query_index"])
+        assert list(r["final_path"]["leaf_global_labels"]) == list(row.indices[np.argsort(-row.data)])
     print("ok")
 
 

@@ -215,7 +215,6 @@ These checks use synthetic inputs and do not run corpus training:
 
 ```bash
 python test/xmr4el/test_data_loading.py
-python test/test_transformer_batch_dir.py
 python -m xmr4el.clustering.train
 python -m xmr4el.matcher.train
 python -m xmr4el.ranker.train

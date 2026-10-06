@@ -454,6 +454,8 @@ probability x routing path probability; `-alpha 1` = cosine to leaf z on the sam
 | `xmodel_500_flag6_sapbert_abbrev_sgd` (SGD matcher) | 500 | 7530 | cosine | 0.817 | 0.867 | 0.928 | 0.951 | 0.964 | 0.839 | 0.521 | 0.851 |
 | `xmodel_1000_flag6_sapbert_abbrev_logreg` | 1000 | 11661 | matcher x path | **0.843** | **0.884** | **0.933** | 0.952 | **0.973** | **0.905** | **0.525** | **0.845** |
 | same | 1000 | 11661 | cosine | 0.808 | 0.856 | 0.920 | 0.951 | 0.960 | 0.843 | 0.480 | 0.834 |
+| `xmodel_1000_flag6_sapbert_abbrev_joint` (joint L-BFGS matcher) | 1000 | 11661 | matcher x path | **0.844** | 0.883 | 0.930 | 0.948 | | | | |
+| same | 1000 | 11661 | cosine (path score on) | 0.803 | 0.845 | 0.896 | 0.947 | | | | |
 | PECOS XR-Linear, same features (beam 2; 2 -> 16 clusters -> labels) | 1000 | 11661 | | 0.838 | 0.871 | 0.911 | | 0.967 | 0.894 | 0.529 | 0.846 |
 | PECOS, same, beam 10 | 1000 | 11661 | | 0.839 | 0.878 | 0.926 | | 0.966 | 0.894 | 0.535 | 0.847 |
 | `xmodel_1000_flag6_sapbert_sgd` (no abbrev, SGD) | 1000 | 11661 | cosine | 0.797 | 0.844 | 0.905 | 0.943 | 0.951 | 0.844 | 0.442 | 0.824 |
@@ -483,6 +485,9 @@ Reading:
 - Speed changes (prediction-neutral up to float noise): `Transformer.transform` embeds each distinct text once (500
   labels: 23512 rows -> 5937 strings; measured 13.2 s -> 6.2 s on 3000 rows, max abs diff 6e-6) and runs on the Apple
   GPU (MPS) when available (1.4x on 25-token mentions, max abs diff 9e-6, cosine 1.000000).
+- Joint matcher retrain (session 12, 2026-10-06, Linux): `xmodel_1000_flag6_sapbert_abbrev_joint` 0.8436 / MRR 0.8827
+  vs liblinear tree 0.843 / 0.884: same objective, same result within noise. Train 375.7 s (6m34 real, 158 min CPU) vs
+  PECOS 12.4 s; no stage breakdown yet. Group columns not reported (compact eval report).
 
 ## Commands
 

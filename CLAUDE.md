@@ -43,8 +43,8 @@ Saved trees are under `test/test_data/saved_trees/`.
   first-seen lists and refuses a label/`Z` count mismatch; regression in `test/xmr4el/test_data_loading.py`.
   Before this fix eval scored dev against a permuted label list, so **every dev number in
   `docs/results_archive.md` is invalid**.
-- Transformer embedding batches are reassembled in numeric order (`featurization_wrapper/transformers.py`).
-  Before, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
+- Transformer embedding batches are kept in memory in row order (`featurization_wrapper/transformers.py`; no `batch_dir`).
+  Before the numeric-order fix, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
   and the old 4.79x/3.81x train-side routing figures are invalid.
 - Any new code that maps indices to label names must use `initial_labels`, never input order.
 

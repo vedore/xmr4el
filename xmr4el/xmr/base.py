@@ -354,16 +354,16 @@ class MLModel():
         self.logger.info("Training ML: Clustering Phase")
         
         cluster_model = Clustering()
-        cluster_model.train(Z=self.label_embeddings, 
-                            local_to_global_idx=self.local_to_global_idx,
-                            min_leaf_size=self.min_leaf_size,
-                            max_leaf_size=self.max_leaf_size,
-                            clustering_config=self.clustering_config,
-                            dtype=np.float32
-                            ) # Hardcoded
-        
-        if cluster_model.is_empty:
-            return
+        if not self.is_last_layer:  # a leaf uses identity C below, so it is never clustered
+            cluster_model.train(Z=self.label_embeddings,
+                                local_to_global_idx=self.local_to_global_idx,
+                                min_leaf_size=self.min_leaf_size,
+                                max_leaf_size=self.max_leaf_size,
+                                clustering_config=self.clustering_config,
+                                dtype=np.float32
+                                )
+            if cluster_model.is_empty:
+                return
         
         self.cluster_model = cluster_model
         del cluster_model
@@ -943,10 +943,6 @@ class HierarchicaMLModel():
         last_layer_index = self.layers - 1
         ranker_flag_default = bool(self.ranker_every_layer)
 
-        cfg = self.clustering_config
-        cfg_kwargs = cfg.get("kwargs", {}) if cfg is not None else {}
-        get_n_clusters = cfg_kwargs.get  # local bind
-        set_n_clusters = cfg_kwargs.__setitem__  # local bind so we don't dot each time
         save_temp = self.save_ml_temp  # local bind
 
         def _accumulate_children(raw_children, start_idx, next_inputs_list):
@@ -980,15 +976,17 @@ class HierarchicaMLModel():
                 
                 next_inputs: list[tuple] = []
                 ml_list: list[str] = []
-                layer_failed = False
                 layer_child_maps: list[dict[int, int]] = []   # <-- add this
                 
                 is_last_layer = (layer == last_layer_index)
                 ranker_flag = True if is_last_layer else ranker_flag_default
 
-                if self.cut_half_cluster and layer > 0: 
-                    n_curr = int(get_n_clusters("n_clusters", 2))
-                    set_n_clusters("n_clusters", max(2, n_curr // 2))
+                if self.cut_half_cluster and layer > 0:
+                    # A new dict per layer: ClusteringModel.train replaces config["kwargs"], and the
+                    # caller's config (saved with the tree) must keep the configured n_clusters
+                    kw = self.clustering_config["kwargs"]
+                    self.clustering_config = {**self.clustering_config,
+                                              "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
                     
                 number_of_childs = len(inputs)
                 
@@ -1021,9 +1019,10 @@ class HierarchicaMLModel():
                         global_to_local=global_to_local_node
                     )
 
-                    if ml.is_empty:
-                        layer_failed = True
-                        break
+                    if ml.is_empty:  # only internal nodes can be empty; leaves use identity C
+                        raise ValueError(
+                            f"layer {layer} node with {Z_node.shape[0]} labels cannot be split into clusters of "
+                            f">= min_leaf_size={self.min_leaf_size}; lower depth or min_leaf_size")
 
                     C = ml.cluster_model.c_node
                     fused_scores = ml.fused_scores
@@ -1050,9 +1049,6 @@ class HierarchicaMLModel():
                     del ml
                     ml_list.append(ml_path)
                     layer_child_maps.append(cluster_to_child)
-
-                if layer_failed:
-                    break
 
                 inputs = _finalize_layer(layer, ml_list, next_inputs)
                 del ml_list
@@ -1267,16 +1263,7 @@ class HierarchicaMLModel():
             )
 
         # Build CSR (n_queries x n_labels)
-        try:
-            n_labels_total = int(self.label_embeddings.shape[0])
-        except Exception:
-            max_lid = -1
-            for acc in per_query_scores:
-                if acc:
-                    m = max(acc.keys())
-                    if m > max_lid:
-                        max_lid = m
-            n_labels_total = max_lid + 1 if max_lid >= 0 else 0
+        n_labels_total = int(self.hmodel[0][0].label_embeddings.shape[0])  # root holds every label
 
         indptr = [0]; indices = []; data = []
 
