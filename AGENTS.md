@@ -210,7 +210,7 @@ Then check these known error origins, in pipeline order (state and evidence in `
 - label index <-> label name mapping: model indices follow sorted `Y` columns; `XModel.initial_labels`
   must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
 - `-ds_len` selects the first N labels in file order, not a random sample
-- feature block balance under `emb_flag` 4 (raw-norm weighted concat)
+- feature block balance (`emb_flag` 6 normalises each block before the concat)
 - PIFA label embeddings built from mention + context
 - per-label rankers whose label-embedding input is constant
 - child matchers trained without out-of-cluster negatives

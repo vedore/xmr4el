@@ -1,4 +1,5 @@
 import os
+import re
 
 import pandas as pd
 
@@ -79,7 +80,41 @@ class Preprocessor:
         return " ".join(document[:start].split()[-window:] + document[end:].split()[:window])
 
     @staticmethod
-    def load_pubtator_file(pubtator_filepath: str, window: Optional[int] = None) -> Dict[str, List[str]]:
+    def best_long_form(sf, lf):
+        """Schwartz & Hearst 2003: match the short form's characters right to left inside the candidate
+        long form; its first character must start a word. Returns the long form or None."""
+        s, l = len(sf) - 1, len(lf) - 1
+        while s >= 0:
+            c = sf[s].lower()
+            if not c.isalnum():
+                s -= 1
+                continue
+            while l >= 0 and (lf[l].lower() != c or (s == 0 and l > 0 and lf[l - 1].isalnum())):
+                l -= 1
+            if l < 0:
+                return None
+            l -= 1
+            s -= 1
+        return lf[lf.rfind(" ", 0, l + 1) + 1:]
+
+    @staticmethod
+    def abbreviations(document):
+        """{short form: long form} for every "long form (SF)" in the document; first definition wins."""
+        out = {}
+        for m in re.finditer(r"\(([^()]+)\)", document):
+            sf = re.split(r"[,;]", m.group(1))[0].strip()
+            if not (2 <= len(sf) <= 10 and len(sf.split()) <= 2 and sf[0].isalnum()
+                    and any(ch.isalpha() for ch in sf)) or sf in out:
+                continue
+            words = re.split(r"[.;!?]\s", document[:m.start()])[-1].split()
+            lf = Preprocessor.best_long_form(sf, " ".join(words[-min(len(sf) + 5, 2 * len(sf)):]))
+            if lf and len(lf) > len(sf) and sf not in lf.split():
+                out[sf] = lf
+        return out
+
+    @staticmethod
+    def load_pubtator_file(pubtator_filepath: str, window: Optional[int] = None,
+                           abbrev: Optional[str] = None) -> Dict[str, List[str]]:
         """
         Load a PubTator file and return flattened corpus and labels lists
         suitable for entity linking training.
@@ -89,14 +124,17 @@ class Preprocessor:
                         `window`, the words around the mention (`context_window`)
             labels[i] = CUI
             spans[i] = (start, end) of the mention in title + " " + abstract (PubTator offsets)
+        `abbrev` "append" / "replace": a mention that is a short form defined in its document
+        (`abbreviations`) becomes "SF long form" / "long form"; None keeps it.
         """
+        assert abbrev in (None, "append", "replace"), abbrev
         assert os.path.exists(pubtator_filepath), f"{pubtator_filepath} does not exist"
 
         corpus: List[str] = []
         labels: List[str] = []
         spans: List[Tuple[int, int]] = []  # mention offsets into the context after "[SEP] "
 
-        title, abstract = "", ""
+        title, abstract, abbrs = "", "", None
 
         with open(pubtator_filepath, "r", encoding="utf-8") as f:
             for line in f:
@@ -110,6 +148,7 @@ class Preprocessor:
                     if len(parts) == 3:
                         title = parts[2]
                         abstract = ""
+                        abbrs = None
 
                 # --- Abstract line ---
                 elif "|a|" in line:
@@ -126,6 +165,12 @@ class Preprocessor:
                         context = " ".join(x for x in [title, abstract] if x)
 
                         span = (int(parts[1]), int(parts[2]))
+                        if abbrev is not None:
+                            if abbrs is None:
+                                abbrs = Preprocessor.abbreviations(context)
+                            lf = abbrs.get(mention_text.strip())
+                            if lf is not None:
+                                mention_text = lf if abbrev == "replace" else f"{mention_text.strip()} {lf}"
                         if window is not None:
                             context = Preprocessor.context_window(context, span, window)
                         corpus.append(f"{mention_text} [SEP] {context}")

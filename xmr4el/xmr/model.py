@@ -35,6 +35,7 @@ class XModel:
                  context_vectorizer_config: dict = None,
                  context_dimension_config: dict = None,
                  context_window: Optional[int] = None,
+                 abbrev_expansion: Optional[str] = None,
                  clustering_config: dict = None,
                  matcher_config: dict = None,
                  ranker_config: dict = None,
@@ -46,7 +47,7 @@ class XModel:
                  train_rankers: bool = True,
                  n_workers: int = 8,
                  depth: int = 1,
-                 emb_flag: int = 1,
+                 emb_flag: int = 6,
                  verbose: Optional[int] = None,
                  logger: Optional[logging.Logger] = None
                  ):
@@ -66,11 +67,13 @@ class XModel:
         self.vectorizer_config = vectorizer_config
         self.transformer_config = transformer_config
         self.dimension_config = dimension_config
-        # emb_flag 6: context block configs; PubTator loaders build the context from
+        # emb_flag 6 (1 = TF-IDF only): context block configs; PubTator loaders build the context from
         # `context_window` words around each mention (None = whole document)
         self.context_vectorizer_config = context_vectorizer_config
         self.context_dimension_config = context_dimension_config
         self.context_window = context_window
+        # PubTator loaders expand in-document abbreviations: "append" | "replace" | None (off)
+        self.abbrev_expansion = abbrev_expansion
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
         self.ranker_config = ranker_config
@@ -390,7 +393,8 @@ class XModel:
                 alpha: float = 0.5,
                 topk_mode: str = "per_leaf", 
                 topk_inside_global: int | None = None,
-                n_jobs: int =-1):
+                n_jobs: int =-1,
+                path_score: bool = False):
             """Predict label scores for given text inputs.
 
             Parameters
@@ -429,7 +433,8 @@ class XModel:
                                           fusion=fusion, 
                                           alpha=alpha,
                                           n_jobs=n_jobs, 
-                                          topk_mode=topk_mode)
+                                          topk_mode=topk_mode,
+                                          path_score=path_score)
             """
                 Nice touch, it makes it evaluate all the leaf labels, could be problematic if beam size to great, 
                 Maybe prune anyway ? could be a option
@@ -442,6 +447,7 @@ class XModel:
                 alpha=alpha,
                 n_jobs=-1,
                 topk_mode="per_leaf",  # do not truncate; gather full union from leaves
+                path_score=path_score,
             )
             
             time_start_reranking = time.time()

@@ -17,7 +17,7 @@ uv sync --locked
 ```
 
 Training accepts PubTator by default, or grouped TSV with `-labels_path`.
-Plain TSV requires `emb_flag` 1, 2, or 3 in the supplied JSON config.
+Plain TSV requires `emb_flag` 1 (`.models/xmr4el_flag1_config.json`); PubTator uses 6 (base config).
 The base configuration is `.models/xmr4el_base_config.json`.
 Saved trees are under `test/test_data/saved_trees/`.
 

@@ -55,7 +55,7 @@ def top1(S, rng):
 
 
 ENCODERS = {
-    "sbiobert": "pritamdeka/S-BioBert-snli-multinli-stsb",  # flag 4/5 mention block
+    "sbiobert": "pritamdeka/S-BioBert-snli-multinli-stsb",  # old flag-4/5 mention encoder
     "sapbert": "cambridgeltl/SapBERT-from-PubMedBERT-fulltext",
 }
 
@@ -97,7 +97,8 @@ def featurize(name, tr, te):
         return A, B
     field, enc = ("win", name[3:]) if name.startswith("win") else ("m", name)
     if enc in ENCODERS:
-        E = encode_mentions(ENCODERS[enc], list(tr[field]) + list(te[field]))
+        u, inv = np.unique(list(tr[field]) + list(te[field]), return_inverse=True)
+        E = encode_mentions(ENCODERS[enc], list(u))[inv]
         return E[:len(tr[field])], E[len(tr[field]):]
     raise ValueError(name)
 
@@ -108,6 +109,20 @@ def combine(parts):
         return parts[0][0], parts[0][1]
     return tuple(hstack([csr_matrix(w * normalize(p[i])) for *p, w in parts], format="csr")
                  for i in (0, 1))
+
+
+def expand_mentions(mentions, documents, mode):
+    """mode none | replace (mention -> long form) | append ("SSI surgical site infection").
+    Returns (new mentions, bool mask of rows whose mention is a short form defined in its document)."""
+    from xmr4el.featurization.preprocessor import Preprocessor
+    cache, new, hit = {}, [], []
+    for m, doc in zip(mentions, documents):
+        if doc not in cache:
+            cache[doc] = Preprocessor.abbreviations(doc)
+        lf = cache[doc].get(m.strip())
+        hit.append(lf is not None)
+        new.append(m if lf is None or mode == "none" else lf if mode == "replace" else f"{m.strip()} {lf}")
+    return new, np.array(hit)
 
 
 def show_errors(pred, gold, te_m, unseen, labels, names, n, rng):
@@ -135,6 +150,9 @@ def main():
     ap.add_argument("-scorers", default="centroid", help="comma list of centroid,max")
     ap.add_argument("-window", type=int, default=10, help="context words each side of the mention")
     ap.add_argument("-show_errors", type=int, default=30)
+    ap.add_argument("-abbrev", default="none",
+                    help="comma list of none,replace,append: expand mentions that are a short form defined "
+                         "as 'long form (SF)' in their document, in train and dev")
     args = ap.parse_args()
     rng = np.random.default_rng(0)
 
@@ -149,12 +167,15 @@ def main():
         fields = {"m": [t.split("[SEP]", 1)[0] for t, _ in pairs],  # what the transformer block sees
                   "win": [context_window(d["corpus"][i], d["spans"][i], args.window) for i in keep],
                   "doc": [t.split("[SEP]", 1)[1] for t, _ in pairs]}
+        for mode in args.abbrev.split(","):
+            fields["m:" + mode], fields["abbr"] = expand_mentions(
+                fields["m"], [doc[1:] for doc in fields["doc"]], mode)
         return pairs, fields, len(d["labels"])
 
     train_pairs, tr, _ = load(args.train_path)
     test_pairs, te, n_test_all = load(args.test_path)
     print(f"labels {len(labels)}  train rows {len(train_pairs)}  dev rows {len(test_pairs)}/{n_test_all}")
-    te_m = te["m"]
+    te_m = te["m"]  # raw mentions; the abbrev loop rebinds te["m"]
     y_tr = np.array([l2i[y] for _, y in train_pairs])
     gold = np.array([l2i[y] for _, y in test_pairs])
 
@@ -165,28 +186,49 @@ def main():
         by_label[l2i[y]][_mention(t)] += 1
     names = [by_label[j].most_common(1)[0][0] for j in range(len(labels))]
 
-    cache = {}
-    for spec in args.features.split(","):
-        parts = []
-        for item in spec.split("+"):
-            name, _, w = item.partition("*")
-            if name not in cache:
-                cache[name] = featurize(name, tr, te)
-            parts.append((*cache[name], float(w or 1)))
-        X_tr, X_te = combine(parts)
-        for scorer in args.scorers.split(","):
-            S = label_scores(X_tr, y_tr, X_te, len(labels), scorer)
-            acc, mrr, ties = acc_mrr(S, gold)
-            pred = top1(S, rng)
-            br = string_breakdown([t for t, _ in test_pairs], [labels[g] for g in gold],
-                                  [labels[p] for p in pred], train_pairs)
-            print(f"\n[{spec} / {scorer}] acc@1 {acc:.4f}  MRR {mrr:.4f}  hybrid {br['hybrid']:.4f}"
-                  f"  (gold tied at top {ties:.3f}; breakdown = one random tie-break)")
-            for k, (n, a, _, _) in ((k, v) for k, v in br.items() if k != "hybrid"):
-                print(f"  {k:<15} n {n:5d}  acc@1 {a:.3f}")
-            if scorer == "centroid" and spec == args.features.split(",")[0] and args.show_errors:
-                show_errors(pred, gold, te_m, unseen, labels, names, args.show_errors, rng)
+    def field_of(name):
+        base = name[:-3] if name.endswith("svd") else name
+        return TFIDF[base][0] if base in TFIDF else "win" if name.startswith("win") else "m"
 
+    cache = {}
+    for mode in args.abbrev.split(","):
+        tr["m"], te["m"] = tr["m:" + mode], te["m:" + mode]
+        abbr = te["abbr"]
+        print(f"\n=== abbrev {mode}: short-form mentions defined in their document: train "
+              f"{tr['abbr'].sum()}/{len(tr['abbr'])}, dev {abbr.sum()}/{len(abbr)} "
+              f"(unseen strings {(abbr & unseen).sum()}/{unseen.sum()})")
+        if mode != "none" and args.show_errors:
+            for i in rng.permutation(np.flatnonzero(abbr))[:args.show_errors]:
+                print(f"    {te_m[i].strip()!r:14.14} -> {te['m'][i]!r:50.50}  gold {names[gold[i]]!r}")
+        for spec in args.features.split(","):
+            parts = []
+            for item in spec.split("+"):
+                name, _, w = item.partition("*")
+                key = (mode if field_of(name) == "m" else "", name)
+                if key not in cache:
+                    cache[key] = featurize(name, tr, te)
+                parts.append((*cache[key], float(w or 1)))
+            X_tr, X_te = combine(parts)
+            for scorer in args.scorers.split(","):
+                S = label_scores(X_tr, y_tr, X_te, len(labels), scorer)
+                acc, mrr, ties = acc_mrr(S, gold)
+                pred = top1(S, rng)
+                br = string_breakdown([t for t, _ in test_pairs], [labels[g] for g in gold],
+                                      [labels[p] for p in pred], train_pairs)
+                print(f"\n[{spec} / {scorer} / abbrev {mode}] acc@1 {acc:.4f}  MRR {mrr:.4f}  hybrid {br['hybrid']:.4f}"
+                      f"  (gold tied at top {ties:.3f}; breakdown = one random tie-break; groups by raw string)")
+                for k, (n, a, _, _) in ((k, v) for k, v in br.items() if k != "hybrid"):
+                    print(f"  {k:<15} n {n:5d}  acc@1 {a:.3f}")
+                ok = pred == gold
+                print(f"  {'abbrev rows':<15} n {abbr.sum():5d}  acc@1 {ok[abbr].mean():.3f}"
+                      f"  (unseen {ok[abbr & unseen].mean():.3f})")
+                if mode != "none":
+                    bx = string_breakdown(te["m"], [labels[g] for g in gold], [labels[p] for p in pred],
+                                          list(zip(tr["m"], [y for _, y in train_pairs])))
+                    print(f"  hybrid with expanded dictionary key {bx['hybrid']:.4f}")
+                if (scorer == "centroid" and spec == args.features.split(",")[0] and mode == "none"
+                        and args.show_errors):
+                    show_errors(pred, gold, te_m, unseen, labels, names, args.show_errors, rng)
 
 def _selfcheck():
     X_tr = np.array([[1.0, 0], [0.6, 0.8], [0, 1.0]])
@@ -222,6 +264,16 @@ def _selfcheck():
     A, B = combine([(np.array([[3.0, 4.0]]), np.array([[1.0, 0.0]]), 1.0),
                     (np.array([[0.0, 2.0]]), np.array([[5.0, 0.0]]), 0.5)])
     assert np.allclose(A.toarray(), [[0.6, 0.8, 0.0, 0.5]]) and np.allclose(B.toarray(), [[1, 0, 0.5, 0]])
+    from xmr4el.featurization.preprocessor import Preprocessor
+    best_long_form, abbreviations = Preprocessor.best_long_form, Preprocessor.abbreviations
+    assert best_long_form("SSI", "after surgery a surgical site infection") == "surgical site infection"
+    assert best_long_form("HIV", "the human immunodeficiency virus") == "human immunodeficiency virus"
+    assert best_long_form("XYZ", "no match here") is None
+    doc = ("Surgical site infection (SSI) is common. Tumor necrosis factor (TNF, a cytokine) rose. "
+           "Patients (n = 12) and controls (p < 0.05). SSI rates fell.")
+    assert abbreviations(doc) == {"SSI": "Surgical site infection", "TNF": "Tumor necrosis factor"}
+    new, hit = expand_mentions(["SSI ", "SSI", "rates"], [doc, "no definition", doc], "append")
+    assert new == ["SSI Surgical site infection", "SSI", "rates"] and hit.tolist() == [True, False, False]
     print("selfcheck ok")
 
 

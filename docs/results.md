@@ -317,7 +317,7 @@ Reading:
 - Weight: 1 (equal block weight, the untuned default, as in flag 5) >= 0.5 > 0.3 on raw TF-IDF.
   Chosen for the tree: equal weights, so no dev-tuned parameter enters.
 
-### Flag-6 SapBERT tree `xmodel_2026-10-01_17-48-39`, 1000 labels
+### Flag-6 SapBERT tree `xmodel_1000_flag6_sapbert_sgd`, 1000 labels
 
 Config `.models/xmr4el_flag6_sapbert_config.json`, checked on the saved tree: `emb_flag` 6,
 `context_window` 10, 1000 labels, K 6. 11661/40884 in-vocabulary dev rows. New vocabulary: compare
@@ -333,7 +333,7 @@ Routing (dev): root matcher cluster acc 0.884, top-2 0.946.
 
 | tree (beam 2, `-alpha 1`) | acc@1 | MRR | R@5 | R@20 | recall@cand | cand/query | seen, 1 | seen, >1 | unseen | hybrid |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `17-48-39` (flag 6) | 0.797 | 0.844 | 0.905 | 0.932 | 0.943 | 200 | 0.951 | 0.844 | 0.442 | 0.824 |
+| `xmodel_1000_flag6_sapbert_sgd` (flag 6) | 0.797 | 0.844 | 0.905 | 0.932 | 0.943 | 200 | 0.951 | 0.844 | 0.442 | 0.824 |
 | flat screen, flag-6 features | 0.800 | 0.852 | | | | 1000 | 0.955 | 0.840 | 0.453 | 0.827 |
 
 The first eval was run at `-alpha 0.5` (acc@1 0.759, MRR 0.819). That mixes the leaf matcher's cluster probability into
@@ -348,6 +348,141 @@ Reading (tree):
 Reading (flat):
 - Context gains more at 1000 labels (+0.019) than at 500 (+0.012), nearly all on seen ambiguous strings
   (+0.044), as expected for a larger vocabulary.
+
+## Session 11 (2026-10-02): abbreviation expansion (flat, `screen_features.py`)
+
+Vocabulary/rows of tree `xmodel_1000_flag6_sapbert_sgd` (1000 labels, 11661 in-vocabulary dev rows), features `sapbert` + charsvd + ctxwinsvd
+(flag 6), centroid scorer. A mention that is a short form defined as "long form (SF)" in its own document (Schwartz-Hearst,
+first definition wins) is expanded in train and dev; context blocks unchanged. Expanded rows: train 1593/36377, dev 487/11661
+(349 of the 2848 unseen-string rows). Detector precision: 30/30 sampled dev pairs correct (full files: 11595/122241 train,
+3895/40884 dev rows). Groups keyed by the raw mention string.
+
+| abbrev | acc@1 | MRR | hybrid (raw key) | hybrid (expanded key) | seen, 1 | seen, >1 | unseen | abbrev rows | abbrev, unseen |
+|---|---|---|---|---|---|---|---|---|---|
+| none (baseline) | 0.800 | 0.852 | 0.827 | | 0.955 | 0.840 | 0.453 | 0.386 | 0.181 |
+| replace | 0.809 | 0.860 | 0.833 | 0.833 | 0.958 | 0.842 | 0.480 | 0.550 | 0.390 |
+| append ("SF long form") | **0.810** | **0.861** | 0.834 | **0.835** | **0.960** | 0.842 | **0.482** | **0.556** | **0.398** |
+
+n: seen 1 = 5532, seen >1 = 3281, unseen = 2848, abbrev rows = 487 (unseen 349).
+
+Reading:
+- Append wins: +0.010 acc@1, +0.009 MRR, +0.008 hybrid. Abbreviation rows 0.386 -> 0.556; unseen abbreviations 0.181 -> 0.398.
+- Append >= replace everywhere (small): keeping the short form keeps its char n-grams.
+- Dictionary key barely matters (0.834 raw vs 0.835 expanded); the loader expands both sides, so eval uses the expanded key.
+- Remaining abbreviation errors are mostly generic gold labels ("findings", "regions", "embase") and short forms
+  not defined in the document.
+
+Retained: `abbrev_expansion: "append"` (now `.models/xmr4el_base_config.json`); not yet in a tree.
+
+## Session 11 (2026-10-02): XMR4EL vs PECOS XR-Linear, 500 labels
+
+Tree `xmodel_500_flag6_sapbert_abbrev_sgd`: base config (flag 6, SapBERT + charsvd + ctxwinsvd, `abbrev_expansion` append,
+window 10), `-ds_len 500` -> 500 labels, 23512 train rows; 7530/40884 in-vocabulary dev rows (347 distinct gold labels).
+New vocabulary and new features: compare only within this table.
+
+PECOS 1.2.8 XR-Linear (`pecos.dockerfile`, `test/xmr4el/pecos_run.py`, defaults otherwise): PIFA label embeddings,
+hierarchical k-means nr_splits 8 / max leaf 100 -> 8 clusters -> labels, top-100 output. `ours` = the tree's own X/Y
+and dev features (same rows, same label order; `pecos_compare.py export`); `tfidf` = PECOS's default TF-IDF of the same
+"mention [SEP] window" texts. Metrics from the same code as eval (`pecos_compare.py score`).
+
+| system | acc@1 | MRR | R@5 | R@20 | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|
+| XMR4EL tree (beam 2, cosine leaf, `-alpha 1`) | 0.817 | 0.867 | 0.928 | 0.947 | 0.964 | 0.839 | 0.521 | 0.851 |
+| PECOS, our features, beam 2 | **0.861** | 0.891 | 0.928 | 0.939 | **0.977** | **0.933** | **0.571** | **0.865** |
+| PECOS, our features, beam 10 | **0.861** | **0.896** | **0.939** | **0.955** | **0.977** | **0.933** | **0.571** | **0.865** |
+| PECOS, PECOS TF-IDF, beam 2 | 0.507 | 0.628 | 0.776 | 0.825 | 0.583 | 0.623 | 0.251 | 0.782 |
+| PECOS, PECOS TF-IDF, beam 10 | 0.510 | 0.639 | 0.799 | 0.862 | 0.587 | 0.625 | 0.252 | 0.783 |
+| dictionary | 0.716 | | | | 0.984 | 0.932 | 0 | |
+
+n: seen 1 = 3638, seen >1 = 1946, unseen = 1946. Tree: 40 candidates/query, recall@cand 0.951.
+PECOS time (Docker, amd64 emulation): train 7.3 s / predict 0.7 s (ours, beam 2); XMR4EL train time not recorded.
+
+Reading:
+- Same features, same rows: PECOS +0.044 acc@1 over the tree. The features are not the gap; the label scorer is.
+  The tree scores leaf labels by cosine to the PIFA centroid (rankers off); PECOS trains one linear classifier per label
+  against the other labels of its cluster.
+- The gain is largest on seen ambiguous strings (0.839 -> 0.933, = dictionary 0.932): a per-label classifier can use the
+  context block, a centroid cannot separate labels that share a mention. Unseen +0.050, seen single +0.013.
+- PECOS alone (0.861) beats our hybrid (0.851); its hybrid adds only 0.004.
+- Beam 2 vs 10 does not change acc@1 (0.861): routing is not PECOS's limit either.
+- Our own leaf matcher as the scorer (`-alpha 0`, beam 2): acc@1 0.394, MRR 0.607, but R@5 0.917 (seen 1 0.450,
+  seen >1 0.320, unseen 0.362). Gold is near the top, rarely first. From code: each leaf's matcher is a multilabel
+  OneVsRest (fitted on a 0/1 indicator matrix), so `predict_proba` is one sigmoid per label, trained only against the
+  other labels of that leaf; the tree merges the beam's leaves by max score with no root/cluster factor
+  (`_predict_one_leaf`). A wrong leaf's labels never saw the query's true neighbours as negatives, so beam-2 scores from
+  two leaves are not on one scale. PECOS multiplies the cluster score into each label score along the path.
+  (Corrected 2026-10-06: an earlier version of this note said OneVsRest renormalises rows within a leaf; it does not in
+  multilabel mode, checked on the saved matchers: `multilabel_` True.)
+- Confirmed with `-alpha 0 -beam_size 1` (one leaf, no merge): acc@1 0.794, MRR 0.839, recall@cand 0.898 (seen 1 0.934,
+  seen >1 0.812, unseen 0.515). Within the routed leaf the matcher is right 0.794 / 0.898 = 0.88 of the time it can be,
+  vs cosine 0.817 / 0.951 = 0.86 and PECOS ~0.90. The leaf classifiers are fine; the beam merge is the bug.
+- With the fix (`-alpha 0 -beam_size 2 -path_score`): acc@1 0.801, MRR 0.858, R@5 0.926, recall@cand 0.945, hybrid
+  0.856 (seen 1 0.935, seen >1 0.812, unseen 0.540). Merge fixed (0.394 -> 0.801), but the leaf matcher stays under
+  cosine (0.817) and PECOS (0.861) on seen strings (PECOS 0.977 / 0.933); it beats cosine on unseen (0.540 vs 0.521).
+  Same routing, so the remaining gap is the leaf classifier itself (SGD log_loss, L1, `class_weight` balanced vs PECOS
+  L2 squared hinge, unweighted).
+
+Leaf scorer screen (`screen_leaf_scorer.py`, no training): the tree's 6 leaves (83-85 labels), exported features, oracle
+routing, so acc@1 = within-leaf accuracy (end-to-end ~ this x routing recall).
+
+| leaf scorer | within-leaf acc@1 | seen, 1 | seen, >1 | unseen | hybrid | fit time |
+|---|---|---|---|---|---|---|
+| cosine to PIFA centroid (tree default) | 0.866 | 0.977 | 0.857 | 0.666 | 0.890 | 2 s |
+| logreg liblinear L2 C=1 | 0.891 | 0.957 | 0.945 | 0.712 | 0.902 | 53 s |
+| logreg liblinear L2 C=1, class_weight balanced | 0.920 | 0.987 | 0.947 | 0.769 | 0.916 | 104 s |
+| LinearSVC squared hinge C=1 (PECOS loss) | **0.921** | **0.989** | 0.945 | **0.771** | **0.917** | 108 s |
+
+- liblinear L2 beats cosine by +0.055 within the leaf; balanced weights help (+0.029), so `class_weight` was not the
+  problem: the SGD L1 solution was. svm = logreg_bal within 0.001.
+- Retained: logreg liblinear balanced (gives probabilities, needed for the path product). Base config matcher (all
+  layers) is now `sklearnlogisticregression` {solver liblinear, C 1, class_weight balanced}; tree `xmodel_500_flag6_sapbert_abbrev_sgd` was trained
+  with the previous SGD matcher (its pickle keeps that config).
+- PECOS with its default word TF-IDF on "mention [SEP] window" is weak (0.51): the context words dominate the mention.
+  The useful comparison is the same-features row.
+
+## Session 11 (2026-10-02): liblinear leaf matcher + path score, 500 and 1000 labels
+
+Trees trained with the base config (flag 6 SapBERT + charsvd + ctxwinsvd, abbrev append, window 10, matcher
+`sklearnlogisticregression` liblinear L2 C 1 balanced at every layer). Eval beam 2; `-alpha 0 -path_score` = leaf matcher
+probability x routing path probability; `-alpha 1` = cosine to leaf z on the same tree.
+
+| tree | labels | dev rows | scorer | acc@1 | MRR | R@5 | recall@cand | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `xmodel_500_flag6_sapbert_abbrev_logreg` | 500 | 7530 | matcher x path | **0.862** | **0.896** | **0.941** | 0.956 | **0.976** | 0.931 | **0.578** | **0.866** |
+| same | 500 | 7530 | cosine | 0.816 | 0.867 | 0.929 | 0.956 | 0.962 | 0.840 | 0.520 | 0.851 |
+| PECOS XR-Linear, same features (beam 2) | 500 | 7530 | | 0.861 | 0.891 | 0.928 | | 0.977 | **0.933** | 0.571 | 0.865 |
+| `xmodel_500_flag6_sapbert_abbrev_sgd` (SGD matcher) | 500 | 7530 | cosine | 0.817 | 0.867 | 0.928 | 0.951 | 0.964 | 0.839 | 0.521 | 0.851 |
+| `xmodel_1000_flag6_sapbert_abbrev_logreg` | 1000 | 11661 | matcher x path | **0.843** | **0.884** | **0.933** | 0.952 | **0.973** | **0.905** | **0.525** | **0.845** |
+| same | 1000 | 11661 | cosine | 0.808 | 0.856 | 0.920 | 0.951 | 0.960 | 0.843 | 0.480 | 0.834 |
+| PECOS XR-Linear, same features (beam 2; 2 -> 16 clusters -> labels) | 1000 | 11661 | | 0.838 | 0.871 | 0.911 | | 0.967 | 0.894 | 0.529 | 0.846 |
+| PECOS, same, beam 10 | 1000 | 11661 | | 0.839 | 0.878 | 0.926 | | 0.966 | 0.894 | 0.535 | 0.847 |
+| `xmodel_1000_flag6_sapbert_sgd` (no abbrev, SGD) | 1000 | 11661 | cosine | 0.797 | 0.844 | 0.905 | 0.943 | 0.951 | 0.844 | 0.442 | 0.824 |
+
+n (500): seen 1 = 3638, seen >1 = 1946, unseen = 1946. n (1000, abbrev keys): 5518 / 3259 / 2884 (raw keys: 5532 / 3281 /
+2848). Dictionary: 0.716 (500), 0.715 (1000).
+
+Reading:
+- 500 labels: the tree now matches PECOS on the same features (0.862 vs 0.861; MRR 0.896 vs 0.891). The two changes were
+  the leaf classifier (liblinear L2 instead of SGD L1) and combining leaves by path probability.
+- 1000 labels: 0.843 vs 0.797 for the previous 1000-label tree (+0.046). Of that, abbreviation expansion is ~+0.011 (cosine
+  on the new tree 0.808 vs 0.797, matching the flat screen +0.010); the matcher + path score is +0.035.
+- Seen ambiguous strings: the tree now beats the dictionary at 1000 (0.905 vs 0.895) and ties it at 500 (0.931 vs 0.932),
+  so the hybrid adds only +0.002-0.004. The remaining weak group is unseen strings (0.53-0.58).
+- Cosine on a logreg tree equals cosine on the SGD tree (0.816 vs 0.817): the matcher change does not hurt routing.
+- 1000 labels: the tree beats PECOS on the same features (0.843 vs 0.838 at beam 2; MRR 0.884 vs 0.871). PECOS's
+  hierarchy at 1000 labels is 2 -> 16 clusters (nr_splits 8, max leaf 100), not the tree's 6 leaves.
+- Training time (user): our tree ~100 s (500 labels) vs PECOS 7.1 s (features precomputed for PECOS). Profile of a
+  500-label training (cProfile, self time; 195 s under the profiler): SapBERT forward ~91 s (47%), waiting on the
+  OneVsRest liblinear worker processes ~67 s (34%), rest (SVD, I/O, gc, imports) ~30 s. Clustering 1.4 s.
+- Leaf classifier speed screen (`screen_leaf_scorer.py`, 1000 labels, oracle routing, 6 leaves of 166-170 labels):
+  logreg_bal 0.8974 in 238 s; liblinear tol 1e-2: 0.8974 in 197 s; char/context SVD cut to 256 dims: 0.8919 in 143 s
+  (unseen -0.013, rejected); **joint** (same objective, all labels of a leaf in one L-BFGS problem on BLAS,
+  `JointOvRLogistic`): 0.8974 in **19 s**, identical in every group. On one 167-label leaf it agreed with liblinear's top-1
+  on every dev row. Retained: base config matcher `jointlogisticregression` {C 1, class_weight balanced, tol 1e-4}.
+  Cost per label of the old path: liblinear 0.45 s single-core; 8 OneVsRest worker processes only reach 0.12-0.16 s.
+- Speed changes (prediction-neutral up to float noise): `Transformer.transform` embeds each distinct text once (500
+  labels: 23512 rows -> 5937 strings; measured 13.2 s -> 6.2 s on 3000 rows, max abs diff 6e-6) and runs on the Apple
+  GPU (MPS) when available (1.4x on 25-token mentions, max abs diff 9e-6, cosine 1.000000).
 
 ## Commands
 

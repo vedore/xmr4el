@@ -391,7 +391,7 @@ class MLModel():
         # for the leaf only, so the non-leaf layers stay byte-identical and the #6 row stays
         # attributable to #6.
         matcher_config = self.matcher_config
-        if self.is_last_layer:
+        if self.is_last_layer and matcher_config.get("type") == "sklearnsgdclassifier":
             matcher_config = {
                 **matcher_config,
                 "kwargs": {**matcher_config.get("kwargs", {}), "early_stopping": False},
@@ -1074,7 +1074,11 @@ class HierarchicaMLModel():
                 alpha: float = 0.5,
                 topk_mode: str = "per_leaf",   # "per_leaf" | "global" | "none"
                 include_global_path: bool = True,
-                n_jobs: int = None):
+                n_jobs: int = None,
+                path_score: bool = False):
+        # path_score: leaf score x routing path probability (exp(path_logscore)), as XR-Linear does.
+        # Leaf matcher probabilities are per-label sigmoids trained only against that leaf's labels, so
+        # without it the beam's leaves are merged by max on scales that are not comparable.
 
         time_start_routing = time.time()
 
@@ -1149,6 +1153,8 @@ class HierarchicaMLModel():
             )
 
             for (qi, trail), labels, scores in zip(zip(q_indices, trails), labels_list, scores_list):
+                if path_score and trail:
+                    scores = asarray(scores) * np.exp(trail[-1]["path_logscore"])
                 if per_leaf_topk:
                     labels, scores = _maybe_leaf_topk(labels, scores, topk_norm)
 

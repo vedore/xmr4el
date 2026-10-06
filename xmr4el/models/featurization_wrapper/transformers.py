@@ -1,9 +1,6 @@
 import logging
 import os
-import gc
-import json
 import glob
-import pickle
 import shutil
 import torch
 import numpy as np
@@ -12,150 +9,59 @@ from gc import collect
 from numpy import savez_compressed, array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
-from abc import ABCMeta
 from sentence_transformers import SentenceTransformer
 from concurrent.futures import ThreadPoolExecutor
 
 
-transformer_dict = {}
-
 logger = logging.getLogger(__name__)
+
+# Short config `type` names -> checkpoints (configs and saved trees use these). Any other model:
+# "kwargs": {"model_name": "<HF or sentence-transformers id>"}, optionally "pooling" and "max_seq_length".
+MODEL_NAMES = {
+    "biobert": "dmis-lab/biobert-base-cased-v1.2",
+    "sentencetbiobert": "pritamdeka/S-BioBert-snli-multinli-stsb",
+    "sapbert": "cambridgeltl/SapBERT-from-PubMedBERT-fulltext",
+}
 
 # Plain HF checkpoints that their authors pool by [CLS], with a max token length.
 # SentenceTransformer(name) alone would mean-pool them.
 CLS_POOLED = {"cambridgeltl/SapBERT-from-PubMedBERT-fulltext": 25}
 
 
-def sentence_model(model_name, device="cpu"):
-    """Load the encoder used for every transformer embedding (training, prediction, screening)."""
+def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None):
+    """Load the encoder used for every transformer embedding (training, prediction, screening).
+    pooling "cls" | "mean" | ... builds [transformer, pooling] explicitly; None = the checkpoint's own
+    sentence-transformers setup (mean pooling for a plain HF checkpoint), or CLS_POOLED's."""
     from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
-    if model_name in CLS_POOLED:
-        tok = STTransformer(model_name, max_seq_length=CLS_POOLED[model_name])
-        pool = Pooling(tok.get_embedding_dimension(), pooling_mode="cls")
-        return SentenceTransformer(modules=[tok, pool], device=str(device))
-    return SentenceTransformer(model_name).to(device)
+    if pooling is None and model_name in CLS_POOLED:
+        pooling, max_seq_length = "cls", max_seq_length or CLS_POOLED[model_name]
+    if pooling is None:
+        model = SentenceTransformer(model_name).to(device)
+        if max_seq_length is not None:
+            model.max_seq_length = max_seq_length
+        return model
+    tok = STTransformer(model_name, max_seq_length=max_seq_length)
+    pool = Pooling(tok.get_embedding_dimension(), pooling_mode=pooling)
+    return SentenceTransformer(modules=[tok, pool], device=str(device))
 
 
-class TransformersMeta(ABCMeta):
-    """Metaclass for keeping track of all 'Transformer' subclasses"""
-
-    def __new__(cls, name, bases, attr):
-        new_cls = super().__new__(cls, name, bases, attr)
-        if name != "Transformer":
-            transformer_dict[name.lower()] = new_cls
-        return new_cls
-
-
-class Transformer(metaclass=TransformersMeta):
-    """Wrapper class for all BERT-based Transformers."""
-
-    def __init__(self, config, model):
-        """Initialization
-
-        Args:
-            config (dict): Dict with key `"type"` and value being the lower
-            -cased name of the specific transformer class to use.
-            Also contains keyword arguments to pass to the specified
-            transformer.
-            model (Berttransformer): Trained Berttransformer.
-        """
-
-        self.config = config
-        self.model = model
-
-
-    def save(self, transformer_folder):
-        """Save trained transformer to disk.
-
-        Args:
-            transformer_folder (str): Folder to save to.
-        """
-
-        # LOGGER.info(f"Saving transformer to {transformer_folder}")
-        os.makedirs(transformer_folder, exist_ok=True)
-        with open(
-            os.path.join(transformer_folder, "best_vec_config.json"),
-            "w",
-            encoding="utf-8",
-        ) as fout:
-            fout.write(json.dumps(self.config))
-        self.model.save(transformer_folder)
-
-    @classmethod
-    def load(cls, transformer_folder):
-        """Load a saved transformer from disk.
-
-        Args:
-            transformer_folder (str): Folder where `Berttransformer` was saved to using `Berttransformer.save`.
-
-        Returns:
-            Berttransformer: The loaded object.
-        """
-
-        config_path = os.path.join(transformer_folder, "bert_vec_config.json")
-
-        if not os.path.exists(config_path):
-            config = {"type": "biobert", "kwargs": {}}
-        else:
-            with open(config_path, "r", encoding="utf-8") as fin:
-                config = json.loads(fin.read())
-
-        transformer_type = config.get("type", None)
-        assert (
-            transformer_type is not None
-        ), f"{transformer_folder} is not a valid transformer folder"
-        assert (
-            transformer_type in transformer_dict
-        ), f"invalid transformer type {config['type']}"
-        model = transformer_dict[transformer_type].load(transformer_folder)
-        return cls(config, model)
+class Transformer:
+    """Embeds texts with a frozen transformer; config = {"type": <MODEL_NAMES key>, "kwargs": {...}}."""
 
     @classmethod
     def transform(cls, trn_corpus, config=None, dtype=np.float32):
-        """Train on a corpus.
-
-        Args:
-            trn_corpus (list or str): Training corpus in the form of a list of strings or path to text file.
-            config (dict, optional): Dict with key `"type"` and value being the lower-cased name of the specific transformer class to use.
-                Also contains keyword arguments to pass to the specified transformer. Default behavior is to use tfidf transformer with default arguments.
-            dtype (type, optional): Data type. Default is `numpy.float32`.
-
-        Returns:
-            Berttransformer: Trained Berttransformer.
-        """
-
-        # LOGGER.info("Starting training for a Transformer")
+        """Returns (run config, embeddings ndarray). kwargs: model_name (overrides type), pooling,
+        max_seq_length, batch_size, batch_dir, output_prefix, max_oom_retries."""
         config = config if config is not None else {"type": "sentencetbiobert", "kwargs": {}}
-
-        transformer_type = config.get("type", None)
-        assert (
-            transformer_type is not None
-        ), f"config {config} should contain a key 'type' for the transformer type"
-        # assert isinstance(trn_corpus, list), "No model supports from file training"
-
-        # LOGGER.info(f"Training transformer of type {transformer_type}")
-        defaults = {
-            "batch_size": 1000,
-            "batch_dir": "batch_dir",
-            "output_prefix": "st_emb",
-            "dtype": np.float32,
-            "max_oom_retries": 3,
-            "device": "cpu"
-        }
-        
-        config = {**defaults, **config['kwargs']}
-        
-        print(config)
-        
-        model = transformer_dict[transformer_type](config)
-        embeddings = cls._predict(
-            model.model_name, trn_corpus, **config
-        )
-        
-        model.embeddings = embeddings
-        
-        # model are the embeddings
-        return config, embeddings
+        kwargs = {"batch_size": 1000, "batch_dir": "batch_dir", "output_prefix": "st_emb",
+                  "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
+        model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
+        assert model_name, f"transformer config {config} needs a known 'type' or kwargs.model_name"
+        kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
+        print(kwargs)
+        # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
+        uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
+        return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs)[inv.ravel()]
 
     @classmethod
     def _predict(
@@ -167,15 +73,14 @@ class Transformer(metaclass=TransformersMeta):
         batch_dir="batch_dir",
         output_prefix="st_emb",
         max_oom_retries=3,
-        device = "cpu"
+        pooling=None,
+        max_seq_length=None,
     ):
         """
         Optimized function for efficient memory usage during CPU or GPU-based embedding extraction.
         """
 
-        # device = torch.device("cuda" if device == "gpu" and torch.cuda.is_available() else "cpu")
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
         logger.info(f"Using PyTorch device: {device}")
 
@@ -183,7 +88,7 @@ class Transformer(metaclass=TransformersMeta):
         emb_file = f"{batch_dir}/{output_prefix}"
         cls._create_batch_dir(batch_dir)
         
-        model = sentence_model(model_name, device)
+        model = sentence_model(model_name, device, pooling, max_seq_length)
         len_corpus = len(trn_corpus)
 
         if batch_size == 0:
@@ -248,38 +153,6 @@ class Transformer(metaclass=TransformersMeta):
 
 
     @staticmethod
-    def load_config_from_args(args):
-        """Parse config from a `argparse.Namespace` object.
-
-        Args:
-            args (argparse.Namespace): Contains either a `transformer_config_path` (path to a json file) or `transformer_config_json` (a json object in string form).
-
-        Returns:
-            dict: The dict resulting from loading the json file or json object.
-
-        Raises:
-            Exception: If json object cannot be loaded.
-        """
-
-        if args.transformer_config_path is not None:
-            with open(args.transformer_config_path, "r", encoding="utf-8") as fin:
-                transformer_config_json = fin.read()
-        else:
-            transformer_config_json = args.transformer_config_json
-
-        try:
-            transformer_config = json.loads(transformer_config_json)
-        except json.JSONDecodeError as jex:
-            raise Exception(
-                "Failed to load transformer config json from {} ({})".format(
-                    transformer_config_json, jex
-                )
-            )
-        return transformer_config
-    
-    def embeddings(self):
-        return self.model.embeddings
-    
     def _create_batch_dir(batch_dir):
         """
         Create the batch dir if it does not exist,
@@ -294,120 +167,8 @@ class Transformer(metaclass=TransformersMeta):
             # LOGGER.warning("Directory does not exist, Creating")
             os.makedirs(batch_dir)
 
+    @staticmethod
     def _del_batch_dir(batch_dir):
         """Delete the batch directory"""
         
         shutil.rmtree(batch_dir)
-
-class BioBert(Transformer):
-    """BioBERT-based transformer."""
-
-    model_name = "dmis-lab/biobert-base-cased-v1.2"
-
-    def __init__(self, config=None, embeddings=None):
-        """Initialization
-
-        Args:
-            config (dict): Dict with key `"type"` and value being the lower-cased name of the specific transformer class to use.
-                Also contains keyword arguments to pass to the specified transformer.
-            embeddings (numpy.ndarray): The Embeddings
-            model_name (str): Transformer name
-        """
-
-        self.config = config
-        self.embeddings = embeddings
-        self.model_name = BioBert.model_name
-
-    def save(self, save_dir):
-        """Save trained tfidf transformer to disk.
-
-        Args:
-            save_dir (str): Folder to save the model.
-        """
-
-        # LOGGER.info(f"Saving BioBERT transformer to {save_dir}")
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "transformer.pkl"), "wb") as fout:
-            pickle.dump(self.__dict__, fout)
-
-    @classmethod
-    def load(cls, load_dir):
-        """Load a BioBert Transformer from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            BioBert: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading BioBERT transformer from {load_dir}")
-        transformer_path = os.path.join(load_dir, "transformer.pkl")
-        assert os.path.exists(
-            transformer_path
-        ), f"transformer path {transformer_path} does not exist"
-
-        with open(transformer_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls()
-        model.__dict__.update(model_data)
-        return model
-    
-class SentenceTBioBert(Transformer):
-    
-    model_name = "pritamdeka/S-BioBert-snli-multinli-stsb"
-
-    def __init__(self, config=None, embeddings=None):
-        """Initialization
-
-        Args:
-            config (dict): Dict with key `"type"` and value being the lower-cased name of the specific transformer class to use.
-                Also contains keyword arguments to pass to the specified transformer.
-            embeddings (numpy.ndarray): The Embeddings
-            model_name (str): Transformer name
-        """
-
-        self.config = config
-        self.embeddings = embeddings
-        self.model_name = type(self).model_name
-
-    def save(self, save_dir):
-        """Save trained tfidf transformer to disk.
-
-        Args:
-            save_dir (str): Folder to save the model.
-        """
-
-        # LOGGER.info(f"Saving Sentence BioBERT transformer to {save_dir}")
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "transformer.pkl"), "wb") as fout:
-            pickle.dump(self.__dict__, fout)
-
-    @classmethod
-    def load(cls, load_dir):
-        """Load a BioBert Transformer from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            BioBert: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading BioBERT transformer from {load_dir}")
-        transformer_path = os.path.join(load_dir, "transformer.pkl")
-        assert os.path.exists(
-            transformer_path
-        ), f"transformer path {transformer_path} does not exist"
-
-        with open(transformer_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls()
-        model.__dict__.update(model_data)
-        return model
-
-
-class SapBert(SentenceTBioBert):
-    """SapBERT (UMLS synonym-trained PubMedBERT), [CLS] pooling via CLS_POOLED."""
-
-    model_name = "cambridgeltl/SapBERT-from-PubMedBERT-fulltext"

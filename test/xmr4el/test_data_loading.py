@@ -52,9 +52,9 @@ def test_local_inputs():
 
         for path, extra, flag, expected in (
             (tsv, ["-labels_path", str(labels)], 1, tsv_expected),
-            (pubtator, [], 4, pub_expected),
+            (pubtator, [], 6, pub_expected),
         ):
-            model = Mock(emb_flag=flag, context_window=None)
+            model = Mock(emb_flag=flag, context_window=None, abbrev_expansion=None)
             argv = [str(script), "-train_path", str(path), "-ds_len", "1", *extra]
             with patch("sys.argv", argv), patch.object(
                 XModel, "load_config", return_value=model
@@ -63,7 +63,7 @@ def test_local_inputs():
             model.train.assert_called_once_with(expected[:1], ["L1"])
             model.save.assert_called_once()
 
-        model = Mock(emb_flag=4, context_window=None)
+        model = Mock(emb_flag=6, context_window=None)
         argv = [str(script), "-train_path", str(tsv), "-labels_path", str(labels)]
         with patch("sys.argv", argv), patch.object(
             XModel, "load_config", return_value=model

@@ -2,7 +2,7 @@
 
 For one saved tree, on train rows and on in-vocabulary dev mentions:
   - root top-1 cluster accuracy: trained matcher vs cosine-to-cluster-centroid over Z
-  - the same cosine router restricted to the mention block and the context block (emb_flag 4)
+  - the same cosine router restricted to each feature block (emb_flag 6: mention, char, context)
   - flat nearest-label acc@1: argmax cosine(x, Z) over every label, no hierarchy
   - dictionary baseline: normalised mention string -> most frequent train label
 """
@@ -88,10 +88,11 @@ def main():
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
 
     blocks = {"all": slice(None)}
-    if xm.emb_flag in (4, 5):
-        d_t = Z.shape[1] - xm.dimension_config["kwargs"]["n_components"]
-        second = "context" if xm.emb_flag == 4 else "char"
-        blocks.update({"mention": slice(0, d_t), second: slice(d_t, None)})
+    if xm.emb_flag == 6:
+        n_c = xm.dimension_config["kwargs"]["n_components"]
+        n_x = xm.context_dimension_config["kwargs"]["n_components"]
+        d_t = Z.shape[1] - n_c - n_x
+        blocks.update({"mention": slice(0, d_t), "char": slice(d_t, d_t + n_c), "context": slice(d_t + n_c, None)})
 
     # Train rows: X[i] pairs with Y[i]; Y rows are one-hot over label columns
     Y = xm.Y.tocsr()
@@ -99,14 +100,16 @@ def main():
     tr = rng.permutation(Y.shape[0])[:args.max_rows]
     report("train", xm.X[tr], Y.indices[tr], root, Z, cluster_of, blocks)
 
-    test = Preprocessor.load_pubtator_file(args.test_path, window=getattr(xm, "context_window", None))
+    abbrev = getattr(xm, "abbrev_expansion", None)
+    test = Preprocessor.load_pubtator_file(args.test_path, window=getattr(xm, "context_window", None),
+                                           abbrev=abbrev)
     pairs = [(t, y) for t, y in zip(test["corpus"], test["labels"]) if y in label_to_idx]
     print(f"\nin-vocabulary dev mentions: {len(pairs)}/{len(test['labels'])}")
     pairs = [pairs[i] for i in rng.permutation(len(pairs))[:args.max_rows]]
     X_dev = xm.text_encoder.predict([t for t, _ in pairs])
     report("dev", X_dev, np.array([label_to_idx[y] for _, y in pairs]), root, Z, cluster_of, blocks)
 
-    train = Preprocessor.load_pubtator_file(args.train_path)
+    train = Preprocessor.load_pubtator_file(args.train_path, abbrev=abbrev)
     train_pairs = [(t, y) for t, y in zip(train["corpus"], train["labels"]) if y in label_to_idx]
     acc, cov = dictionary_baseline(train_pairs, pairs)
     print(f"\ndictionary baseline (dev): acc@1 {acc:.4f}  mention-string coverage {cov:.3f}")

@@ -52,6 +52,17 @@ def main():
     t1 = t1.toarray()
     assert (t1 > 0).sum(axis=1).max() <= 2, "topk=1 keeps at most one label per visited leaf"
     assert (t1.argmax(axis=1) == b.argmax(axis=1)).all(), "per-leaf topk cut the wrong labels"
+
+    # path_score: each leaf's score is multiplied by its routing path probability, nothing else changes
+    kw0 = dict(beam_size=2, topk=0, alpha=0.0)
+    (routes, off), (_, on) = without_r.predict(Xq, **kw0), without_r.predict(Xq, path_score=True, **kw0)
+    expect = off.toarray()
+    for r in routes:
+        for p in r["paths"]:
+            if p["trail"]:
+                expect[r["query_index"], p["leaf_global_labels"]] *= np.exp(p["trail"][-1]["path_logscore"])
+    assert np.allclose(on.toarray(), expect), "path_score must scale each leaf by exp(path_logscore)"
+    assert not np.allclose(on.toarray(), off.toarray()), "beam 2 visits leaves with different path scores"
     print("ok")
 
 

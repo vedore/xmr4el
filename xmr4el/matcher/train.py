@@ -65,7 +65,7 @@ def _selfcheck():
     import json
     import scipy.sparse as sp
 
-    cfg = json.load(open(".models/xmr4el_base_config.json"))["matcher_config"]
+    cfg = json.load(open(".models/xmr4el_flag6_sapbert_config.json"))["matcher_config"]  # SGD matcher
     rng = np.random.default_rng(0)
     n, d, L = 40, 12, 6
     X = rng.normal(size=(n, d)).astype(np.float32)

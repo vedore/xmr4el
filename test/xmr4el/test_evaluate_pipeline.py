@@ -104,6 +104,9 @@ def main():
     parser.add_argument("-scorer", choices=["ranker", "cosine"], default="cosine",
                         help="leaf label score fused with the matcher: cosine to leaf z (default; trained "
                              "rankers anti-rank, docs/results.md Session 7) or the trained rankers")
+    parser.add_argument("-path_score", action="store_true",
+                        help="multiply each leaf score by the routing path probability (XR-Linear); needed to "
+                             "compare leaves in a beam when alpha < 1 (leaf matcher probs are only comparable within a leaf)")
     parser.add_argument("-verbose", action="store_true",
                         help="show library prints, logs and progress bars (hidden by default)")
     args = parser.parse_args()
@@ -128,8 +131,9 @@ def main():
     for leaf in trained_xtree.model.hmodel[-1]:
         leaf.cosine_scorer = args.scorer == "cosine"
 
+    abbrev = getattr(trained_xtree, "abbrev_expansion", None)  # train side too: same dictionary keys
     test_set = Preprocessor.load_pubtator_file(
-        args.test_path, window=getattr(trained_xtree, "context_window", None))
+        args.test_path, window=getattr(trained_xtree, "context_window", None), abbrev=abbrev)
     labels = test_set["labels"]
     golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
     n_total, n = len(labels), len(golden_labels)
@@ -140,7 +144,8 @@ def main():
                                                   topk=args.topk,
                                                   fusion="lp_fusion",
                                                   alpha=args.alpha,
-                                                  topk_mode="per_leaf")
+                                                  topk_mode="per_leaf",
+                                                  path_score=args.path_score)
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
@@ -166,8 +171,9 @@ def main():
     print(f"rows     {n}/{n_total} gold label in vocabulary ({n / max(n_total, 1):.1%}); "
           f"{len(set(golden_labels))} distinct gold labels")
     print(f"search   beam {args.beam_size}, scorer {args.scorer}, alpha {args.alpha}, "
+          f"path score {'on' if args.path_score else 'off'}, "
           f"{nnz:.0f} candidates/query")
-    if args.scorer == "cosine" and args.alpha != 1:
+    if args.scorer == "cosine" and 0 < args.alpha < 1:
         print(f"WARNING  alpha {args.alpha} mixes the matcher probability into the cosine score; "
               f"not comparable with alpha 1 rows")
     print()
@@ -197,7 +203,7 @@ def main():
                   f"MRR {mrr(r):.4f}")
 
     if args.train_path:
-        train = Preprocessor.load_pubtator_file(args.train_path)
+        train = Preprocessor.load_pubtator_file(args.train_path, abbrev=abbrev)
         train_pairs = [(t, y) for t, y in zip(train["corpus"], train["labels"]) if y in label_to_idx]
         tree_top1 = [trained_labels[r.indices[np.argmax(r.data)]] if r.nnz else None
                      for r in (score_csr.getrow(i) for i in range(score_csr.shape[0]))]

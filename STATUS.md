@@ -4,11 +4,32 @@ History and completed steps: `docs/status_log.md`. Valid results: `docs/results.
 
 ## Resume here
 
-Last updated 2026-10-02 (session 10). A new session starts from this block; update it at the
+Last updated 2026-10-06 (session 11 end). A new session starts from this block; update it at the
 end of every step and before the user resets the chat.
 
-**NEXT (user decision 2026-10-02, session 10 end):** work on (1) abbreviation expansion, then (2) a candidate reranker.
-Both are tested flat first (`screen_features.py` on tree `17-48-39`, 1000 labels), so no training run. Baselines on those
+**IN FLIGHT (user, on a Linux machine):** timed 1000-label retrain with the base config:
+`time python3 test/xmr4el/test_train_pipeline.py -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
+-model_config .models/xmr4el_base_config.json -ds_len 1000`. **Freeze code while it runs.** Session 11 work is uncommitted
+on branch `repeat` (the user moves it to Linux). On output: rename the new tree to
+`xmodel_1000_flag6_sapbert_abbrev_joint` (rename is safe: trees load by listing their folder), eval
+`-beam_size 2 -alpha 0 -path_score` (+ `-alpha 1`), record train secs vs the old ~100 s at 500 labels / PECOS 12.4 s at
+1000. Expect acc@1 0.843 within float noise (same objective as `xmodel_1000_flag6_sapbert_abbrev_logreg`).
+
+**Current best (session 11):** base config = flag 6 (SapBERT mention | char TF-IDF->SVD 768 | context window 10
+TF-IDF->SVD 768) + `abbrev_expansion` append + matcher `jointlogisticregression` (liblinear's OvR L2 logistic objective,
+C 1, class_weight balanced, all labels of a node in one L-BFGS problem; 12.5x faster than sklearn liblinear OvR, identical
+predictions). Eval these trees with `-beam_size 2 -alpha 0 -path_score`. Results (dev, beam 2): 500 labels 0.862 / MRR
+0.896 (PECOS same features 0.861); 1000 labels 0.843 / 0.884 (PECOS 0.838). Weak group: unseen strings 0.53-0.58.
+Speed (prediction-neutral): texts embedded once per distinct string; SapBERT on CUDA, else Apple MPS, else CPU.
+Trees in use: `xmodel_{500,1000}_flag6_sapbert_abbrev_logreg`, `xmodel_500_flag6_sapbert_abbrev_sgd`,
+`xmodel_1000_flag6_sapbert_sgd`. PECOS tools: `pecos.dockerfile`, `test/xmr4el/pecos_compare.py`, `pecos_run.py`.
+
+**Next after the retrain:** user still does not want the full-label run; candidates: unseen strings (abbreviations not
+defined in the doc, generic labels), candidate reranker on top of matcher x path (must beat 0.843 at 1000), encoder swap
+(flat screen first). Session-11 history below.
+
+**Plan (user decision 2026-10-02, session 10 end):** (1) abbreviation expansion, then (2) a candidate reranker.
+Both are tested flat first (`screen_features.py` on tree `xmodel_1000_flag6_sapbert_sgd`, 1000 labels), so no training run. Baselines on those
 11661 dev rows: flat flag-6 features 0.800 / MRR 0.852 / hybrid 0.827; tree 0.797 / 0.844 / hybrid 0.824. Seen 1 label 0.951, seen >1
 label 0.844, unseen strings 0.442 (tree).
 
@@ -31,7 +52,66 @@ label 0.844, unseen strings 0.442 (tree).
 - Model: sklearn LogisticRegression or HistGradientBoosting (pointwise) first; lightgbm is installed (lambdarank) if
   needed. No new deps. Target: beat hybrid 0.827 flat. Then apply it to the tree's `score_csr` in eval.
 
-Code not frozen: no user run in flight. Session 10 changes are uncommitted (STATUS, results, eval report, topk fix).
+**Done (session 11): (1) abbreviation expansion.** Flat screen (results Session 11): append ("SF long form") 0.810 / MRR
+0.861 / hybrid 0.835 vs 0.800 / 0.852 / 0.827; abbrev rows 0.386 -> 0.556. Moved into the shared loader:
+`Preprocessor.best_long_form` / `abbreviations`, `load_pubtator_file(..., abbrev="append"|"replace"|None)`; XModel key
+`abbrev_expansion` (None for old trees via getattr); train, eval (test + dictionary train side) and diagnose pass it.
+Config: now `.models/xmr4el_base_config.json` (flag-6 SapBERT + `"abbrev_expansion": "append"`). Loader output on dev
+matches the screen's expansion exactly (3895 rows, 0 diffs). Regression in `test_text_encoder.py`. Uncommitted. No tree yet.
+`screen_features.py -abbrev append` gives the new flat baseline for step (2).
+
+**Done (session 11, user request): flags reduced to 1 and 6.** `TextEncoder._encode(texts, fit)` is the one path for
+train/query: flag 1 = TF-IDF (-> dimension model) of the whole text; flag 6 = [transformer(mention) | char TF-IDF -> SVD
+(mention) | TF-IDF -> SVD(context)], each block L2-normalised. Flags 2-5 raise. Transformer wrapper: `MODEL_NAMES`
+(`sapbert`, `sentencetbiobert`, `biobert`) or any checkpoint via `kwargs.model_name` (+ optional `pooling`,
+`max_seq_length`); metaclass registry and per-model classes removed. `xmodel_1000_flag6_sapbert_sgd` encoder output bit-identical (64 dev rows,
+max diff 0.0). Configs: `xmr4el_base_config.json` = flag 6 + SapBERT + abbrev append; `xmr4el_flag1_config.json` = old base
+TF-IDF with flag 1 (TSV); `xmr4el_flag6_sapbert_config.json` kept (recipe of `xmodel_1000_flag6_sapbert_sgd`); flag-5 configs and
+`run_ablation.sh` removed. XModel default `emb_flag` 6; TSV training requires flag 1. Trees with flags 1-5 no longer predict.
+Pending user: delete unused trees (all but `xmodel_1000_flag6_sapbert_sgd`; the auto-mode classifier blocked `rm`). Uncommitted.
+
+**Done (session 11): PECOS vs XMR4EL, 500 labels** (results "Session 11: XMR4EL vs PECOS"). Tree
+`xmodel_500_flag6_sapbert_abbrev_sgd` (base config, 500 labels): 0.817 / MRR 0.867 / hybrid 0.851. PECOS XR-Linear on the tree's own
+features and rows: 0.861 / 0.891 (beam 2) / hybrid 0.865; seen ambiguous 0.839 -> 0.933, unseen 0.521 -> 0.571. Features are
+not the gap; the leaf label scorer is (cosine to PIFA centroid vs PECOS's per-label linear classifier with in-cluster
+negatives). Tools: `pecos.dockerfile`, `test/xmr4el/pecos_compare.py` (export/score), `test/xmr4el/pecos_run.py`.
+
+**`-alpha 0` results:** beam 2 0.394 (R@5 0.917); beam 1 0.794 (cap 0.898, i.e. 0.88 within the leaf vs cosine 0.86,
+PECOS ~0.90). Cause confirmed: leaf matcher probs are per-label sigmoids only comparable within a leaf (multilabel OneVsRest, no
+renormalisation) and leaves are merged by max with no path factor. **Fix implemented (uncommitted):** `path_score` predict option (HierarchicaMLModel -> XModel -> eval
+`-path_score`): leaf score x exp(path_logscore) = P(leaf) * P(label | leaf), as XR-Linear. Off by default (recorded rows
+unchanged). Regression in `test_no_rankers.py`. Result: 0.801 / MRR 0.858 / hybrid 0.856 (merge fixed; seen 1 0.935, seen >1 0.812, unseen 0.540) vs cosine 0.817,
+PECOS 0.861. Remaining gap = leaf classifier. Screen `screen_leaf_scorer.py` (oracle routing, within-leaf acc@1): cosine 0.866,
+logreg 0.891, logreg_bal 0.920, svm 0.921 (results Session 11). **Done (uncommitted):** base config matcher (all layers)
+= `sklearnlogisticregression` liblinear L2 C 1 balanced n_jobs 1; leaf `early_stopping` override now SGD-only
+(`MLModel.train`); matcher selfcheck reads the SGD config from `xmr4el_flag6_sapbert_config.json`.
+**Next (user):** retrain `-ds_len 500` with the base config, eval `-beam_size 2 -alpha 0 -path_score` (+ `-alpha 1` for the
+cosine row), record train secs. Trained: `xmodel_500_flag6_sapbert_abbrev_logreg` (logreg matcher, 500 labels;
+train secs not yet reported); eval pending. Done: `penalty`/`l1_ratio`/`n_jobs` dropped from the logreg wrapper defaults and
+base config (sklearn 1.9.1 deprecations); verified warning-free and coef-identical to explicit `penalty="l2"`.
+**Result (results "liblinear leaf matcher + path score"):** 500 labels 0.862 / MRR 0.896 = PECOS 0.861; 1000 labels
+0.843 / 0.884 vs previous 1000 tree 0.797. Eval default for these trees: `-beam_size 2 -alpha 0 -path_score`. Next: full
+labels (no `-ds_len`) with the base config; optional PECOS at 1000/full. Weak group: unseen strings (0.53-0.58).
+**Speed (user priority, session 11):** PECOS at 1000 labels: 0.838 (tree 0.843). Profile (500 labels): SapBERT 47%,
+OneVsRest liblinear wait 34%. Done (uncommitted): dedup of texts before embedding + MPS device in `transformers.py`
+(regression in `test_text_encoder.py`). Leaf screen at 1000: liblinear 238 s, tol 1e-2 197 s, svd 256
+143 s (-0.0055, rejected). Done (uncommitted): `JointOvRLogistic` / config type `jointlogisticregression` in
+`classifier_model.py` (liblinear's OvR L2 logistic objective for all labels of a node in one L-BFGS problem): same
+0.8974 in 19 s; test `test/xmr4el/test_joint_logistic.py`. Base config matcher switched to it. Next: one timed
+`-ds_len 1000` retrain, eval `-beam_size 2 -alpha 0 -path_score`; expect 0.843 (tree) within float noise. User does not want the full run yet.
+Trained (1000 labels, base config): `xmodel_1000_flag6_sapbert_abbrev_logreg` (renamed from `xmodel_2026-10-02_16-10-54`); eval pending.
+Training queue after that eval: (a) `-ds_len 1000` base config vs `xmodel_1000_flag6_sapbert_sgd` (0.797 cosine); (b) full labels (no
+`-ds_len`): liblinear removes the old leaf-cost blocker, and under `-alpha 0` the leaf's matcher top-100 cut ranks by the
+same score, so it no longer drops labels the scorer would rank first; (c) encoder swap only after a flat screen. Target PECOS 0.861; expected ~0.92 x routing recall (~0.95) ~ 0.87.
+This replaces step (2): a reranker must now beat 0.861, not hybrid 0.835.
+Training time (user): tree 3000 s vs PECOS 7.3 s (PECOS excludes featurization, ~2-4 min of ours). Measured on one
+83-label leaf of the exported X: our leaf matcher (SGD log_loss, L1, `early_stopping` forced off at the leaf, tol 1e-4)
+takes 25 s/label, 168-823 epochs -> ~210 core-min for 500 labels = ~30 min on 8 cores: the bulk of the 3000 s. Same
+data: SGD with early stopping 0.26 s, liblinear squared hinge (sklearn LinearSVC, PECOS-like) 0.15 s/label. A liblinear
+leaf classifier is the candidate fix for both speed and the 0.861 gap; decide after `-alpha 0`.
+
+(2) candidate reranker: on hold until the `-alpha 0` result (see above).
+Code not frozen: no user run in flight.
 
 State (flag 4, 500 labels, tree `xmodel_2026-10-01_11-20-27`): hierarchy + cosine leaf scorer
 acc@1 0.764, MRR 0.822 = flat nearest-label 0.767 > dictionary 0.717; hybrid (dict if string
@@ -97,7 +177,7 @@ PubTator with `window=model.context_window` (context = +-N words, mention exclud
 document, old behaviour). Config `.models/xmr4el_flag6_sapbert_config.json`. Loader also returns
 `spans`. Regression: `test_text_encoder.py` (flag 6 blocks, empty window, save/load, loader window).
 
-Flag-6 1000-label tree `xmodel_2026-10-01_17-48-39` recorded (results Session 9): tree 0.797 / MRR 0.844 /
+Flag-6 1000-label tree `xmodel_1000_flag6_sapbert_sgd` recorded (results Session 9): tree 0.797 / MRR 0.844 /
 hybrid 0.824 vs flat ceiling 0.800 / 0.852 / 0.827; gap 0.003, same as 500. Context +0.019 flat at 1000.
 Eval must use `-alpha 1` (alpha 0.5 gave 0.759: the matcher cluster probability gets mixed in).
 
@@ -127,7 +207,7 @@ unless `-verbose`. `-alpha` default is now 1 (warns when alpha != 1 under cosine
 `-scorer ranker`, the defect-#6 tie check only when scores collapse, and the random-ordering line is gone. Metric values unchanged.
 
 Bug fixed (session 10): `per_leaf` `-topk k>0` kept each leaf's first k labels in label-index order, not score order
-(`_maybe_leaf_topk`, `xmr4el/xmr/base.py`); `-topk 1` gave acc@1 0.006 on `17-48-39`. `-topk 0` (every recorded row)
+(`_maybe_leaf_topk`, `xmr4el/xmr/base.py`); `-topk 1` gave acc@1 0.006 on `xmodel_1000_flag6_sapbert_sgd`. `-topk 0` (every recorded row)
 was unaffected. Regression in `test/xmr4el/test_no_rankers.py`. Confirmed: `-topk 1` now gives acc@1 0.7967 (= topk 0).
 
 Then scale (`-ds_len` 1000 -> full) with the chosen features; see "Scale and external baseline".

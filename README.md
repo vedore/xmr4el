@@ -136,17 +136,16 @@ Saved models go to `test/test_data/saved_trees/xmodel_<timestamp>/`.
 
 Training rows are `group_id<TAB>text`. A separate file lists one label ID per
 line, aligned with the sorted group IDs. Use a copy of the base configuration
-with `emb_flag` set to `1`, `2`, or `3` for plain text without `[SEP]`.
+with `emb_flag` `1` for plain text without `[SEP]` (`.models/xmr4el_flag1_config.json`).
 
 ```bash
 python test/xmr4el/test_train_pipeline.py \
   -train_path data/train/chemical/train_Chemical.txt \
   -labels_path data/train/chemical/labels.txt \
-  -model_config .models/tsv_config.json \
+  -model_config .models/xmr4el_flag1_config.json \
   -ds_len 500
 ```
 
-Create `.models/tsv_config.json` from the base configuration before this command.
 The loader rejects too few labels and truncates excess labels to the number of
 groups; check that the files are aligned before training.
 
@@ -183,12 +182,17 @@ The `per_leaf` mode returns hierarchy scores. The alternate `global` path in
 `.models/xmr4el_base_config.json` selects component types and parameters.
 `emb_flag` controls features:
 
-- `1`: TF-IDF.
-- `2`: TF-IDF plus transformer over the full input.
-- `3`: transformer over the full input.
-- `4`: transformer over the mention and TF-IDF over context, separated by `[SEP]`.
+- `1`: TF-IDF (-> dimension model) of the whole input (`.models/xmr4el_flag1_config.json`).
+- `6`: input `mention [SEP] context`; three blocks, each L2-normalised before the concat:
+  transformer(mention), char TF-IDF -> SVD(mention), TF-IDF -> SVD(context window).
 
-The default uses flag 4, balanced k-means, and SGD classifiers with log loss.
+Transformer: `transformer_config.type` `sapbert`, `sentencetbiobert` or `biobert`, or any
+checkpoint with `"kwargs": {"model_name": "<HF id>"}` (optional `pooling`, e.g. `"cls"`, and
+`max_seq_length`). `abbrev_expansion` `"append"` expands in-document abbreviations in PubTator input.
+
+The default uses flag 6 with SapBERT, abbreviation expansion, balanced k-means, and one-vs-rest
+L2 logistic-regression matchers (`jointlogisticregression`: liblinear's objective, all labels of a node solved at once). Evaluate such trees with `-alpha 0 -path_score`
+(leaf matcher probability x routing path probability).
 Use the available sklearn, FAISS, and PyTorch clustering/classifier wrappers
 through the existing configuration registries.
 
