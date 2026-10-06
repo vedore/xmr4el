@@ -27,9 +27,9 @@ from sklearn.preprocessing import normalize
 from sklearn.svm import LinearSVC
 
 from xmr4el.classifiers import JointOvRLogistic
+from xmr4el.eval import string_breakdown
 from xmr4el.xmodel import XModel
 
-from test_evaluate_pipeline import string_breakdown
 
 SCORERS = {
     "logreg": lambda: OneVsRestClassifier(LogisticRegression(solver="liblinear", C=1.0), n_jobs=-1),

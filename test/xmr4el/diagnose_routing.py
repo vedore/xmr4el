@@ -16,6 +16,7 @@ from unittest.mock import Mock
 import numpy as np
 from sklearn.preprocessing import normalize
 from xmr4el.data import Preprocessor
+from xmr4el.eval import mention_key
 from xmr4el.xmodel import XModel
 
 
@@ -30,16 +31,12 @@ def cos_argmax(X, B):
     return (normalize(X) @ normalize(B).T).argmax(axis=1)
 
 
-def _mention(text):
-    return text.split("[SEP]", 1)[0].strip().lower()
-
-
 def dictionary_baseline(train_pairs, test_pairs):
     """(acc@1, coverage) of predicting the most frequent train label for an exact mention string."""
     counts = defaultdict(Counter)
     for text, y in train_pairs:
-        counts[_mention(text)][y] += 1
-    preds = [counts[_mention(t)].most_common(1)[0][0] if _mention(t) in counts else None
+        counts[mention_key(text)][y] += 1
+    preds = [counts[mention_key(t)].most_common(1)[0][0] if mention_key(t) in counts else None
              for t, _ in test_pairs]
     gold = [y for _, y in test_pairs]
     return (np.mean([p == y for p, y in zip(preds, gold)]),

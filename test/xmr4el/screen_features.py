@@ -18,9 +18,8 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
-from diagnose_routing import _mention
-from test_evaluate_pipeline import string_breakdown
 from xmr4el.data import Preprocessor
+from xmr4el.eval import mention_key, string_breakdown
 from xmr4el.transformers import sentence_model
 from xmr4el.xmodel import XModel
 
@@ -179,11 +178,11 @@ def main():
     y_tr = np.array([l2i[y] for _, y in train_pairs])
     gold = np.array([l2i[y] for _, y in test_pairs])
 
-    seen = Counter(_mention(t) for t, _ in train_pairs)
-    unseen = np.array([_mention(t) not in seen for t, _ in test_pairs])
+    seen = Counter(mention_key(t) for t, _ in train_pairs)
+    unseen = np.array([mention_key(t) not in seen for t, _ in test_pairs])
     by_label = defaultdict(Counter)
     for t, y in train_pairs:
-        by_label[l2i[y]][_mention(t)] += 1
+        by_label[l2i[y]][mention_key(t)] += 1
     names = [by_label[j].most_common(1)[0][0] for j in range(len(labels))]
 
     def field_of(name):
