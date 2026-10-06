@@ -7,7 +7,7 @@ Moved out of `STATUS.md` (2026-10-06). Paths are pre-restructure; update them at
 
 | Area | Current behavior | Evidence |
 |---|---|---|
-| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicaMLModel.load`, `xmr4el/xmr/base.py` |
+| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicalMLModel.load`, `xmr4el/xmr/base.py` |
 | Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load sorts legacy first-seen lists and asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmr/model.py` |
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `test/xmr4el/test_evaluate_pipeline.py` |
 | Features | Flag 1: TF-IDF (-> dimension model) of the whole text (TSV). Flag 6: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Flags 2-5 raise | `TextEncoder._encode`, base / flag1 config |
@@ -15,7 +15,7 @@ Moved out of `STATUS.md` (2026-10-06). Paths are pre-restructure; update them at
 | Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/ranker/train.py`, `.models/xmr4el_base_config.json` |
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/xmr/base.py`, `classifier_model.py` |
 | Leaf scoring | Cosine by default (`cosine_scorer`, eval `-scorer cosine`); `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising | `MLModel.predict`, `xmr4el/xmr/base.py` 
-| Path score | `-path_score`: leaf score x exp(path_logscore); current trees eval with `-beam_size 2 -alpha 0 -path_score` | `HierarchicaMLModel.predict`, `XModel.predict` |
+| Path score | `-path_score`: leaf score x exp(path_logscore); current trees eval with `-beam_size 2 -alpha 0 -path_score` | `HierarchicalMLModel.predict`, `XModel.predict` |
 
 Implemented does not mean validated on dev. Saved trees retain their trained classifiers and leaf
 structure; loading them with current code does not apply training changes retroactively.

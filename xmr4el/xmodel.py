@@ -16,7 +16,7 @@ from scipy.sparse import csr_matrix
 from xmr4el.encoder import LabelEmbeddingFactory
 from xmr4el.data import Preprocessor
 from xmr4el.encoder import TextEncoder
-from xmr4el.tree import HierarchicaMLModel
+from xmr4el.tree import HierarchicalMLModel
 from xmr4el.temp_store import TempVarStore
 
 
@@ -291,7 +291,7 @@ class XModel:
             )
         
         model_path = os.path.join(load_dir, "hml")
-        hml = HierarchicaMLModel.load(model_path)
+        hml = HierarchicalMLModel.load(model_path)
         setattr(model, "_hml", hml)
         
         text_encoder_path = os.path.join(load_dir, "text_encoder")
@@ -357,7 +357,7 @@ class XModel:
 
         self.logger.info("Hierarchical Model Pipeline")
 
-        hml = HierarchicaMLModel(
+        hml = HierarchicalMLModel(
             clustering_config=self.clustering_config,
             matcher_config=self.matcher_config,
             ranker_config=self.ranker_config,

@@ -10,11 +10,12 @@ from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
 from xmr4el.encoder import LabelEmbeddingFactory
-from xmr4el.tree import HierarchicaMLModel, MLModel
+from xmr4el.node import MLModel
+from xmr4el.tree import HierarchicalMLModel
 
 
 def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
-    hml = HierarchicaMLModel(
+    hml = HierarchicalMLModel(
         clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": n_clusters, "iter_limit": 50}},
         matcher_config=cfg["matcher_config"], ranker_config=cfg["ranker_config"],
         cur_config=cfg["cur_config"], min_leaf_size=min_leaf_size, max_leaf_size=20,
@@ -97,7 +98,7 @@ def main():
     assert [m.cluster_model.c_node.shape[1] for m in deep.hmodel[1]] == [2] * 4
     with TemporaryDirectory() as d:
         deep.save(d)
-        restored = HierarchicaMLModel.load(d)
+        restored = HierarchicalMLModel.load(d)
     assert restored.clustering_config == deep.clustering_config
     assert restored.clustering_config["kwargs"]["n_clusters"] == 4
     assert np.allclose(deep.predict(Xq, **kw)[1].toarray(), restored.predict(Xq, **kw)[1].toarray())

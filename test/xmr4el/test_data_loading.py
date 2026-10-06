@@ -86,7 +86,7 @@ def test_label_mapping():
     encoder = Mock()
     encoder.return_value.encode.side_effect = lambda texts: np.eye(len(texts))  # row i = text i
     with patch("xmr4el.xmodel.TextEncoder", encoder), patch(
-        "xmr4el.xmodel.HierarchicaMLModel"
+        "xmr4el.xmodel.HierarchicalMLModel"
     ):
         xm = XModel()
         xm.train(list(groups.values()), list(groups))
@@ -101,7 +101,7 @@ def test_label_mapping():
 
     xm.text_encoder = None  # the Mock cannot be pickled; TextEncoder.load is stubbed below
     with TemporaryDirectory() as tmp, patch("xmr4el.xmodel.TextEncoder"), patch(
-        "xmr4el.xmodel.HierarchicaMLModel"
+        "xmr4el.xmodel.HierarchicalMLModel"
     ):
         xm.save(tmp)
         (saved,) = Path(tmp).iterdir()
