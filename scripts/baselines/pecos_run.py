@@ -46,6 +46,7 @@ def main():
         xlm = XLinearModel.train(X, Y, C=chain)
         t_train = time.time() - t0
         print(f"[{feat}] X {X.shape}, cluster sizes {[c.shape for c in chain]}, train {t_train:.1f}s")
+        xlm.save(os.path.join(args.data, f"model_{feat}"))
         for beam in map(int, args.beams.split(",")):
             t0 = time.time()
             P = xlm.predict(X_dev, beam_size=beam, only_topk=args.topk)
