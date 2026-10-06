@@ -14,18 +14,20 @@ leaf's labels only. acc@1 here = within-leaf accuracy given perfect routing (end
 """
 import json
 import os
+import sys
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
 
 import numpy as np
-from scipy.sparse import load_npz
+from scipy.sparse import csr_matrix, hstack, load_npz
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import normalize
 from sklearn.svm import LinearSVC
 
 from xmr4el.models.classifier_wrapper.classifier_model import JointOvRLogistic
+from xmr4el.xmr.model import XModel
 
 from test_evaluate_pipeline import string_breakdown
 
@@ -42,7 +44,6 @@ SCORERS = {
 
 def shrink_blocks(X, d_mention, d_char, k):
     """[mention | char SVD | context SVD] -> [mention | char[:k] | context[:k]], each block L2-normalised, then the row."""
-    from scipy.sparse import csr_matrix, hstack
     X = csr_matrix(X)
     blocks = [X[:, :d_mention], X[:, d_mention:d_mention + k], X[:, d_mention + d_char:d_mention + d_char + k]]
     return normalize(hstack([normalize(b) for b in blocks], format="csr"))
@@ -62,7 +63,6 @@ def leaf_scores(name, X_tr, y_tr, X_te, n_labels):
 
 
 def main():
-    from xmr4el.xmr.model import XModel
 
     ap = ArgumentParser()
     ap.add_argument("-xmodel_path", required=True, help="tree whose leaves are used")
@@ -122,5 +122,4 @@ def _selfcheck():
 
 
 if __name__ == "__main__":
-    import sys
     _selfcheck() if "-selfcheck" in sys.argv else main()

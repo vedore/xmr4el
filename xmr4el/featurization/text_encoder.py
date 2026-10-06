@@ -95,6 +95,7 @@ class TextEncoder():
 
         model = cls()
         model.__dict__.update(model_data)
+        model._validate_flag()
         
         # Load models
         model_files = {
@@ -183,6 +184,12 @@ class TextEncoder():
         dim = getattr(self, f"{prefix}dimension_model")
         return csr_matrix(X if dim is None else self._predict_dimension(X, dim))
 
+    def _validate_flag(self):
+        if self.flag in (2, 3, 4, 5):
+            raise ValueError(f"emb_flag {self.flag} was removed in session 11; retrain with emb_flag 1 or 6")
+        if self.flag not in (1, 6):
+            raise ValueError(f"emb_flag must be 1 or 6, got {self.flag}")
+
     def _encode(self, X_text: Sequence[str], fit: bool) -> csr_matrix:
         """
         flag 1 → TF-IDF (-> dimension model) of the whole text
@@ -190,10 +197,9 @@ class TextEncoder():
                  [SEP] (mention [SEP] context); each block L2-normalised before the concat, so each
                  carries an equal share of the row norm. Any transformer (`transformer_config`).
         """
+        self._validate_flag()
         if self.flag == 1:
             return normalize(self._tfidf_block(X_text, "", fit))
-        if self.flag != 6:
-            raise ValueError(f"emb_flag must be 1 or 6, got {self.flag}")
         if any("[SEP]" not in t for t in X_text):
             raise ValueError("emb_flag 6 needs 'mention [SEP] context' input")
         mentions, contexts = zip(*(t.split("[SEP]", 1) for t in X_text)) if X_text else ((), ())

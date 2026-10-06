@@ -10,6 +10,7 @@ import time
 import numpy as np
 
 from gc import collect
+from copy import deepcopy
 from os.path import dirname, isfile, join as pjoin, exists as pexists, isdir as pisdir
 from os import makedirs as pmakedirs, listdir as plistdir
 from pickle import dump as pkl_dump, load as pkl_load
@@ -189,9 +190,10 @@ class MLModel():
 
         # Save fused scores separately
         fused_scores = self.fused_scores
-        if fused_scores is None:
+        if fused_scores is None and not self.is_last_layer:
             raise ValueError("fused_scores is None. Cannot save.")
-        np.save(pjoin(save_dir, "fused_scores.npy"), fused_scores)
+        if fused_scores is not None:
+            np.save(pjoin(save_dir, "fused_scores.npy"), fused_scores)
         state.pop("_fused_scores", None)
         state.pop("_ranker_score_fn_cache", None)
 
@@ -238,8 +240,8 @@ class MLModel():
 
         # Load fused scores / label embeddings
         emb_path = pjoin(base_dir, "fused_scores.npy")
-        assert pexists(emb_path), f"Expecting fused_scores at {emb_path}"
-        model.fused_scores = np.load(emb_path, allow_pickle=True)
+        assert pexists(emb_path) or model.is_last_layer, f"Expecting fused_scores at {emb_path}"
+        model.fused_scores = np.load(emb_path, allow_pickle=True) if pexists(emb_path) else None
 
         label_emb_path = pjoin(base_dir, "label_embeddings.npy")
         model.label_embeddings = np.load(label_emb_path, allow_pickle=True) if pexists(label_emb_path) else None
@@ -412,9 +414,8 @@ class MLModel():
         del matcher_model
         gc.collect()
         
-        # Nothing used for prediction depends on the rankers unless eval runs -scorer ranker: the
-        # root's fused_scores are matcher-only, the leaf's feed prepare_layer children that are
-        # never trained. train_rankers=False skips them; predict then scores every label by cosine.
+        # Rankers are only used for prediction with -scorer ranker; internal training scores
+        # are matcher-only. train_rankers=False skips them; predict then uses cosine.
         train_ranker = self.train_rankers and (self.ranker_every_layer or self.is_last_layer)
         
         def _topb_sparse(P: np.ndarray, b: int) -> csr_matrix:
@@ -463,13 +464,11 @@ class MLModel():
             
         gc.collect()
         
-        print("Fusing Scores")
+        self.fused_scores = None
         if not self.is_last_layer:
+            print("Fusing Scores")
             cluster_scores = self.matcher_model.predict_proba(X_train)
             self.fused_scores = csr_matrix(np.maximum(cluster_scores, 0.0))
-        else:
-            I_L = sp_eye(self.label_embeddings.shape[0], format="csr", dtype=np.float32)
-            self.fused_scores = self.fused_predict(X_train, self.label_embeddings, I_L, alpha=0.5, fusion="lp_hinge", p=3)
         
     def predict(self, X_query, beam_size: int = 5, topk: int | None = None, return_matrix: bool = False, 
                 fusion: str = "lp_fusion", eps: float = 1e-6, alpha: float = 0.5, p: int = 3):
@@ -940,6 +939,7 @@ class HierarchicaMLModel():
         temporary folder which is automatically deleted at the end of training.
         """
         inputs = ((X_train, Y_train, Z_train, local_to_global, global_to_local),)
+        clustering_config = deepcopy(self.clustering_config)
         last_layer_index = self.layers - 1
         ranker_flag_default = bool(self.ranker_every_layer)
 
@@ -984,9 +984,9 @@ class HierarchicaMLModel():
                 if self.cut_half_cluster and layer > 0:
                     # A new dict per layer: ClusteringModel.train replaces config["kwargs"], and the
                     # caller's config (saved with the tree) must keep the configured n_clusters
-                    kw = self.clustering_config["kwargs"]
-                    self.clustering_config = {**self.clustering_config,
-                                              "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
+                    kw = clustering_config["kwargs"]
+                    clustering_config = {**clustering_config,
+                                         "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
                     
                 number_of_childs = len(inputs)
                 
@@ -998,7 +998,7 @@ class HierarchicaMLModel():
                     self.logger.info(f"Training ML: Number {n_child}")
                     
                     ml = MLModel(
-                        clustering_config=self.clustering_config,
+                        clustering_config=clustering_config,
                         matcher_config=self.matcher_config,
                         ranker_config=self.ranker_config,
                         cur_config=self.cur_config,
@@ -1024,26 +1024,22 @@ class HierarchicaMLModel():
                             f"layer {layer} node with {Z_node.shape[0]} labels cannot be split into clusters of "
                             f">= min_leaf_size={self.min_leaf_size}; lower depth or min_leaf_size")
 
-                    C = ml.cluster_model.c_node
-                    fused_scores = ml.fused_scores
-
-                    self.logger.info(f"Training ML: Preparing Layer")
-
-                    # Prepare inputs for next layer
-                    raw_children = self.prepare_layer(
-                        X=X_node,
-                        Y=Y_node,
-                        Z=Z_node,
-                        C=C,
-                        fused_scores=fused_scores,
-                        local_to_global_idx=local_to_label_node
-                    )
-                                            
-                    cluster_to_child = _accumulate_children(
-                        raw_children, 
-                        start_idx=len(next_inputs), 
-                        next_inputs_list=next_inputs
-                    )
+                    cluster_to_child = {}
+                    if not is_last_layer:
+                        self.logger.info("Training ML: Preparing Layer")
+                        raw_children = self.prepare_layer(
+                            X=X_node,
+                            Y=Y_node,
+                            Z=Z_node,
+                            C=ml.cluster_model.c_node,
+                            fused_scores=ml.fused_scores,
+                            local_to_global_idx=local_to_label_node
+                        )
+                        cluster_to_child = _accumulate_children(
+                            raw_children,
+                            start_idx=len(next_inputs),
+                            next_inputs_list=next_inputs
+                        )
                     
                     ml_path = _save_ml_for_layer(ml, layer)
                     del ml

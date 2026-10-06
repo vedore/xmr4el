@@ -206,7 +206,7 @@ If asked why a result is poor, check these first:
 
 Do not jump directly to model replacement before checking pipeline quality.
 
-Then check these known error origins, in pipeline order (state and evidence in `STATUS.md`):
+Then check these known error origins, in pipeline order (state in `STATUS.md`, evidence in `docs/pipeline.md`):
 - label index <-> label name mapping: model indices follow sorted `Y` columns; `XModel.initial_labels`
   must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
 - `-ds_len` selects the first N labels in file order, not a random sample

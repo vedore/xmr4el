@@ -16,6 +16,7 @@ from scipy.sparse import load_npz, save_npz
 
 from pecos.xmc import Indexer, LabelEmbeddingFactory
 from pecos.xmc.xlinear.model import XLinearModel
+from pecos.utils.featurization.text.preprocess import Preprocessor
 
 
 def main():
@@ -35,7 +36,6 @@ def main():
             X = load_npz(os.path.join(args.data, "X_trn.npz")).tocsr().astype(np.float32)
             X_dev = load_npz(os.path.join(args.data, "X_dev.npz")).tocsr().astype(np.float32)
         else:
-            from pecos.utils.featurization.text.preprocess import Preprocessor
             with open(os.path.join(args.data, "texts.json")) as f:
                 t = json.load(f)
             prep = Preprocessor.train(t["trn_texts"], {"type": "tfidf", "kwargs": {}})

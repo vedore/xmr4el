@@ -206,7 +206,7 @@ through the existing configuration registries.
 - `xmr4el/xmr/`: training, traversal, persistence, and the `XModel` API.
 - `xmr4el/utils/`: temporary array storage and local PubTator splitting.
 - `test/`: train/evaluate scripts and small regression checks.
-- `STATUS.md`: current state, error chain, next step. `docs/results.md`: experiment history.
+- `STATUS.md`: current state, next step. `docs/pipeline.md`: implemented behavior, observations. `docs/status_log.md`: history. `docs/results.md`: results.
 - `data/`, `datasets/`: local inputs, excluded from version control.
 
 ## Checks

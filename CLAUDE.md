@@ -28,7 +28,7 @@ Saved trees are under `test/test_data/saved_trees/`.
 - Keep `data/`, `datasets/`, and saved model artifacts intact.
 - Start every session by reading `STATUS.md` § "Resume here"; it says what is in flight and what to
   do with pasted output. Update that block at the end of each step and before a chat reset.
-- `docs/results.md` holds valid results only; `docs/results_archive.md` holds invalid history.
+- `docs/results.md` holds valid results only. Pre-fix (invalid) results were removed 2026-10-06; recover with `git show b8b7e5a:docs/results_archive.md`.
 - Verify claims against code; old notes and pre-fix measurements may be superseded.
 - Preserve the loader ordering guard, the sorted label order, leaf label-level matching,
   ranker warm-starting, small-cluster reassignment, and local data formats.
@@ -41,8 +41,8 @@ Saved trees are under `test/test_data/saved_trees/`.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
   binarizer's `classes_` (sorted; labels with no training text have no column). `load` sorts legacy
   first-seen lists and refuses a label/`Z` count mismatch; regression in `test/xmr4el/test_data_loading.py`.
-  Before this fix eval scored dev against a permuted label list, so **every dev number in
-  `docs/results_archive.md` is invalid**.
+  Before this fix eval scored dev against a permuted label list, so **every pre-fix dev number
+  (the deleted `docs/results_archive.md`) is invalid**.
 - Transformer embedding batches are kept in memory in row order (`featurization_wrapper/transformers.py`; no `batch_dir`).
   Before the numeric-order fix, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
   and the old 4.79x/3.81x train-side routing figures are invalid.
@@ -50,5 +50,6 @@ Saved trees are under `test/test_data/saved_trees/`.
 
 ## Priorities
 
-`STATUS.md` owns the work order, the pipeline observations, and the interpretation rules. Do not
+`STATUS.md` owns the work order and the interpretation rules; `docs/pipeline.md` holds the
+implemented-behavior table, synthetic checks and pipeline observations. Do not
 duplicate them here. `fused_predict` (`xmr4el/xmr/base.py`) is not dead code: leaf training calls it.

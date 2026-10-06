@@ -10,6 +10,7 @@
 *.egg-info/
 __pycache__/
 *.pyc
+*.prof
 *.onnx
 .DS_Store
-
+.codemap

@@ -491,7 +491,7 @@ Reading:
 
 ## Commands
 
-Older, invalid runs: `docs/results_archive.md`.
+Older, invalid runs: removed 2026-10-06; recover with `git show b8b7e5a:docs/results_archive.md`.
 
 ```bash
 # train (500-label diagnosis scale)

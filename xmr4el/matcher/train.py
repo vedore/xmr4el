@@ -1,4 +1,7 @@
+import json
+
 import numpy as np
+import scipy.sparse as sp
 
 from typing import Any, Dict, List, Tuple
 from xmr4el.models.classifier_wrapper.classifier_model import ClassifierModel
@@ -62,8 +65,6 @@ def _selfcheck():
     """Identity C at the leaf (defect #6) turns the matcher into one-vs-rest over labels, where a
     label can have a single positive. SGD's `early_stopping` stratifies its validation split and
     raises on that; MLModel.train disables it for the last layer only. Asserts both halves."""
-    import json
-    import scipy.sparse as sp
 
     cfg = json.load(open(".models/xmr4el_flag6_sapbert_config.json"))["matcher_config"]  # SGD matcher
     rng = np.random.default_rng(0)

@@ -15,6 +15,9 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC as SVC
 from sklearn.multiclass import OneVsRestClassifier
 from lightgbm import LGBMClassifier
+from scipy.optimize import minimize
+from scipy.special import expit
+from threadpoolctl import threadpool_limits
 
 classifier_dict = {}
 
@@ -546,12 +549,19 @@ class JointOvRLogistic:
 
     @staticmethod
     def _dense(X):
-        X = X.toarray() if hasattr(X, "toarray") else np.asarray(X)
-        return np.hstack([X, np.ones((X.shape[0], 1), X.dtype)]).astype(np.float32)
+        X = X if hasattr(X, "toarray") else np.asarray(X)
+        # Column-major storage lets scipy fill the feature slice without another dense array.
+        Xb = np.empty((X.shape[0], X.shape[1] + 1), dtype=np.float32, order="F")
+        if hasattr(X, "toarray"):
+            X.astype(np.float32, copy=False).toarray(out=Xb[:, :-1])
+        else:
+            Xb[:, :-1] = X
+        Xb[:, -1] = 1
+        return Xb
 
     def fit(self, X, y):
-        from scipy.optimize import minimize
-        from scipy.special import expit
+        if self.class_weight not in (None, "balanced"):
+            raise ValueError("JointOvRLogistic class_weight must be None or 'balanced'")
         y = y.toarray() if hasattr(y, "toarray") else np.asarray(y)
         if y.ndim == 1:  # class labels -> indicator over sorted classes
             self.classes_, idx = np.unique(y, return_inverse=True)
@@ -573,7 +583,6 @@ class JointOvRLogistic:
             loss = 0.5 * float((W * W).sum()) + float((cw * np.logaddexp(0, -M)).sum())
             return loss, (W + Xb.T @ (-cw * S * expit(-M))).ravel().astype(np.float64)
 
-        from threadpoolctl import threadpool_limits
         # This module pins OpenBLAS/MKL to 1 thread for the process-parallel sklearn wrappers (Linux numpy); the joint
         # solver is one BLAS-bound problem, so it lifts the cap for its own fit.
         with threadpool_limits(limits=os.cpu_count(), user_api="blas"):
@@ -586,7 +595,6 @@ class JointOvRLogistic:
         return self._dense(X) @ self.W_
 
     def predict_proba(self, X):
-        from scipy.special import expit
         return expit(self.decision_function(X))
 
     def predict(self, X):

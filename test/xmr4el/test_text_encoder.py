@@ -6,6 +6,8 @@ import numpy as np
 from unittest.mock import patch
 
 from xmr4el.featurization.text_encoder import TextEncoder
+from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.models.featurization_wrapper.transformers import CLS_POOLED, MODEL_NAMES, Transformer
 
 
 def fake_transformer(texts, _config):
@@ -46,15 +48,18 @@ def main():
     assert np.allclose(X6[4, 6:], 0) and np.isclose((X6[4, :3] ** 2).sum(), 1 / 2), "empty context = zero block"
     assert not np.allclose(X6[0, 6:], X6[1, 6:]), "context block must depend on the context"
     assert np.allclose(X6, X6q, atol=1e-6), "saved/loaded flag-6 encoder must reproduce encode"
-    for flag in (4, 5):
-        try:
-            TextEncoder(flag=flag).encode(texts6)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("only emb_flag 1 and 6 exist")
+    for flag in (2, 3, 4, 5):
+        enc = TextEncoder(flag=flag)
+        with tempfile.TemporaryDirectory() as d:
+            enc.save(d)
+            for action in (lambda: enc.encode(texts6), lambda: enc.predict(texts6), lambda: TextEncoder.load(d)):
+                try:
+                    action()
+                except ValueError as e:
+                    assert f"emb_flag {flag} was removed in session 11" in str(e)
+                else:
+                    raise AssertionError("removed emb_flag accepted")
 
-    from xmr4el.featurization.preprocessor import Preprocessor
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write("1|t|Aspirin works\n1|a|It lowers fever.\n1\t17\t23\tlowers\tT\tC2\n")
     assert Preprocessor.load_pubtator_file(f.name, window=2)["corpus"] == ["lowers [SEP] works It fever."]
@@ -67,7 +72,6 @@ def main():
     assert load(abbrev="append", window=1) == ["SSI Surgical site infection", "SSI"]
     assert load(abbrev="replace") == ["Surgical site infection", "SSI"]
 
-    from xmr4el.models.featurization_wrapper.transformers import CLS_POOLED, MODEL_NAMES, Transformer
     assert MODEL_NAMES["sapbert"] in CLS_POOLED, "config type sapbert must load SapBERT with [CLS] pooling"
     assert MODEL_NAMES["sentencetbiobert"] not in CLS_POOLED
     calls = []

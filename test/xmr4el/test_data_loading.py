@@ -13,6 +13,7 @@ import numpy as np
 from xmr4el.featurization.preprocessor import Preprocessor
 from xmr4el.models.featurization_wrapper.transformers import Transformer
 from xmr4el.xmr.model import XModel
+from torch.cuda import OutOfMemoryError
 
 
 def test_local_inputs():
@@ -129,7 +130,6 @@ def test_label_mapping():
 
 def test_embedding_row_order():
     """Transformer embeddings must keep corpus row order past 10 on-disk batches and after an OOM."""
-    from torch.cuda import OutOfMemoryError
 
     class Fake:
         oom_at = None
@@ -165,7 +165,40 @@ def test_embedding_row_order():
     print("embedding row order ok")
 
 
+def test_mps_oom():
+    prefix = "xmr4el.models.featurization_wrapper.transformers"
+    oom = RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")
+    texts = ["0", "1", "2", "3"]
+    batches = []
+
+    def encode(batch, **kwargs):
+        batches.append(len(batch))
+        if len(batch) > 1:
+            raise oom
+        return [[float(t)] for t in batch]
+
+    model = Mock(encode=Mock(side_effect=encode))
+    with patch(f"{prefix}.sentence_model", return_value=model), \
+         patch(f"{prefix}.torch.cuda.is_available", return_value=False), \
+         patch(f"{prefix}.torch.backends.mps.is_available", return_value=True), \
+         patch(f"{prefix}.torch.mps.empty_cache") as clear, patch(f"{prefix}.empty_cache") as cuda_clear:
+        result = Transformer._predict("fake", texts, batch_size=4)
+        assert result[:, 0].tolist() == list(range(4)) and batches == [4, 2, 1, 1, 1, 1]
+        assert clear.call_count == 2 and not cuda_clear.called
+        for error, retries in ((oom, 0), (RuntimeError("unrelated failure"), 3)):
+            model.encode.side_effect = error
+            try:
+                Transformer._predict("fake", texts, batch_size=4, max_oom_retries=retries)
+            except RuntimeError as e:
+                assert e is error if retries else e.__cause__ is oom
+            else:
+                raise AssertionError("failed batch did not raise")
+        assert clear.call_count == 3, "unrelated RuntimeError must not retry or clear cache"
+    print("MPS OOM checks ok")
+
+
 if __name__ == "__main__":
     test_local_inputs()
     test_label_mapping()
     test_embedding_row_order()
+    test_mps_oom()

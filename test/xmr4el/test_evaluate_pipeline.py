@@ -3,9 +3,22 @@ import contextlib
 import io
 import logging
 import os
-import numpy as np
-from collections import Counter, defaultdict
+import sys
 import time
+from collections import Counter, defaultdict
+
+# These libraries read their quiet settings during import.
+if "-verbose" not in sys.argv:
+    os.environ.update(TRANSFORMERS_VERBOSITY="error", HF_HUB_VERBOSITY="error",
+                      HF_HUB_DISABLE_PROGRESS_BARS="1", TQDM_DISABLE="1")
+    logging.disable(logging.WARNING)
+
+import numpy as np
+from scipy.sparse import csr_matrix
+
+from diagnose_routing import _mention  # same string normalisation as the dictionary baseline
+from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.xmr.model import XModel
 
 
 def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
@@ -52,7 +65,6 @@ def string_breakdown(test_texts, gold, tree_top1, train_pairs):
     """acc@1 of the tree and of the mention dictionary, split by whether the exact mention string
     occurs in train (and with how many labels). Returns {group: (n, tree, dict, either)} plus the
     hybrid (dictionary if the string was seen, tree otherwise)."""
-    from diagnose_routing import _mention  # same string normalisation as the dictionary baseline
     counts = defaultdict(Counter)
     for t, y in train_pairs:
         counts[_mention(t)][y] += 1
@@ -70,7 +82,6 @@ def string_breakdown(test_texts, gold, tree_top1, train_pairs):
 
 
 def _selfcheck():
-    from scipy.sparse import csr_matrix
     m = csr_matrix(np.array([[0.1, 0.9, 0.5], [0.0, 0.0, 0.0]]))
     assert gold_rank(m.getrow(0), 1) == 1
     assert gold_rank(m.getrow(0), 2) == 2
@@ -111,14 +122,8 @@ def main():
                         help="show library prints, logs and progress bars (hidden by default)")
     args = parser.parse_args()
 
-    if not args.verbose:  # before the imports below, which pull in transformers/tqdm
-        os.environ.update(TRANSFORMERS_VERBOSITY="error", HF_HUB_VERBOSITY="error",
-                          HF_HUB_DISABLE_PROGRESS_BARS="1", TQDM_DISABLE="1")
-        logging.disable(logging.WARNING)
     quiet = contextlib.nullcontext if args.verbose else lambda: contextlib.redirect_stdout(io.StringIO())
 
-    from xmr4el.featurization.preprocessor import Preprocessor
-    from xmr4el.xmr.model import XModel
 
     start = time.time()
     print(f"evaluating {args.xmodel_path} on {args.test_path} (library output hidden; -verbose shows it) ...",
@@ -219,7 +224,6 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     if "-selfcheck" in sys.argv:
         _selfcheck()
     else:

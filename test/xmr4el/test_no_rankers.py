@@ -1,13 +1,16 @@
 """train_rankers=False skips every ranker and leaves cosine-scored predictions unchanged.
 Small synthetic hierarchy, trained twice (with / without rankers); runs offline in seconds."""
 import json
+from copy import deepcopy
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
 from xmr4el.featurization.label_embedding_factory import LabelEmbeddingFactory
-from xmr4el.xmr.base import HierarchicaMLModel
+from xmr4el.xmr.base import HierarchicaMLModel, MLModel
 
 
 def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
@@ -19,8 +22,16 @@ def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, c
         train_rankers=train_rankers,
     )
     L = Z.shape[0]
-    hml.train(X_train=X, Y_train=Y, Z_train=Z, local_to_global=np.arange(L),
-              global_to_local={i: i for i in range(L)})
+    caller_config = hml.clustering_config
+    original = deepcopy(caller_config)
+    with patch.object(hml, "prepare_layer", wraps=hml.prepare_layer) as prepare, \
+         patch.object(MLModel, "fused_predict", side_effect=AssertionError("unused leaf fusion")):
+        hml.train(X_train=X, Y_train=Y, Z_train=Z, local_to_global=np.arange(L),
+                  global_to_local={i: i for i in range(L)})
+    assert caller_config == original == hml.clustering_config, "training mutated clustering settings"
+    assert prepare.call_count == sum(len(nodes) for nodes in hml.hmodel[:-1]), "prepared children of leaves"
+    assert all(m.fused_scores is None for m in hml.hmodel[-1])
+    assert hml.child_index_map[-1] == [{} for m in hml.hmodel[-1]]
     for leaf in hml.hmodel[-1]:
         leaf.cosine_scorer = True
     return hml
@@ -84,6 +95,12 @@ def main():
     # cut_half_cluster halves n_clusters below the root: 4 root clusters of 6 labels, then 2 per node
     deep = train(X, Y, Z, cfg, False, n_clusters=4, layer=3, cut_half=True)
     assert [m.cluster_model.c_node.shape[1] for m in deep.hmodel[1]] == [2] * 4
+    with TemporaryDirectory() as d:
+        deep.save(d)
+        restored = HierarchicaMLModel.load(d)
+    assert restored.clustering_config == deep.clustering_config
+    assert restored.clustering_config["kwargs"]["n_clusters"] == 4
+    assert np.allclose(deep.predict(Xq, **kw)[1].toarray(), restored.predict(Xq, **kw)[1].toarray())
 
     # global topk: final_path ranks the same labels as the returned scores
     routes, g = without_r.predict(Xq, beam_size=2, topk=1, topk_mode="global")

@@ -6,11 +6,17 @@ For one saved tree, on train rows and on in-vocabulary dev mentions:
   - flat nearest-label acc@1: argmax cosine(x, Z) over every label, no hierarchy
   - dictionary baseline: normalised mention string -> most frequent train label
 """
+import sys
 from argparse import ArgumentParser
 from collections import Counter, defaultdict
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import Mock
 
 import numpy as np
 from sklearn.preprocessing import normalize
+from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.xmr.model import XModel
 
 
 def cluster_centroids(Z, cluster_of):
@@ -69,8 +75,6 @@ def report(split, X, gold_label, root, Z, cluster_of, blocks):
 
 
 def main():
-    from xmr4el.featurization.preprocessor import Preprocessor
-    from xmr4el.xmr.model import XModel
 
     ap = ArgumentParser()
     ap.add_argument("-xmodel_path", required=True)
@@ -128,9 +132,6 @@ def _selfcheck():
     assert np.isclose(acc, 1 / 3) and np.isclose(cov, 2 / 3)
 
     # Gold clusters [0, 1, 2, 0]: matcher top-1 hits 2/4, its top-2 covers all; fixed top-2 = 3/4
-    from contextlib import redirect_stdout
-    from io import StringIO
-    from unittest.mock import Mock
     root = Mock()
     root.matcher_model.predict_proba.return_value = np.array(
         [[0.6, 0.3, 0.1], [0.5, 0.4, 0.1], [0.1, 0.6, 0.3], [0.7, 0.2, 0.1]])
@@ -143,7 +144,6 @@ def _selfcheck():
 
 
 if __name__ == "__main__":
-    import sys
     if "-selfcheck" in sys.argv:
         _selfcheck()
     else:

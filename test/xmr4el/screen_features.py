@@ -6,6 +6,8 @@ For each feature variant two label scorers:
   max       max cosine over the label's train rows (1-NN)
 Reports acc@1, MRR and the mention-string breakdown; prints a sample of unseen-string errors.
 """
+import sys
+import tempfile
 from argparse import ArgumentParser
 from collections import Counter, defaultdict
 
@@ -18,6 +20,9 @@ from sklearn.preprocessing import normalize
 
 from diagnose_routing import _mention
 from test_evaluate_pipeline import string_breakdown
+from xmr4el.featurization.preprocessor import Preprocessor
+from xmr4el.models.featurization_wrapper.transformers import sentence_model
+from xmr4el.xmr.model import XModel
 
 
 def label_scores(X_tr, y_tr, X_te, n_labels, scorer, chunk=1000):
@@ -63,14 +68,12 @@ ENCODERS = {
 def encode_mentions(model_name, texts):
     """Raw (unnormalised) embeddings on CPU with the tree's own model loader. Not via
     Transformer._predict: that clears ./batch_dir, which a concurrent training run may be using."""
-    from xmr4el.models.featurization_wrapper.transformers import sentence_model
     return sentence_model(model_name, "cpu").encode(
         texts, batch_size=256, normalize_embeddings=False, show_progress_bar=True).astype(np.float32)
 
 
 def context_window(text, span, w):
     """Window around the mention; text = "mention [SEP] document" as the loader builds it."""
-    from xmr4el.featurization.preprocessor import Preprocessor
     return Preprocessor.context_window(text.split("[SEP]", 1)[1][1:], span, w)
 
 
@@ -114,7 +117,6 @@ def combine(parts):
 def expand_mentions(mentions, documents, mode):
     """mode none | replace (mention -> long form) | append ("SSI surgical site infection").
     Returns (new mentions, bool mask of rows whose mention is a short form defined in its document)."""
-    from xmr4el.featurization.preprocessor import Preprocessor
     cache, new, hit = {}, [], []
     for m, doc in zip(mentions, documents):
         if doc not in cache:
@@ -135,8 +137,6 @@ def show_errors(pred, gold, te_m, unseen, labels, names, n, rng):
 
 
 def main():
-    from xmr4el.featurization.preprocessor import Preprocessor
-    from xmr4el.xmr.model import XModel
 
     ap = ArgumentParser()
     ap.add_argument("-xmodel_path", required=True, help="saved tree: label vocabulary + transformer config")
@@ -249,8 +249,6 @@ def _selfcheck():
     assert 0.4 < picks.mean() < 0.6, "ties must not always go to label 0"
     Xc_tr, Xc_te = featurize("char", {"m": ["aspirin", "tumour"]}, {"m": ["Aspirine"]})
     assert label_scores(Xc_tr, np.array([0, 1]), Xc_te, 2, "max").argmax() == 0
-    import tempfile
-    from xmr4el.featurization.preprocessor import Preprocessor
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write("1|t|Aspirin works\n1|a|It lowers fever.\n"
                 "1\t0\t7\tAspirin\tT\tC1\n1\t17\t23\tlowers\tT\tC2\n")
@@ -264,7 +262,6 @@ def _selfcheck():
     A, B = combine([(np.array([[3.0, 4.0]]), np.array([[1.0, 0.0]]), 1.0),
                     (np.array([[0.0, 2.0]]), np.array([[5.0, 0.0]]), 0.5)])
     assert np.allclose(A.toarray(), [[0.6, 0.8, 0.0, 0.5]]) and np.allclose(B.toarray(), [[1, 0, 0.5, 0]])
-    from xmr4el.featurization.preprocessor import Preprocessor
     best_long_form, abbreviations = Preprocessor.best_long_form, Preprocessor.abbreviations
     assert best_long_form("SSI", "after surgery a surgical site infection") == "surgical site infection"
     assert best_long_form("HIV", "the human immunodeficiency virus") == "human immunodeficiency virus"
@@ -278,7 +275,6 @@ def _selfcheck():
 
 
 if __name__ == "__main__":
-    import sys
     if "-selfcheck" in sys.argv:
         _selfcheck()
     else:

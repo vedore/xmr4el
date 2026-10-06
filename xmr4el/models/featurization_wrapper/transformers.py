@@ -7,6 +7,7 @@ from numpy import array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
 from sentence_transformers import SentenceTransformer
+from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,6 @@ def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None):
     """Load the encoder used for every transformer embedding (training, prediction, screening).
     pooling "cls" | "mean" | ... builds [transformer, pooling] explicitly; None = the checkpoint's own
     sentence-transformers setup (mean pooling for a plain HF checkpoint), or CLS_POOLED's."""
-    from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
     if pooling is None and model_name in CLS_POOLED:
         pooling, max_seq_length = "cls", max_seq_length or CLS_POOLED[model_name]
     if pooling is None:
@@ -54,7 +54,6 @@ class Transformer:
         assert model_name, f"transformer config {config} needs a known 'type' or kwargs.model_name"
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
         kwargs.pop("batch_dir", None), kwargs.pop("output_prefix", None)  # obsolete: batches stay in memory
-        print(kwargs)
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
         return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs)[inv.ravel()]
@@ -105,9 +104,14 @@ class Transformer:
                 batches.append(array(batch_results, dtype=dtype))
                 start = end
 
-            except OutOfMemoryError as oom:
-                empty_cache()
+            except RuntimeError as oom:
+                if not isinstance(oom, OutOfMemoryError) and "MPS backend out of memory" not in str(oom):
+                    raise
                 collect()
+                if device.type == "mps":
+                    torch.mps.empty_cache()
+                else:
+                    empty_cache()
 
                 if max_oom_retries <= 0:
                     raise RuntimeError("Failed to process batch after multiple OOM retries") from oom

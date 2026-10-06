@@ -1,7 +1,7 @@
 """JointOvRLogistic solves liblinear's one-vs-rest L2 logistic objective for all labels at once: same probabilities as
 sklearn's liblinear OneVsRest on a 0/1 indicator target, same shapes through the ClassifierModel wrapper. Offline."""
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, csc_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import normalize
@@ -15,6 +15,18 @@ def main():
     y = np.repeat(np.arange(L), per)
     X = normalize(rng.normal(size=(L, d))[y] + 0.8 * rng.normal(size=(len(y), d)))
     Y = np.eye(L)[y]
+
+    for features in (X, X.tolist(), csr_matrix(X), csc_matrix(X.astype(np.float32))):
+        dense = JointOvRLogistic._dense(features)
+        assert dense.dtype == np.float32 and dense.shape == (len(y), d + 1)
+        assert np.array_equal(dense[:, :-1], X.astype(np.float32)) and (dense[:, -1] == 1).all()
+    for cw in ("unsupported", {0: 1, 1: 2}, 1):
+        try:
+            JointOvRLogistic(class_weight=cw).fit(X, Y)
+        except ValueError as e:
+            assert "class_weight must be None or 'balanced'" in str(e)
+        else:
+            raise AssertionError("unsupported class_weight accepted")
 
     for cw in ("balanced", None):
         ref = OneVsRestClassifier(LogisticRegression(solver="liblinear", C=1.0, class_weight=cw, tol=1e-8)).fit(X, Y)
