@@ -1,0 +1,41 @@
+"""Offline pipeline round-trip and independent training-text ownership."""
+from copy import deepcopy
+import pickle
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import numpy as np
+
+from xmr4el.xmodel import XModel
+
+
+def test_pipeline_persistence():
+    config = dict(
+        vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char", "ngram_range": [2, 4]}},
+        dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 6, "random_state": 42}},
+        clustering_config={"type": "sklearnkmeans", "kwargs": {"n_clusters": 2, "random_state": 42}},
+        matcher_config={"type": "jointlogisticregression", "kwargs": {"max_iter": 100}},
+        emb_flag=1, depth=2, min_leaf_size=2, train_rankers=False, n_workers=1,
+    )
+    texts = [[f"concept{j} synonym{i} group{j // 4}" for i in range(8)] for j in range(8)]
+    labels = [f"L{j}" for j in range(8)][::-1]
+    first, second = XModel(**deepcopy(config)), XModel(**deepcopy(config))
+    first.train(texts, labels)
+    second.train(texts, labels)
+    texts[0].append("caller mutation")
+    assert first.training_set == second.training_set and first.training_set != texts
+    queries = [group[0] for group in texts]
+    expected = first.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray()
+    with TemporaryDirectory() as tmp:
+        first.save(tmp)
+        saved = next(Path(tmp).iterdir())
+        with open(saved / "xmodel.pkl", "rb") as f:
+            state = pickle.load(f)
+        assert "_text_encoder" not in state and "_hml" not in state and "temp_var" not in state
+        with open(saved / "text_encoder/text_encoder.pkl", "rb") as f:
+            state = pickle.load(f)
+        assert "_vectorizer_model" not in state and "_dimension_model" not in state
+        restored = XModel.load(saved)
+        assert restored.initial_labels == sorted(labels)
+        assert restored.training_set == first.training_set
+        assert np.allclose(restored.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray(), expected)

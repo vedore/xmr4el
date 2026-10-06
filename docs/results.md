@@ -8,7 +8,7 @@ as they were at the time; the Commands section uses the current layout.
 
 ## Metric choice
 
-Each mention carries exactly one gold CUI (`Preprocessor.load_pubtator_file` in `xmr4el/data.py` → one-hot `Y` rows),
+Each mention carries exactly one gold CUI (`Preprocessor.load_pubtator_file` in `xmr4el/data/readers.py` → one-hot `Y` rows),
 so this is extreme multi-**class**, not multi-label. Reported metrics are **acc@1, MRR, recall@k**.
 PECOS's precision@k / propensity-scored suite is **not** reused: with a single gold label,
 precision@k is just recall@k / k and carries no extra information.
@@ -516,7 +516,7 @@ Older, invalid runs: removed 2026-10-06; recover with `git show b8b7e5a:docs/res
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -max_rows 100000
 
 # flat feature screen, no training (vocabulary/rows of the given tree)
-.venv/bin/python scripts/screen_features.py -xmodel_path outputs/saved_trees/<run> \
+.venv/bin/python scripts/experiments/screen_features.py -xmodel_path outputs/saved_trees/<run> \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -features <list>
 ```

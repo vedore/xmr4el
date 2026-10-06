@@ -15,7 +15,7 @@ from unittest.mock import Mock
 
 import numpy as np
 from sklearn.preprocessing import normalize
-from xmr4el.data import Preprocessor
+from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import mention_key
 from xmr4el.xmodel import XModel
 

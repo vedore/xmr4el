@@ -165,7 +165,7 @@ cut but the leaf matcher still has an internal 100-candidate limit.
 For prediction from Python:
 
 ```python
-from xmr4el.xmr.model import XModel
+from xmr4el.xmodel import XModel
 
 model = XModel.load("outputs/saved_trees/<run>")
 routes, scores = model.predict(
@@ -173,8 +173,9 @@ routes, scores = model.predict(
 )
 ```
 
-The `per_leaf` mode returns hierarchy scores. The alternate `global` path in
-`XModel.predict` reranks retrieved labels with cosine similarity.
+The `per_leaf` mode keeps the best labels per visited leaf. `global` keeps the best
+labels across visited leaves using the same fused scores. Set `scorer="cosine"` or
+`scorer="ranker"` in `XModel.predict` to choose leaf scoring explicitly.
 
 ## Configuration
 
@@ -197,14 +198,14 @@ through the existing configuration registries.
 
 ## Layout
 
-- `xmr4el/data.py`: local readers (`Preprocessor`) and PubTator splitting (`python -m xmr4el.data`).
-- `xmr4el/encoder.py`: text encoder and PIFA label embeddings; `vectorizers.py` (TF-IDF, SVD), `transformers.py`.
-- `xmr4el/clusterers.py`: clustering backends and label hierarchy construction.
-- `xmr4el/classifiers.py`: classifier backends and the cluster/leaf matcher.
-- `xmr4el/ranker.py`: per-label scoring and negative sampling.
-- `xmr4el/node.py`, `tree.py`: one tree node (`MLModel`) and the hierarchy (`HierarchicalMLModel`): training, traversal, persistence.
-- `xmr4el/xmodel.py`: the `XModel` API. `xmr4el/eval.py`: evaluation metrics.
-- `scripts/`: train/evaluate and diagnostic scripts. `tests/`: pytest regression checks. `configs/`: model configs.
+- `xmr4el/data/`: local readers/grouping (`readers.py`) and PubTator splitting/export (`splits.py`).
+- `xmr4el/features/`: text composition (`encoder.py`), TF-IDF (`vectorizers.py`), SVD (`reduction.py`), transformers, and PIFA/label matrices (`label_embeddings.py`).
+- `xmr4el/learning/`: classifier backends, matcher, per-label ranker training, and scoring/fusion.
+- `xmr4el/hierarchy/`: clustering, node training (`node.py`), tree construction/traversal/persistence (`tree.py`).
+- `xmr4el/xmodel.py`: public pipeline API. `xmr4el/eval.py`: shared evaluation metrics.
+- `scripts/`: train/evaluate, split CLI (`split_pubtator.py`), routing diagnostics; `experiments/` for screens/sweeps and `baselines/` for PECOS.
+- `tests/`: domain checks and `integration/` pipeline/persistence checks. `configs/`: model configs.
+- Legacy flat modules contain compatibility imports so existing saved trees remain loadable.
 - `outputs/`: saved trees, ablation logs, PECOS exports (gitignored).
 - `STATUS.md`: current state, next step. `docs/pipeline.md`: implemented behavior, observations. `docs/status_log.md`: history. `docs/results.md`: results.
 - `data/`, `datasets/`: local inputs, excluded from version control.
@@ -217,7 +218,7 @@ These checks use synthetic inputs and do not run corpus training:
 python -m pytest tests/
 python scripts/evaluate.py -selfcheck
 python scripts/diagnose_routing.py -selfcheck
-python scripts/screen_features.py -selfcheck
+python scripts/experiments/screen_features.py -selfcheck
 ```
 
 The user runs full training and evaluation. Keep experiment configurations and

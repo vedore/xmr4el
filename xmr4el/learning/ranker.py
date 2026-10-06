@@ -1,37 +1,35 @@
 import os
 import logging
-import shutil
-import tempfile
 import numpy as np
 import pickle
 from numpy import array
-from pathlib import Path
-from joblib import Parallel, delayed, Memory
+from joblib import Parallel, delayed
 from scipy.sparse import hstack, csr_matrix, issparse
 from typing import Dict, Optional, Tuple
-from xmr4el.classifiers import ClassifierModel
+from xmr4el.learning.classifiers import ClassifierModel
 
 
-ranker_dir = Path(tempfile.mkdtemp(prefix="rankers_store_"))
 random_seed = 0
 
 logger = logging.getLogger(__name__)
 
+def ranker_input(X, label_embeddings):
+    """Append label features, preserving sparse training and dense scoring inputs."""
+    labels = np.asarray(label_embeddings)
+    if labels.ndim == 1:
+        if issparse(X):
+            n = X.shape[0]
+            labels = csr_matrix((np.ones(n), (np.arange(n), np.zeros(n))), shape=(n, 1)).dot(
+                csr_matrix(labels.reshape(1, -1))
+            )
+        else:
+            labels = np.tile(labels, (X.shape[0], 1))
+    return hstack([X, labels], format="csr") if issparse(X) else np.hstack([X, labels])
+
 class RankerTrainer:
     """Training routines for per-label rankers."""
     
-    @staticmethod
-    def save_ranker_temp(model: ClassifierModel, label: int) -> str:
-        """Persist a temporary model for the given label."""
-        sub_dir = ranker_dir / str(label)
-        sub_dir.mkdir(parents=True, exist_ok=True)
-        model.save(str(sub_dir))
-        return str(sub_dir)
 
-    @staticmethod
-    def delete_ranker_temp() -> None:
-        """Remove all temporary ranker models from disk."""
-        shutil.rmtree(ranker_dir)
         
     @staticmethod
     def _width_match(vec: np.ndarray, D: int) -> np.ndarray:
@@ -52,15 +50,7 @@ class RankerTrainer:
         # dense fallback
         return np.linalg.norm(X, axis=1)
 
-    @staticmethod
-    def _cosine_scores(X_block: np.ndarray, v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-        v = v / (np.linalg.norm(v) + eps)
-        Xn = np.linalg.norm(X_block, axis=1) + eps
-        return (X_block @ v) / Xn
 
-    @staticmethod
-    def _ip_scores(X_block: np.ndarray, v: np.ndarray) -> np.ndarray:
-        return (X_block @ v).ravel()
     
     @staticmethod
     def _select_negatives_curriculum(
@@ -221,12 +211,7 @@ class RankerTrainer:
         y[:n_pos] = 1
         X_valid = X_cluster[selected_positions]
 
-        # append label-tile block (same as before)
-        n = X_valid.shape[0]
-        label_tile = csr_matrix((np.ones(n), (np.arange(n), np.zeros(n))), shape=(n, 1)).dot(
-            csr_matrix(label_emb.reshape(1, -1))
-        )
-        X_combined = hstack([X_valid, label_tile])
+        X_combined = ranker_input(X_valid, label_emb)
 
         # light shuffle helps SGD
         perm = np.arange(X_combined.shape[0])
@@ -310,41 +295,6 @@ class RankerTrainer:
 
         return ranker_models
 
-def _selfcheck():
-    """Asserts the two things the curriculum degrades silently on: models are carried
-    across epochs (not retrained from scratch) and epochs draw different negatives."""
-    rs = np.random.RandomState(0)
-    n, d, L = 200, 8, 3
-    X = csr_matrix(rs.rand(n, d).astype(np.float32))
-    Y = csr_matrix((rs.rand(n, L) > 0.8).astype(np.int8))
-    Z = rs.rand(L, d).astype(np.float32)
-    M_TFN = np.ones((n, 1), dtype=int)
-    cfg = {"type": "sklearnsgdclassifier",
-           "kwargs": {"loss": "hinge", "learning_rate": "adaptive", "eta0": 0.01, "random_state": 42}}
-    cur = {"E_warm": 1, "ratios_warm": (0.7, 0.3), "ratios_hard": (0.6, 0.3, 0.1),
-           "neg_mult": 5, "seed": 42}
-
-    def run(n_epochs):
-        return RankerTrainer.train(X=X, Y=Y, Z=Z, M_TFN=M_TFN, M_MAN=None,
-                                   cluster_labels=np.zeros(L, dtype=int), config=cfg,
-                                   cur_config=cur, local_to_global_idx=np.arange(L),
-                                   n_label_workers=1, n_epochs=n_epochs)
-
-    one, three = run(1), run(3)
-    assert one and three, "no rankers trained"
-    gid = next(iter(one))
-    # SGD's t_ counts samples seen; 3 epochs must accumulate more than 1 if warm-started
-    assert three[gid].model.model.t_ > one[gid].model.model.t_, "epochs retrain from scratch, not warm-started"
-
-    picks = [RankerTrainer._select_negatives_curriculum(
-                epoch=e, positive_positions=np.arange(5), neg_positions_all=np.arange(5, 200),
-                cos_scores_neg=rs.rand(195), ip_scores_neg=rs.rand(195),
-                E_warm=cur["E_warm"], ratios_warm=cur["ratios_warm"],
-                ratios_hard=cur["ratios_hard"], neg_mult=cur["neg_mult"],
-                rng=np.random.RandomState(cur["seed"] + e), cluster_size=200)
-             for e in (1, 2)]
-    assert not np.array_equal(picks[0], picks[1]), "epochs draw identical negatives"
-    print("ranker selfcheck ok")
 
 
 class Ranker:
@@ -356,10 +306,6 @@ class Ranker:
     ) -> None:        
         self._ranker_models: Optional[Dict[int, ClassifierModel]] = None
         
-        # Configure joblib memory caching
-        self.memory = Memory(temp_dir, verbose=0)
-        self._cached_process_label = self.memory.cache(RankerTrainer.process_label_incremental)
-    
     @property
     def model_dict(self) -> Optional[Dict[int, ClassifierModel]]:
         """Return the dictionary of trained ranker models."""
@@ -446,7 +392,3 @@ class Ranker:
         )
 
         self.model_dict = ranker_models
-
-
-if __name__ == "__main__":
-    _selfcheck()

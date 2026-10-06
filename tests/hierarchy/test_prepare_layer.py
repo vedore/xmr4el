@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
-from xmr4el.tree import HierarchicalMLModel
+from xmr4el.hierarchy.tree import HierarchicalMLModel
 
 
 def test_prepare_layer():

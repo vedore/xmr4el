@@ -5,11 +5,10 @@ import logging
 import numpy as np
 from typing import Any, Dict, Optional, Tuple, Sequence, List
 from scipy.sparse import csr_matrix, hstack
-from sklearn.preprocessing import normalize, MultiLabelBinarizer
-from xmr4el.vectorizers import DimensionModel, Vectorizer
-from xmr4el.transformers import Transformer
-from numpy import zeros, asarray, sum as npsum
-from numpy.linalg import norm
+from sklearn.preprocessing import normalize
+from xmr4el.features.vectorizers import Vectorizer
+from xmr4el.features.reduction import DimensionModel
+from xmr4el.features.transformers import Transformer
 
 
 class TextEncoder():
@@ -79,7 +78,7 @@ class TextEncoder():
                     except ImportError:
                         with open(f"{model_path}.pkl", "wb") as f:
                             pickle.dump(model, f)
-                state.pop(models[idx], None)
+                state.pop("_" + models[idx] if idx < 2 else models[idx], None)
 
         with open(os.path.join(save_dir, "text_encoder.pkl"), "wb") as fout:
             pickle.dump(state, fout)
@@ -216,47 +215,3 @@ class TextEncoder():
     def predict(self, X_text_query: Sequence[str]) -> csr_matrix:
         """Features for query texts with the models fitted by `encode`."""
         return self._encode(X_text_query, fit=False)
-
-
-class LabelEmbeddingFactory():
-    """Utility factory to build label embeddings."""
-        
-    @staticmethod
-    def generate_label_matrix(label_to_indices: Dict[int, List[int]]) -> List[List[int]]:
-        """Expand a mapping from labels to corpus indices into a label matrix (row i = corpus row i)."""
-        label_to_matrix: List[List[int]] = [None] * sum(len(ids) for ids in label_to_indices.values())
-        for key, ids in label_to_indices.items():
-            for i in ids:
-                label_to_matrix[i] = [key]
-        return label_to_matrix
-        
-    @staticmethod
-    def label_binarizer(labels: Sequence[Sequence[int]]) -> Tuple[np.ndarray, np.ndarray]:
-        """Binarize labels using ``MultiLabelBinarizer``."""
-        mlb = MultiLabelBinarizer(sparse_output=True)
-        Y = mlb.fit_transform(labels)
-        return Y, mlb.classes_
-    
-    @staticmethod
-    def generate_PIFA(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-        """Generate PIFA label embeddings from features and label matrix."""
-        Z: List[np.ndarray] = []
-
-        D = X.shape[1]
-
-        for label_idx in range(Y.shape[1]):
-            row_indices = Y[:, label_idx].nonzero()[0]
-
-            if len(row_indices) == 0:
-                Z.append(zeros(D))
-            else:
-                positive_x = X[row_indices]
-                v_ell = npsum(positive_x, axis=0)
-                v_ell = asarray(v_ell).ravel()
-                z_ell = v_ell / (norm(v_ell) + 1e-10)
-                Z.append(z_ell)
-
-        Z = np.vstack(Z)
-        Z = normalize(Z, norm="l2", axis=1)
-        return Z
-    

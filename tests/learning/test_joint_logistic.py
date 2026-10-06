@@ -6,7 +6,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import normalize
 
-from xmr4el.classifiers import ClassifierModel, JointOvRLogistic
+from xmr4el.learning.classifiers import ClassifierModel, JointOvRLogistic
 
 
 def test_joint_ovr_logistic():

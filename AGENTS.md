@@ -17,12 +17,12 @@ This project is research-oriented. Prefer clarity, traceability, and small safe 
 
 When analyzing this repo, assume the main logic is organized around these areas:
 
-- `xmr4el/data.py`: local readers and PubTator splitting
-- `xmr4el/encoder.py`, `vectorizers.py`, `transformers.py`: text encoders and label embeddings
-- `xmr4el/clusterers.py`: clustering backends and hierarchy construction
-- `xmr4el/classifiers.py`: classifier backends and the matcher
-- `xmr4el/ranker.py`: ranking models for leaf scoring
-- `xmr4el/node.py`, `tree.py`: tree node and hierarchical model (training, traversal, persistence)
+- `xmr4el/data/readers.py`, `data/splits.py`: local readers and PubTator splitting
+- `xmr4el/features/`: encoder, vectorizers, reduction, transformers, label embeddings
+- `xmr4el/hierarchy/clusterers.py`: clustering backends and hierarchy construction
+- `xmr4el/learning/classifiers.py`, `learning/matcher.py`: classifier backends and the matcher
+- `xmr4el/learning/ranker.py`, `learning/scoring.py`: ranker training and leaf scoring
+- `xmr4el/hierarchy/node.py`, `hierarchy/tree.py`: tree node and hierarchical model (training, traversal, persistence)
 - `xmr4el/xmodel.py`: the `XModel` API; `xmr4el/eval.py`: evaluation metrics
 
 Scripts live under `scripts/`, pytest checks under `tests/`, configs under `configs/`,
@@ -82,11 +82,11 @@ When asked to explain, debug, extend, or document this repository, inspect in th
 
 1. `README.md`
 2. `pyproject.toml`
-3. `xmr4el/xmodel.py`, `tree.py`, `node.py`
-4. `xmr4el/encoder.py`, `vectorizers.py`, `transformers.py`
-5. `xmr4el/classifiers.py`
-6. `xmr4el/ranker.py`
-7. `xmr4el/clusterers.py`
+3. `xmr4el/xmodel.py`, `hierarchy/tree.py`, `hierarchy/node.py`
+4. `xmr4el/features/encoder.py`, `features/vectorizers.py`, `features/reduction.py`, `features/transformers.py`, `features/label_embeddings.py`
+5. `xmr4el/learning/classifiers.py`
+6. `xmr4el/learning/ranker.py`
+7. `xmr4el/hierarchy/clusterers.py`
 8. `scripts/`, `tests/`
 
 Before making claims, verify them against the implementation.

@@ -5,9 +5,9 @@ import tempfile
 import numpy as np
 from unittest.mock import patch
 
-from xmr4el.encoder import TextEncoder
-from xmr4el.data import Preprocessor
-from xmr4el.transformers import CLS_POOLED, MODEL_NAMES, Transformer
+from xmr4el.features.encoder import TextEncoder
+from xmr4el.data.readers import Preprocessor
+from xmr4el.features.transformers import CLS_POOLED, MODEL_NAMES, Transformer
 
 
 def fake_transformer(texts, _config):

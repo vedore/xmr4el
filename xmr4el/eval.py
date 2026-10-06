@@ -45,6 +45,16 @@ def gold_rank(row, gold_idx):
     return int(pos[0]) + 1 if pos.size else 0
 
 
+def ranking_metrics(ranks, ks=(5, 10, 20)):
+    """Aggregate existing ranks without changing callers' tie ordering."""
+    ranks = np.asarray(ranks)
+    found = ranks > 0
+    metrics = {"acc@1": np.mean(ranks == 1),
+               "MRR": np.mean(np.where(found, 1.0 / np.maximum(ranks, 1), 0.0))}
+    metrics.update({f"R@{k}": np.mean(found & (ranks <= k)) for k in ks})
+    return metrics
+
+
 def split_by_ranker(gold_idx, trained):
     has = np.isin(gold_idx, list(trained))
     return (("with ranker", has), ("without ranker", ~has))

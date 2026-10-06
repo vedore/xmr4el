@@ -23,7 +23,12 @@ from typing import Tuple
 from uuid import uuid4
 from heapq import nlargest
 from pathlib import Path
-from xmr4el.node import MLModel
+from xmr4el.hierarchy.node import MLModel
+
+def augment_features(X, selected, total, maximum):
+    """Append routing probabilities and normalize identically during train and predict."""
+    extra = csr_matrix(np_vstack([selected, total, maximum]).T)
+    return normalize(sp_hstack([X, extra], format="csr"), norm="l2", axis=1)
 
 
 class HierarchicalMLModel():
@@ -58,7 +63,7 @@ class HierarchicalMLModel():
         self._layer = layer
         self._child_index_map = None
         
-        self.ml_dir = Path(tempfile.mkdtemp(prefix="ml_store_"))
+        self.ml_dir = None
         
     @property
     def hmodel(self):
@@ -229,9 +234,7 @@ class HierarchicalMLModel():
             feat_sum = fused_c.sum(axis=1).ravel()
             feat_max = fused_c.max(axis=1).ravel()
             
-            sparse_feats = csr_matrix(np_vstack([feat_c, feat_sum, feat_max]).T)
-            X_aug = sp_hstack([X_node, sparse_feats], format="csr")
-            X_aug = normalize(X_aug, norm="l2", axis=1)
+            X_aug = augment_features(X_node, feat_c, feat_sum, feat_max)
 
             # Zero pad keeps Z width == X_aug width (ranker cosine/ip, cosine fallback). The old
             # pad held mean/sum/max of X.Z over all node rows; the sum grew with node size and after
@@ -378,7 +381,10 @@ class HierarchicalMLModel():
                 topk_mode: str = "per_leaf",   # "per_leaf" | "global" | "none"
                 include_global_path: bool = True,
                 n_jobs: int = None,
-                path_score: bool = False):
+                path_score: bool = False,
+                scorer: str | None = None):
+        if scorer not in (None, "ranker", "cosine"):
+            raise ValueError(f"Unknown scorer: {scorer}")
         # path_score: leaf score x routing path probability (exp(path_logscore)), as XR-Linear does.
         # Leaf matcher probabilities are per-label sigmoids trained only against that leaf's labels, so
         # without it the beam's leaves are merged by max on scales that are not comparable.
@@ -452,7 +458,8 @@ class HierarchicalMLModel():
                 X_batch,
                 beam_size=100,
                 fusion=fusion,
-                alpha=alpha
+                alpha=alpha,
+                scorer=scorer
             )
 
             for (qi, trail), labels, scores in zip(zip(q_indices, trails), labels_list, scores_list):
@@ -524,9 +531,7 @@ class HierarchicalMLModel():
                         if child_idx is None:
                             continue
 
-                        extra = csr_matrix([[float(p_child), sum_cs, max_cs]])
-                        x_next = sp_hstack([x_row, extra], format="csr")
-                        x_next = normalize(x_next, norm="l2", axis=1)
+                        x_next = augment_features(x_row, [float(p_child)], [sum_cs], [max_cs])
 
                         logscore_next = logscore + float(log(max(p_child, eps)))
 

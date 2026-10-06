@@ -40,10 +40,10 @@ Saved trees are under `outputs/saved_trees/`.
   only a local file format here.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
   binarizer's `classes_` (sorted; labels with no training text have no column). `load` sorts legacy
-  first-seen lists and refuses a label/`Z` count mismatch; regression in `tests/test_data_loading.py`.
+  first-seen lists and refuses a label/`Z` count mismatch; regression in `tests/integration/test_label_mapping.py`.
   Before this fix eval scored dev against a permuted label list, so **every pre-fix dev number
   (the deleted `docs/results_archive.md`) is invalid**.
-- Transformer embedding batches are kept in memory in row order (`xmr4el/transformers.py`; no `batch_dir`).
+- Transformer embedding batches are kept in memory in row order (`xmr4el/features/transformers.py`; no `batch_dir`).
   Before the numeric-order fix, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
   and the old 4.79x/3.81x train-side routing figures are invalid.
 - Any new code that maps indices to label names must use `initial_labels`, never input order.
@@ -52,4 +52,4 @@ Saved trees are under `outputs/saved_trees/`.
 
 `STATUS.md` owns the work order and the interpretation rules; `docs/pipeline.md` holds the
 implemented-behavior table, synthetic checks and pipeline observations. Do not
-duplicate them here. `fused_predict` (`xmr4el/node.py`) is not dead code: leaf training calls it.
+duplicate them here. `fused_predict` (`xmr4el/hierarchy/node.py`) is not dead code: leaf training calls it.

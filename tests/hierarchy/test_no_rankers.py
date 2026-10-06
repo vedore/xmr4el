@@ -10,9 +10,9 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
-from xmr4el.encoder import LabelEmbeddingFactory
-from xmr4el.node import MLModel
-from xmr4el.tree import HierarchicalMLModel
+from xmr4el.features.label_embeddings import LabelEmbeddingFactory
+from xmr4el.hierarchy.node import MLModel
+from xmr4el.hierarchy.tree import HierarchicalMLModel
 
 
 def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
@@ -40,7 +40,7 @@ def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, c
 
 
 def test_no_rankers():
-    cfg = json.load(open(Path(__file__).resolve().parents[1] / "configs/xmr4el_base_config.json"))
+    cfg = json.load(open(Path(__file__).resolve().parents[2] / "configs/xmr4el_base_config.json"))
     rng = np.random.default_rng(0)
     L, per, d = 24, 10, 16
     centers = rng.normal(size=(L, d))

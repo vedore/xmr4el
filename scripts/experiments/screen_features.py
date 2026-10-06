@@ -18,9 +18,9 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
-from xmr4el.data import Preprocessor
+from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import mention_key, string_breakdown
-from xmr4el.transformers import sentence_model
+from xmr4el.features.transformers import sentence_model
 from xmr4el.xmodel import XModel
 
 

@@ -1,14 +1,13 @@
 import os
 import json
 import pickle
-import torch
 import numpy as np
 import logging
 import joblib
 from abc import ABCMeta
+from copy import deepcopy
 from joblib import parallel_backend
 from sklearn.cluster import KMeans
-from kmeans_pytorch import KMeans as PyTorchBalancedKMeans
 from typing import Any, Dict, Optional, Tuple, Counter, List
 from numpy import ones, ndarray, asarray, argmax
 from scipy.sparse import csr_matrix
@@ -97,7 +96,7 @@ class ClusteringModel(metaclass=ClusterMeta):
         """
 
         config = (
-            config if config is not None else {"type": "sklearnkmeans", "kwargs": {}}
+            deepcopy(config) if config is not None else {"type": "sklearnkmeans", "kwargs": {}}
         )
         # LOGGER.debug(f"Train Clustering with config: {json.dumps(config, indent=True)}")
         cluster_type = config.get("type", None)
@@ -113,33 +112,6 @@ class ClusteringModel(metaclass=ClusterMeta):
     def labels(self):
         return self.model.labels()
 
-    @staticmethod
-    def load_config_from_args(args):
-        """Parse config from a `argparse.Namespace` object.
-
-        Args:
-            args (argparse.Namespace): Contains either a `cluster_config_path` (path to a json file) or `cluster_config_json` (a json object in string form).
-
-        Returns:
-            dict: The dict resulting from loading the json file or json object.
-
-        Raises:
-            Exception: If json object cannot be loaded.
-        """
-
-        if args.cluster_config_path is not None:
-            with open(args.cluster_config_path, "r", encoding="utf-8") as fin:
-                cluster_config_json = fin.read()
-        else:
-            cluster_config_json = args.cluster_config_json
-
-        try:
-            cluster_config = json.loads(cluster_config_json)
-        except json.JSONDecodeError as jex:
-            raise Exception(
-                f"Failed to load clustering config json from {cluster_config_json} ({jex})"
-            )
-        return cluster_config
 
 
 class SklearnKMeans(ClusteringModel):
@@ -293,6 +265,9 @@ class BalancedKMeans(ClusteringModel):
         Raises:
             Exception: If `config` contains keyword arguments that the BalancedKMeans does not accept.
         """
+        import torch
+        from kmeans_pytorch import KMeans as PyTorchBalancedKMeans
+
         defaults = {
             "n_clusters": 8,
             "distance": "cosine",
@@ -428,22 +403,6 @@ class ClusteringTrainer:
         return C_node, clustering_model
 
 
-def _clustering_selfcheck():
-    """No label may be dropped: every C_node row must have exactly one cluster."""
-    rs = np.random.RandomState(0)
-    # 3 tight blobs of 20 + a stray pair far away: unbalanced kmeans gives the pair its own
-    # cluster, which is below min_leaf_size and would otherwise be dropped.
-    Z = np.vstack([rs.normal(c, 0.01, size=(20, 4)) for c in (0.0, 5.0, 10.0)]
-                  + [rs.normal(40.0, 0.01, size=(2, 4))]).astype(np.float32)
-    cfg = {"type": "sklearnkmeans", "kwargs": {"n_clusters": 4, "random_state": 0}}
-    C, _ = ClusteringTrainer.train(Z, cfg, min_leaf_size=5)
-    assert C is not None, "clustering returned nothing"
-    assert C.shape == (Z.shape[0], 3), f"expected 3 valid clusters, got {C.shape}"
-    per_row = np.asarray(C.sum(axis=1)).ravel()
-    assert (per_row == 1).all(), f"{int((per_row == 0).sum())} labels dropped from C_node"
-    # the strays must land in the blob they are actually nearest to
-    assert C[60].indices[0] == C[61].indices[0] == C[40].indices[0]
-    print("clustering selfcheck ok")
 
 
 class Clustering:
@@ -568,8 +527,3 @@ class Clustering:
         
             gidx = local_to_global_idx[local_idx]
             self.cluster_to_labels[cid].append(int(gidx))
-        
-
-
-if __name__ == "__main__":
-    _clustering_selfcheck()

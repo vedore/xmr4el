@@ -3,8 +3,8 @@ import os
 import joblib
 import pickle
 import time 
-import warnings
 import logging
+from copy import deepcopy
 
 import numpy as np
 
@@ -13,16 +13,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from scipy.sparse import csr_matrix
-from xmr4el.encoder import LabelEmbeddingFactory
-from xmr4el.data import Preprocessor
-from xmr4el.encoder import TextEncoder
-from xmr4el.tree import HierarchicalMLModel
-from xmr4el.temp_store import TempVarStore
+from xmr4el.features.label_embeddings import LabelEmbeddingFactory
+from xmr4el.data.readers import Preprocessor
+from xmr4el.features.encoder import TextEncoder
+from xmr4el.hierarchy.tree import HierarchicalMLModel
 
 
-os.makedirs("/tmp", exist_ok=True)
-os.environ["JOBLIB_TEMP_FOLDER"] = "/tmp"
-warnings.filterwarnings("ignore", message=".*does not have valid feature names.*")
 
 
 class XModel:
@@ -100,7 +96,6 @@ class XModel:
         self.EPS = 1e-12
         self.TOPK_DBG = 50
         
-        self.temp_var = TempVarStore()
     
     def __str__(self) -> str:
         """Human-friendly multi-line summary of the model and its config/state."""
@@ -258,6 +253,8 @@ class XModel:
         
         text_encoder = self.text_encoder
         text_encoder_path = os.path.join(save_dir, "text_encoder")
+        state.pop("_text_encoder", None)
+        state.pop("temp_var", None)  # legacy temporary store is not model state
         
         if text_encoder is not None:
             if hasattr(text_encoder, "save"):
@@ -281,6 +278,7 @@ class XModel:
             model_data = pickle.load(fin)
             
         model = cls()
+        model_data.pop("temp_var", None)
         model.__dict__.update(model_data)
         # Trees saved before the label-order fix stored input order; sorted() is idempotent
         model.initial_labels = sorted(set(model.initial_labels))
@@ -313,7 +311,7 @@ class XModel:
     def _fit(self, X_text, Y_text):
         """Returns embeddings: ndarray"""
         
-        self.training_set = self.temp_var.save_model_temp(X_text)
+        self.training_set = deepcopy(X_text)
         
         self.logger.info("Preparing Data")
         
@@ -381,9 +379,6 @@ class XModel:
 
         self.model = hml
         
-        self.training_set = self.temp_var.load_model_temp(self.training_set)
-        
-        self.temp_var.delete_model_temp()
         
     def predict(self, X_text, 
                 topk: int = 5, 
@@ -392,7 +387,8 @@ class XModel:
                 alpha: float = 0.5,
                 topk_mode: str = "per_leaf", 
                 n_jobs: int =-1,
-                path_score: bool = False):
+                path_score: bool = False,
+                scorer: str | None = None):
             """Predict label scores for given text inputs.
 
             Parameters
@@ -416,6 +412,8 @@ class XModel:
                 Hit counts per query when ``return_hits`` is ``True``.
             """
             
+            if scorer not in (None, "ranker", "cosine"):
+                raise ValueError(f"Unknown scorer: {scorer}")
             time_start_encoding = time.time()
 
             X_query = self.text_encoder.predict(X_text)
@@ -432,4 +430,5 @@ class XModel:
                                       alpha=alpha,
                                       n_jobs=n_jobs,
                                       topk_mode=topk_mode,
-                                      path_score=path_score)
+                                      path_score=path_score,
+                                      scorer=scorer)

@@ -14,8 +14,8 @@ if "-verbose" not in sys.argv:
 
 import numpy as np
 
-from xmr4el.data import Preprocessor
-from xmr4el.eval import _selfcheck, filter_labels_and_inputs, gold_rank, split_by_ranker, string_breakdown
+from xmr4el.data.readers import Preprocessor
+from xmr4el.eval import _selfcheck, filter_labels_and_inputs, gold_rank, ranking_metrics, split_by_ranker, string_breakdown
 from xmr4el.xmodel import XModel
 
 
@@ -51,8 +51,6 @@ def main():
         trained_xtree = XModel.load(args.xmodel_path)
     if args.verbose:
         print(trained_xtree)
-    for leaf in trained_xtree.model.hmodel[-1]:
-        leaf.cosine_scorer = args.scorer == "cosine"
 
     abbrev = getattr(trained_xtree, "abbrev_expansion", None)  # train side too: same dictionary keys
     test_set = Preprocessor.load_pubtator_file(
@@ -68,7 +66,8 @@ def main():
                                                   fusion="lp_fusion",
                                                   alpha=args.alpha,
                                                   topk_mode="per_leaf",
-                                                  path_score=args.path_score)
+                                                  path_score=args.path_score,
+                                                  scorer=args.scorer)
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
@@ -84,8 +83,8 @@ def main():
         cand = set(trained_labels[r.get("final_path").get("leaf_global_labels", [])])
         hit_counts.append(1 if golden_labels[qi] in cand else 0)
 
-    found = ranks > 0
-    mrr = lambda r: np.mean(np.where(r > 0, 1.0 / np.maximum(r, 1), 0.0)) if r.size else 0.0
+    metrics = ranking_metrics(ranks, ks=(5, 10, 20, 50, 100))
+    mrr = lambda r: ranking_metrics(r)["MRR"] if r.size else 0.0
     nnz = score_csr.nnz / max(score_csr.shape[0], 1)
 
     print("-" * 72)
@@ -100,9 +99,9 @@ def main():
         print(f"WARNING  alpha {args.alpha} mixes the matcher probability into the cosine score; "
               f"not comparable with alpha 1 rows")
     print()
-    print(f"acc@1    {np.mean(ranks == 1):.4f}")
+    print(f"acc@1    {metrics['acc@1']:.4f}")
     print(f"MRR      {mrr(ranks):.4f}")
-    print("recall   " + "  ".join(f"@{k} {np.mean(found & (ranks <= k)):.4f}" for k in (5, 10, 20, 50, 100)))
+    print("recall   " + "  ".join(f"@{k} {metrics[f'R@{k}']:.4f}" for k in (5, 10, 20, 50, 100)))
     print(f"         @cand {np.mean(hit_counts):.4f}  (gold among the candidates: the cap for every metric)")
 
     # Defect #6 tie detector: a cluster-level leaf matcher gives every label in a cluster the same

@@ -15,8 +15,8 @@ from argparse import ArgumentParser
 import numpy as np
 from scipy.sparse import csr_matrix, load_npz, save_npz
 
-from xmr4el.data import Preprocessor
-from xmr4el.eval import filter_labels_and_inputs, gold_rank, string_breakdown
+from xmr4el.data.readers import Preprocessor
+from xmr4el.eval import filter_labels_and_inputs, gold_rank, ranking_metrics, string_breakdown
 from xmr4el.xmodel import XModel
 
 
@@ -57,9 +57,7 @@ def export(args):
 def report(P, gold, dev_texts, labels, train_pairs):
     """Eval's metrics for one (n_dev, n_labels) score matrix."""
     ranks = np.array([gold_rank(P.getrow(i), g) for i, g in enumerate(gold)])
-    found = ranks > 0
-    out = {"acc@1": np.mean(ranks == 1), "MRR": np.mean(np.where(found, 1.0 / np.maximum(ranks, 1), 0.0))}
-    out.update({f"R@{k}": np.mean(found & (ranks <= k)) for k in (5, 10, 20)})
+    out = ranking_metrics(ranks)
     top1 = [labels[r.indices[np.argmax(r.data)]] if r.nnz else None for r in (P.getrow(i) for i in range(P.shape[0]))]
     return out, string_breakdown(dev_texts, [labels[g] for g in gold], top1, train_pairs)
 
