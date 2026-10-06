@@ -57,7 +57,7 @@ class Preprocessor:
         }
 
     @staticmethod
-    def prepare_data_older(
+    def prepare_data(
         X_train: Sequence[Sequence[str]],
         Y_train: Sequence[str],
     ) -> Tuple[List[str], Dict[str, List[int]]]:

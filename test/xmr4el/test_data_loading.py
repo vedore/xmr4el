@@ -47,7 +47,7 @@ def test_local_inputs():
             Preprocessor.load_pubtator_file(pubtator)
         )
         assert grouped == pub_expected and ids == ["L1", "L2"]
-        flat, mapping = Preprocessor.prepare_data_older(grouped, ids)
+        flat, mapping = Preprocessor.prepare_data(grouped, ids)
         assert flat == pub_expected[0] + pub_expected[1]
         assert mapping == {"L1": [0, 1], "L2": [2]}
 
@@ -90,7 +90,7 @@ def test_label_mapping():
     ):
         xm = XModel()
         xm.train(list(groups.values()), list(groups))
-    flat, _ = Preprocessor.prepare_data_older(list(groups.values()), list(groups))
+    flat, _ = Preprocessor.prepare_data(list(groups.values()), list(groups))
     Y, Z = xm.Y.tocsc(), np.asarray(xm.Z)
     assert xm.initial_labels == ["L1", "L2", "L3"], xm.initial_labels
     assert Y.shape[1] == Z.shape[0] == len(xm.initial_labels)

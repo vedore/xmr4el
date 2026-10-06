@@ -317,7 +317,7 @@ class XModel:
         
         self.logger.info("Preparing Data")
         
-        X_processed, Y_label_to_indices = Preprocessor.prepare_data_older(X_text, Y_text)
+        X_processed, Y_label_to_indices = Preprocessor.prepare_data(X_text, Y_text)
         
         self.logger.info("Started Encoding")
         

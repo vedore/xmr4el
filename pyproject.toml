@@ -23,9 +23,7 @@ dependencies = [
   "scikit-learn",
   "transformers",
   "sentence-transformers",
-  "faiss-cpu",
-  "lightgbm",
-  "umap-learn",
+  "numba",
 
   "torch>=2.8.0",
 
