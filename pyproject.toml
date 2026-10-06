@@ -29,3 +29,8 @@ dependencies = [
 
   "kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main"
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

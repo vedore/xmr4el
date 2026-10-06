@@ -28,7 +28,7 @@ def export(args):
     window, abbrev = getattr(xm, "context_window", None), getattr(xm, "abbrev_expansion", None)
     os.makedirs(args.out, exist_ok=True)
 
-    # Training rows in the tree's order: first len(labels) label groups, flattened (test_train_pipeline + XModel._fit)
+    # Training rows in the tree's order: first len(labels) label groups, flattened (scripts/train.py + XModel._fit)
     groups, ids = Preprocessor.organize_pubtator_output(
         Preprocessor.load_pubtator_file(args.train_path, window=window, abbrev=abbrev))
     trn_texts = [t for g in groups[:len(labels)] for t in g]
@@ -97,12 +97,12 @@ def main():
     ap.add_argument("-xmodel_path")
     ap.add_argument("-train_path", default="datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt")
     ap.add_argument("-test_path", default="datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt")
-    ap.add_argument("-out", help="default test/test_data/pecos/<tree name>")
+    ap.add_argument("-out", help="default outputs/pecos/<tree name>")
     args = ap.parse_args()
     if args.mode == "selfcheck":
         return _selfcheck()
     if args.out is None:
-        args.out = os.path.join("test/test_data/pecos", os.path.basename(os.path.normpath(args.xmodel_path)))
+        args.out = os.path.join("outputs/pecos", os.path.basename(os.path.normpath(args.xmodel_path)))
     export(args) if args.mode == "export" else score(args)
 
 

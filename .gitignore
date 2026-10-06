@@ -2,6 +2,7 @@
 /datasets/
 /tmp/
 /test/test_data/
+/outputs/
 /.venv/
 /.ruff_cache/
 /.pytest_cache/

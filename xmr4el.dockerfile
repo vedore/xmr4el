@@ -23,7 +23,7 @@ WORKDIR /opt/deps
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --locked --no-dev --no-install-project --no-cache
 
-# Use PYTHONPATH, not the script directory (test/xmr4el shadows the package).
+# Use PYTHONPATH, not the script directory (scripts must import the mounted package).
 ENV PYTHONSAFEPATH=1
 WORKDIR /app
 CMD ["/bin/bash"]

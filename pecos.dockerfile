@@ -1,4 +1,4 @@
-# PECOS baseline runtime (libpecos has no macOS wheel). Used by test/xmr4el/pecos_run.py.
+# PECOS baseline runtime (libpecos has no macOS wheel). Used by scripts/pecos_run.py.
 #   docker build --platform linux/amd64 -f pecos.dockerfile -t xmr4el-pecos .
 FROM python:3.10-slim
 

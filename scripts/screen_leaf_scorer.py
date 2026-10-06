@@ -66,11 +66,11 @@ def main():
 
     ap = ArgumentParser()
     ap.add_argument("-xmodel_path", required=True, help="tree whose leaves are used")
-    ap.add_argument("-data", help="pecos_compare.py export dir; default test/test_data/pecos/<tree name>")
+    ap.add_argument("-data", help="pecos_compare.py export dir; default outputs/pecos/<tree name>")
     ap.add_argument("-scorers", default="cosine,logreg,logreg_bal,svm")
     ap.add_argument("-svd_dims", type=int, default=0, help="0 = all; else keep the first k char/context SVD columns")
     args = ap.parse_args()
-    data = args.data or os.path.join("test/test_data/pecos", os.path.basename(os.path.normpath(args.xmodel_path)))
+    data = args.data or os.path.join("outputs/pecos", os.path.basename(os.path.normpath(args.xmodel_path)))
 
     X = load_npz(f"{data}/X_trn.npz").tocsr()
     y = load_npz(f"{data}/Y_trn.npz").tocsr().indices

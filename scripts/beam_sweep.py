@@ -17,7 +17,7 @@ def run_tests(model_path, test_path, beam_start=5, beam_end=25, topk=10):
         log(f"Running test with beam_size={beam}", "yellow")
         cmd = [
             "python3",
-            "test/xmr4el/test_evaluate_pipeline.py",
+            "scripts/evaluate.py",
             "-xmodel_path", model_path,
             "-test_path", test_path,
             "-beam_size", str(beam),
@@ -31,7 +31,7 @@ def run_tests(model_path, test_path, beam_start=5, beam_end=25, topk=10):
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
-        print("Usage: python run_tests.py <model_path> <test_path> <beam_start> <beam_end> <topk>")
+        print("Usage: python scripts/beam_sweep.py <model_path> <test_path> <beam_start> <beam_end> <topk>")
         sys.exit(1)
 
     model_path = sys.argv[1]

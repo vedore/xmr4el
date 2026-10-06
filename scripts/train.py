@@ -18,7 +18,7 @@ def main():
     parser.add_argument("-ds_len", type=int, default=10000000)
     parser.add_argument("-train_path", type=str, required=True)
     parser.add_argument("-labels_path", help="Label file for grouped TSV input; omit for PubTator")
-    parser.add_argument("-model_config", type=str, default=".models/xmr4el_base_config.json")
+    parser.add_argument("-model_config", type=str, default="configs/xmr4el_base_config.json")
     
     args = parser.parse_args()
     
@@ -40,7 +40,7 @@ def main():
     xmodel.train(X_train[:args.ds_len], Y_train[:args.ds_len])
 
     # Save the tree
-    save_dir = os.path.join(os.getcwd(), "test/test_data/saved_trees")  # Ensure this path is correct and writable
+    save_dir = os.path.join(os.getcwd(), "outputs/saved_trees")  # Ensure this path is correct and writable
     xmodel.save(save_dir)
 
     end = time.time()

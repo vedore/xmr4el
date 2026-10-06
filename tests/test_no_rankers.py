@@ -2,6 +2,7 @@
 Small synthetic hierarchy, trained twice (with / without rankers); runs offline in seconds."""
 import json
 from copy import deepcopy
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -38,8 +39,8 @@ def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, c
     return hml
 
 
-def main():
-    cfg = json.load(open(".models/xmr4el_base_config.json"))
+def test_no_rankers():
+    cfg = json.load(open(Path(__file__).resolve().parents[1] / "configs/xmr4el_base_config.json"))
     rng = np.random.default_rng(0)
     L, per, d = 24, 10, 16
     centers = rng.normal(size=(L, d))
@@ -110,6 +111,3 @@ def main():
         assert list(r["final_path"]["leaf_global_labels"]) == list(row.indices[np.argsort(-row.data)])
     print("ok")
 
-
-if __name__ == "__main__":
-    main()

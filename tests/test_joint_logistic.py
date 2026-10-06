@@ -9,7 +9,7 @@ from sklearn.preprocessing import normalize
 from xmr4el.classifiers import ClassifierModel, JointOvRLogistic
 
 
-def main():
+def test_joint_ovr_logistic():
     rng = np.random.default_rng(0)
     L, d, per = 7, 20, 25
     y = np.repeat(np.arange(L), per)
@@ -42,6 +42,3 @@ def main():
     assert (m.predict(X) == y).mean() > 0.8 and list(m.classes_) == list(range(L))
     print("ok")
 
-
-if __name__ == "__main__":
-    main()

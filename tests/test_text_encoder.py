@@ -15,7 +15,7 @@ def fake_transformer(texts, _config):
     return np.array([[10.0 * len(t), 30.0, 1.0] for t in texts], dtype=np.float32)
 
 
-def main():
+def test_text_encoder():
     char = {"type": "tfidf", "kwargs": {"analyzer": "char_wb", "ngram_range": [2, 4],
                                         "sublinear_tf": True, "max_df": 1.0}}
     svd3 = {"type": "sklearntruncatedsvd", "kwargs": {"n_components": 3, "random_state": 0}}
@@ -90,6 +90,3 @@ def main():
     assert calls[1][0] == "org/model" and calls[1][1]["pooling"] == "mean", "any checkpoint via kwargs.model_name"
     print("ok")
 
-
-if __name__ == "__main__":
-    main()

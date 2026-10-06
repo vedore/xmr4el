@@ -17,7 +17,7 @@ from torch.cuda import OutOfMemoryError
 
 
 def test_local_inputs():
-    script = Path(__file__).with_name("test_train_pipeline.py")
+    script = Path(__file__).resolve().parents[1] / "scripts/train.py"
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "data").mkdir()
@@ -196,9 +196,3 @@ def test_mps_oom():
         assert clear.call_count == 3, "unrelated RuntimeError must not retry or clear cache"
     print("MPS OOM checks ok")
 
-
-if __name__ == "__main__":
-    test_local_inputs()
-    test_label_mapping()
-    test_embedding_row_order()
-    test_mps_oom()

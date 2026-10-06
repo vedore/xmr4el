@@ -485,7 +485,7 @@ def _matcher_selfcheck():
     label can have a single positive. SGD's `early_stopping` stratifies its validation split and
     raises on that; MLModel.train disables it for the last layer only. Asserts both halves."""
 
-    cfg = json.load(open(".models/xmr4el_flag6_sapbert_config.json"))["matcher_config"]  # SGD matcher
+    cfg = json.load(open("configs/xmr4el_flag6_sapbert_config.json"))["matcher_config"]  # SGD matcher
     rng = np.random.default_rng(0)
     n, d, L = 40, 12, 6
     X = rng.normal(size=(n, d)).astype(np.float32)

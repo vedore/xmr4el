@@ -541,7 +541,7 @@ class MLModel():
 
         # --- 4) Batch ranker per label and fuse with the label's cluster score ---
         X_dense = X_query.toarray() if hasattr(X_query, "toarray") else np.asarray(X_query)
-        # eval-only switch (set by test_evaluate_pipeline -scorer cosine): skip trained rankers and
+        # eval-only switch (set by scripts/evaluate.py -scorer cosine): skip trained rankers and
         # score every label by cosine to its leaf z, like the no-ranker fallback.
         no_rankers = getattr(self, "cosine_scorer", False) or self.ranker_model is None
         model_dict = {} if no_rankers else self.ranker_model.model_dict
