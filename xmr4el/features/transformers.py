@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import os
 import time
 import torch
 import numpy as np
@@ -24,6 +26,11 @@ MODEL_NAMES = {
 # Plain HF checkpoints that their authors pool by [CLS], with a max token length.
 # SentenceTransformer(name) alone would mean-pool them.
 CLS_POOLED = {"cambridgeltl/SapBERT-from-PubMedBERT-fulltext": 25}
+
+# Embeddings of a frozen encoder depend only on (model, pooling, max length, dtype, texts): `transform` saves them here
+# and reuses them on any later run with the same distinct texts. Delete the directory after changing a checkpoint.
+CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                         "outputs", "cache", "transformers")
 
 
 def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None):
@@ -56,7 +63,20 @@ class Transformer:
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
-        return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs)[inv.ravel()]
+        key = "\0".join([model_name, str(kwargs.get("pooling")), str(kwargs.get("max_seq_length")),
+                         np.dtype(kwargs["dtype"]).name, *uniq.tolist()])
+        path = os.path.join(CACHE_DIR, hashlib.sha256(key.encode()).hexdigest()[:24] + ".npy")
+        if os.path.exists(path):
+            emb = np.load(path)
+            assert emb.shape[0] == len(uniq), f"cached embeddings {path} have {emb.shape[0]} rows, expected {len(uniq)}"
+            logger.info("Transformer cache hit: model=%s rows=%d path=%s", model_name, len(uniq), path)
+        else:
+            emb = cls._predict(model_name, uniq.tolist(), **kwargs)
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(path + ".tmp", "wb") as f:  # write-then-rename: an interrupted save leaves no partial cache file
+                np.save(f, emb)
+            os.replace(path + ".tmp", path)
+        return kwargs, emb[inv.ravel()]
 
     @classmethod
     def _predict(

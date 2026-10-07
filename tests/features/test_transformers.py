@@ -78,3 +78,21 @@ def test_mps_oom(caplog, capsys):
                for record in caplog.records)
     assert not any("Transformer batch" in record.getMessage() for record in caplog.records)
     print("MPS OOM checks ok")
+
+
+def test_transform_cache():
+    """A second transform of the same distinct texts loads the saved embeddings instead of re-encoding."""
+    calls = []
+
+    def fake_predict(cls, name, texts, **kw):
+        calls.append(list(texts))
+        return np.arange(len(texts), dtype=np.float32)[:, None]
+
+    cfg = {"type": "sapbert", "kwargs": {}}
+    with patch.object(Transformer, "_predict", classmethod(fake_predict)):
+        _, first = Transformer.transform(["b", "a", "b"], cfg)
+        _, again = Transformer.transform(["a", "b"], cfg)  # same distinct texts
+        Transformer.transform(["a", "c"], cfg)
+        Transformer.transform(["a", "b"], {"type": "sapbert", "kwargs": {"max_seq_length": 10}})
+    assert calls == [["a", "b"], ["a", "c"], ["a", "b"]], calls
+    assert first.ravel().tolist() == [1, 0, 1] and again.ravel().tolist() == [0, 1]
