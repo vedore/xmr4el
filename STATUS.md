@@ -6,45 +6,48 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-07 (legacy removal; work order reset).
+Last updated 2026-10-07 (BC5CDR done; next session = training speed, step 0 first).
 
 **Nothing is running.** The user is not running training or evaluation now, so code is not frozen.
 
-**In flight: training speed (planned, not started).** From the log of an earlier
-`xmr4el_full_cuda_config.json` run: leaves take ~0.25 s Clustering->Matcher and ~1.5-2 s
-Matcher->next node; depth 4 x 8 clusters = up to 585 nodes. Leaf k-means is already skipped
-(`node.py:248`); the leaf's 0.25 s gap is `gc.collect()`.
-1. Drop the three `gc.collect()` in `MLModel.train` (`node.py:261,304,354`); `tree.py` has none.
-   Refcounting frees the arrays.
-2. Parallelize nodes within a layer (`tree.py:308` loop) with joblib loky, `n_jobs=n_workers`,
+**Next session: training speed (planned, not started).** Benchmark = BC5CDR-disease, `train_plus_ctd.pubtator`,
+`configs/xmr4el_bc5cdr_config.json` (depth 2: root -> 16 leaves of ~734 labels, 17 nodes, 89,929 rows):
+tree `13-47-38` trained in 567 s (PECOS on the same features: 34 s). Same config without CTD (664 labels): 15 s.
+0. Before any edit: (a) the user commits the current tree so the pre-change code has a commit for the
+   bit-identical check (`git worktree add <dir> <commit>`); (b) the user runs the baseline train with a log, and
+   the session splits wall time from the log timestamps: encoding (log `Started Encoding` -> `Started Training`, SapBERT over 89,929 rows) vs
+   root vs the 16 leaves. If encoding dominates, node parallelism does not pay on this benchmark; target encoding
+   first (device/batch size). Command:
+   `mkdir -p outputs/logs && .venv/bin/python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/speed_baseline_bc5cdr_ctd.log`
+1. Drop the three `gc.collect()` in `MLModel.train` (`node.py:261,304,354`; `import gc` at `node.py:2`);
+   `tree.py` has none. Refcounting frees the arrays.
+2. Parallelize nodes within a layer (`tree.py:306` loop over `inputs`) with joblib loky, `n_jobs=n_workers`,
    only for layers with >1 node. Worker = module-level fn: build MLModel, train, raise-flag if
-   empty internal node, `prepare_layer` (make it a static/module fn), save to `ml_dir`, return
+   empty internal node, `prepare_layer` (`tree.py:204`; make it a static/module fn), save to `ml_dir`, return
    `(ml_path, raw_children)`. Parent keeps input order, so `ml_list`/`next_inputs`/
    `layer_child_maps` and the load-time `child_index_map` guard are unchanged.
-   BLAS: `classifiers.py:343` lifts the cap to `os.cpu_count()`; make it a module value
-   (`BLAS_THREADS`) the worker sets to `max(1, cpu_count // n_jobs)`. Rankers inside workers get
-   `n_label_workers=1`. Parent logs `layer L: N nodes, n_jobs J` (also fixes "Number 0").
+   BLAS: `classifiers.py:343` lifts the cap to `os.cpu_count()` (`classifiers.py:174` OvR also uses all cores);
+   make it a module value (`BLAS_THREADS`) the worker sets to `max(1, cpu_count // n_jobs)`. Rankers inside
+   workers get `n_label_workers=1`. Parent logs `layer L: N nodes, n_jobs J` (also fixes "Number 0").
    Risks: per-worker CUDA context for internal-layer k-means (fallback: `device` cpu);
    memory = n_jobs node copies + loky memmaps (`/dev/shm` on Linux).
-3. Verify: pytest suite; synthetic flag-1 train/predict with `n_workers=1` bit-identical to
-   pre-change; `n_workers=4` same top-k, scores within ~1e-5 (BLAS thread count changes
-   summation order). User reruns one corpus train to compare wall time.
+3. Verify: pytest suite + selfchecks (`docs/pipeline.md`); synthetic flag-1 train/predict with `n_workers=1`
+   bit-identical to the pre-change commit; `n_workers=4` same top-k, scores within ~1e-5 (BLAS thread count
+   changes summation order). User reruns the step-0 command (log to `speed_after_bc5cdr_ctd.log`) and the
+   beam-10 dev eval of the new tree; acc@1 must stay 0.845 +- noise.
 
-**Next: compare XMR4EL with PECOS on BC5CDR.**
-- Data: `datasets/BC5CDR/CDR_Data/CDR.Corpus.v010516/CDR_{Training,Development,Test}Set.PubTator.txt`
-  (GitHub mirror JHnlp/BioCreative-V-CDR-Corpus; official URL 403). `load_pubtator_file` drops `-1` ids
-  (also as composite parts), splits composite `D1|D2` mentions via column 7, drops composites without
-  column 7 (`tests/data/test_readers.py::test_bc5cdr_ids`). Rows: train 9396 / 1327 ids, dev 9613, test 9762.
-- Done (dev, `docs/results.md` § BC5CDR): tree `16-44-38`, `configs/xmr4el_bc5cdr_config.json` (base with
-  `n_clusters` 16: root -> 16 leaves of ~83 labels), PECOS `-nr_splits 16 -max_leaf_size 100`, export
-  `outputs/pecos/bc5cdr_dev`. XMR4EL 0.921 vs PECOS 0.847 with default `threshold` 0.1, 0.922 with `-threshold 0` (tie).
-- Prepared, not run: CTD MEDIC dictionary `datasets/CTD/ctd_disease.pubtator` (`scripts/dict_to_pubtator.py`;
-  85,693 names, 11,742 MeSH ids); disease-only splits `datasets/BC5CDR/disease/{train,dev,test}.pubtator`
-  (awk-filtered) and `train_plus_ctd.pubtator` (11,744 labels; dev/test gold in vocab 0.9998/0.9975);
-  config `configs/xmr4el_bc5cdr_dict_config.json` (bc5cdr config, depth 3: 16 -> 8 per node with cut_half
-  -> 128 leaves; PECOS counterpart `-nr_splits 16 -max_leaf_size 100`).
-- To do: train/eval the dict config, PECOS with `-threshold 0` on the same export, test split only for the
-  selected configuration. Literature BC5CDR-disease test acc@1: BioSyn 93.2, SapBERT 93.5.
+**Done: XMR4EL vs PECOS on BC5CDR** (`docs/results.md` § BC5CDR, § BC5CDR-disease dev/test).
+- Data: `datasets/BC5CDR/CDR_Data/CDR.Corpus.v010516/`; disease-only splits `datasets/BC5CDR/disease/{train,dev,test}.pubtator`;
+  CTD MEDIC dictionary `datasets/CTD/ctd_disease.pubtator` (`scripts/dict_to_pubtator.py`), merged as
+  `train_plus_ctd.pubtator` (11,744 labels). Reader drops `-1` ids, splits composites via column 7
+  (`tests/data/test_readers.py::test_bc5cdr_ids`).
+- PECOS needs `-threshold 0` (default 0.1 cost it 0.075 on dev). On Mac: `docker build/run --platform linux/amd64`
+  (`docs/full_cuda_comparison.md`).
+- Selected: `configs/xmr4el_bc5cdr_config.json` (depth 2) on train + CTD, beam 10, hybrid (dictionary if string seen).
+  Depth 3 (`xmr4el_bc5cdr_dict_config.json`) loses ~0.08-0.09. Test: XMR4EL 0.860 / hybrid 0.906 vs PECOS
+  0.862 / 0.904 (tie). Literature test acc@1 BioSyn 93.2, SapBERT 93.5 (protocol not matched).
+- Open accuracy gaps (after speed): unseen strings 0.64; tree below the dictionary on seen 1-label strings
+  (0.930 vs 0.985); optional CTD cost on the 3631 shared dev rows.
 - Earlier MedMentions PECOS rows used `threshold` 0.1: rerun with 0 before claiming parity or a win there.
 
 **Current best, MedMentions (session 11-12):** base config = flag 6 (SapBERT mention | char TF-IDF->SVD 768 |

@@ -509,6 +509,55 @@ train times not recorded.
   are likely low too; rerun with `threshold` 0 before claiming parity or a win there.
 - 21.7% of dev rows have a gold label absent from training; neither system can get them.
 
+## 2026-10-07: BC5CDR-disease dev, CTD MEDIC dictionary, depth 2 vs 3, vs PECOS
+
+Disease-only splits `datasets/BC5CDR/disease/{train,dev}.pubtator`; `train_plus_ctd.pubtator` = train + CTD MEDIC
+names (`scripts/dict_to_pubtator.py`, 11,744 labels). Dev has 4306 rows. Eval `-beam_size 2 -topk 0 -alpha 0 -path_score`.
+PECOS: `pecos_run.py -features ours -nr_splits 16 -max_leaf_size 100 -threshold 0` on the export of tree `12-38-23`
+(`outputs/pecos/bc5cdr_dict_dev`). `cov x acc` = acc@1 x in-vocabulary rows / 4306.
+
+| system | train data | depth | beam | in vocab | acc@1 | MRR | R@5 | R@cand (cand) | seen, 1 | seen, >1 | unseen | hybrid | cov x acc | train |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| XMR4EL `12-38-23` | train + CTD | 3 | 2 | 4305 | 0.747 | 0.789 | 0.841 | 0.891 (184) | 0.842 | 0.679 | 0.448 | 0.855 | 0.747 | 567 s |
+| XMR4EL `13-47-38` | train + CTD | 2 | 2 | 4305 | 0.838 | 0.874 | 0.919 | 0.943 (200) | 0.921 | 0.759 | 0.581 | 0.884 | 0.837 | 567 s |
+| XMR4EL `13-47-38` | train + CTD | 2 | 10 | 4305 | 0.845 | **0.887** | **0.938** | 0.992 (1000) | 0.928 | **0.778** | 0.587 | **0.886** | 0.845 | 567 s |
+| XMR4EL `13-49-39` | train | 3 | 2 | 3631 | 0.801 | 0.824 | 0.847 | 0.881 (10) | 0.901 | 0.672 | 0.528 | 0.862 | 0.675 | 41 s |
+| XMR4EL `13-55-09` | train | 2 | 2 | 3631 | 0.879 | 0.910 | 0.947 | 0.965 (82) | 0.954 | 0.672 | 0.681 | 0.902 | 0.741 | 15 s |
+| PECOS, our features | train + CTD | 8 -> 128 -> labels | 2 | 4305 | 0.838 | 0.864 | 0.892 | (100) | 0.923 | 0.755 | 0.576 | 0.883 | 0.837 | 34.6 s |
+| PECOS, our features | train + CTD | 8 -> 128 -> labels | 10 | 4305 | **0.847** | 0.884 | 0.928 | (100) | **0.930** | 0.755 | **0.594** | **0.886** | **0.846** | 34.6 s |
+
+Dictionary acc@1 (most frequent train label for the exact string): 0.756 with CTD (seen 1-label 0.978), 0.726 without.
+Rows with the same train data share the same row set; the no-CTD rows cover 3631 rows and are compared only by `cov x acc`.
+
+- With CTD, depth 3 loses 0.091 acc@1 to depth 2 (0.747 vs 0.838) and 0.052 of candidate recall: depth 3 at beam 2
+  prunes the gold. Without CTD, depth 3 loses 0.078 (0.801 vs 0.879).
+- XMR4EL depth 2 ties PECOS: beam 2 0.838 vs 0.838, beam 10 0.845 vs 0.847 (hybrid 0.886 both). XMR4EL is ahead on
+  MRR/R@5 at beam 10 (0.887 / 0.938 vs 0.884 / 0.928).
+- On seen 1-label strings both trees are below the exact-string dictionary (0.928 / 0.930 vs 0.978); the hybrid
+  (dictionary if the string was seen, else tree) is +0.041 over the XMR4EL tree at beam 10.
+- CTD at depth 2: `cov x acc` 0.741 -> 0.837 (hybrid 0.760 -> 0.884), all from the 674 rows whose gold is not in
+  the BC5CDR train labels. Whether CTD costs accuracy on the 3631 rows both trees cover is not measured
+  (no-CTD tree 0.879 there; the CTD tree's acc@1 on 4305 rows is not comparable).
+- Literature BC5CDR-disease **test** acc@1: BioSyn 93.2, SapBERT 93.5; these are dev rows.
+
+## 2026-10-07: BC5CDR-disease test, selected configuration
+
+Tree `13-47-38` (depth 2, train + CTD), `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
+labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in the dev section on export
+`outputs/pecos/bc5cdr_dict_test` (train 34.4 s). Dictionary acc@1 0.770 (seen 1-label 0.985).
+
+| system | beam | acc@1 | MRR | R@5 | R@10 | R@20 | seen, 1 (n=3287) | seen, >1 (n=174) | unseen (n=938) | hybrid | cov x acc | cov x hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| XMR4EL | 10 | 0.860 | **0.898** | **0.945** | **0.963** | **0.974** | 0.930 | 0.730 | **0.641** | **0.906** | 0.858 | **0.904** |
+| PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | **0.747** | 0.618 | 0.901 | 0.850 | 0.899 |
+| PECOS, our features | 10 | **0.862** | 0.897 | 0.939 | 0.948 | 0.954 | **0.933** | **0.747** | 0.634 | 0.904 | **0.860** | 0.902 |
+
+XMR4EL recall@cand 0.991 (1000 cand/query). Eval 54 s; PECOS predict 2.3 s.
+
+- XMR4EL ties PECOS on test (0.860 vs 0.862 at beam 10; hybrid 0.906 vs 0.904), as on dev.
+- Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
+  (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
+
 ## Commands
 
 ```bash
