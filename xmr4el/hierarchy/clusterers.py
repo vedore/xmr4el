@@ -272,7 +272,7 @@ class BalancedKMeans(ClusteringModel):
             "n_clusters": 8,
             "distance": "cosine",
             "tol": 1e-4,
-            "tqdm_flag": True,
+            "tqdm_flag": logger.isEnabledFor(logging.DEBUG),
             "iter_limit": 400,
             "iter_k": None,
             "device": None,
@@ -289,14 +289,11 @@ class BalancedKMeans(ClusteringModel):
                 f"clustering config {config} contains unexpected keyword arguments for BalancedKMeans Clustering"
             )
 
-        # print(config["n_clusters"])
-        # print(type(trn_corpus))
         trn_corpus = torch.from_numpy(trn_corpus)
         
         # Check for zero vectors (norm == 0)
         norms = torch.norm(trn_corpus, dim=1)
         if (norms == 0).any():
-            # print(f"Warning: Found {torch.sum(norms == 0).item()} zero vectors in input!")
             # You might want to remove or fix these vectors, e.g.:
             trn_corpus = trn_corpus[norms > 0]
         
@@ -356,19 +353,16 @@ class ClusteringTrainer:
         n_clusters = config["kwargs"]["n_clusters"]
 
         if n_points <= min_leaf_size:
-            # print(f"Too few points ({n_points}), stopping clustering.")
             return None, None
 
         # Train clustering model
         clustering_model = ClusteringModel.train(Z, config, dtype)
         cluster_labels = clustering_model.labels()
         cluster_counts = Counter(cluster_labels)
-        # print(f"Cluster sizes: {cluster_counts}")
 
         # Filter out invalid clusters
         valid_clusters = [cid for cid, cnt in cluster_counts.items() if cnt >= min_leaf_size]
         if len(valid_clusters) <= 1:
-            # print(f"Only {len(valid_clusters)} valid clusters after pruning, stopping clustering.")
             return None, None
 
         assert len(cluster_labels) == n_points, (
@@ -390,11 +384,10 @@ class ClusteringTrainer:
             centroids /= np.linalg.norm(centroids, axis=1, keepdims=True) + 1e-12
             cols[orphans] = np.argmax(Zn[orphans] @ centroids.T, axis=1)
 
-        logger.info(
-            f"Clusters: {len(cluster_counts)} raw -> {len(valid_clusters)} valid "
-            f"(min_leaf_size={min_leaf_size}); reassigned {n_orphans}/{n_points} points "
-            f"from undersized clusters. Sizes: {sorted(Counter(cols.tolist()).values(), reverse=True)}"
-        )
+        sizes = Counter(cols.tolist()).values()
+        logger.info("Clustering completed: raw_clusters=%d valid_clusters=%d labels=%d reassigned=%d size_min=%d size_max=%d",
+                    len(cluster_counts), len(valid_clusters), n_points, n_orphans, min(sizes), max(sizes))
+        logger.debug("Cluster sizes: %s", sorted(sizes, reverse=True))
 
         C_node = csr_matrix(
             (ones(n_points, dtype=dtype), (np.arange(n_points), cols)),

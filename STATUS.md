@@ -6,19 +6,28 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-07 (BC5CDR done; next session = training speed, step 0 first).
+Last updated 2026-10-07 (training speed, step 0: old-format baseline read; waiting on commit + new-format baseline log).
 
 **Nothing is running.** The user is not running training or evaluation now, so code is not frozen.
+
+**Logging cleanup (2026-10-07):** INFO reports stage/layer/node timings and shapes;
+training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
+preserves warnings. Details and log capture: `scripts/README.md` § Train.
 
 **Next session: training speed (planned, not started).** Benchmark = BC5CDR-disease, `train_plus_ctd.pubtator`,
 `configs/xmr4el_bc5cdr_config.json` (depth 2: root -> 16 leaves of ~734 labels, 17 nodes, 89,929 rows):
 tree `13-47-38` trained in 567 s (PECOS on the same features: 34 s). Same config without CTD (664 labels): 15 s.
 0. Before any edit: (a) the user commits the current tree so the pre-change code has a commit for the
-   bit-identical check (`git worktree add <dir> <commit>`); (b) the user runs the baseline train with a log, and
-   the session splits wall time from the log timestamps: encoding (log `Started Encoding` -> `Started Training`, SapBERT over 89,929 rows) vs
-   root vs the 16 leaves. If encoding dominates, node parallelism does not pay on this benchmark; target encoding
-   first (device/batch size). Command:
-   `mkdir -p outputs/logs && .venv/bin/python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/speed_baseline_bc5cdr_ctd.log`
+   bit-identical check (`git worktree add <dir> <commit>`); (b) baseline log with the new logging.
+   `outputs/logs/speed_baseline_bc5cdr_ctd.log` (2026-10-07 14:11, 577.7 s, mps) uses the OLD log format
+   (`Training ML: Number 0`, no elapsed fields); breakdown from timestamps: encoding + PIFA 241 s
+   (14:11:10.9 -> 14:15:12.0, not split), root 80 s (clustering 38 s, matcher 40 s), 16 leaves 243 s
+   (11-22 s each, matcher dominated; leaf clustering <0.1 s). Encoding and leaves are each ~42%.
+   The old log cannot split encoding into SapBERT / char TF-IDF+SVD / context TF-IDF+SVD / PIFA, so the
+   user reruns it with the new logging into a new file (old log kept). Compare with
+   `grep -E "Transformer completed|Encoding completed|Label embeddings completed|Clustering completed|Node completed|Layer completed|Hierarchy completed|Run completed"`.
+   Do not compare message names across the two formats; compare stage spans. Command:
+   `.venv/bin/python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/speed_baseline2_bc5cdr_ctd.log`
 1. Drop the three `gc.collect()` in `MLModel.train` (`node.py:261,304,354`; `import gc` at `node.py:2`);
    `tree.py` has none. Refcounting frees the arrays.
 2. Parallelize nodes within a layer (`tree.py:306` loop over `inputs`) with joblib loky, `n_jobs=n_workers`,
@@ -28,7 +37,7 @@ tree `13-47-38` trained in 567 s (PECOS on the same features: 34 s). Same config
    `layer_child_maps` and the load-time `child_index_map` guard are unchanged.
    BLAS: `classifiers.py:343` lifts the cap to `os.cpu_count()` (`classifiers.py:174` OvR also uses all cores);
    make it a module value (`BLAS_THREADS`) the worker sets to `max(1, cpu_count // n_jobs)`. Rankers inside
-   workers get `n_label_workers=1`. Parent logs `layer L: N nodes, n_jobs J` (also fixes "Number 0").
+   workers get `n_label_workers=1`. Add `n_jobs` to the parent's existing layer summary.
    Risks: per-worker CUDA context for internal-layer k-means (fallback: `device` cpu);
    memory = n_jobs node copies + loky memmaps (`/dev/shm` on Linux).
 3. Verify: pytest suite + selfchecks (`docs/pipeline.md`); synthetic flag-1 train/predict with `n_workers=1`

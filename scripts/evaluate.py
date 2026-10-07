@@ -1,6 +1,4 @@
 from argparse import ArgumentParser
-import contextlib
-import io
 import logging
 import os
 import sys
@@ -8,15 +6,19 @@ import time
 
 # These libraries read their quiet settings during import.
 if "-verbose" not in sys.argv:
-    os.environ.update(TRANSFORMERS_VERBOSITY="error", HF_HUB_VERBOSITY="error",
+    os.environ.update(TRANSFORMERS_VERBOSITY="warning", HF_HUB_VERBOSITY="warning",
                       HF_HUB_DISABLE_PROGRESS_BARS="1", TQDM_DISABLE="1")
-    logging.disable(logging.WARNING)
 
 import numpy as np
 
 from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import _selfcheck, filter_labels_and_inputs, gold_rank, ranking_metrics, split_by_ranker, string_breakdown
 from xmr4el.xmodel import XModel
+from xmr4el import set_verbosity
+
+logging.basicConfig(level=logging.WARNING,
+                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+set_verbosity(2 if "-verbose" in sys.argv else 0)
 
 
 def main():
@@ -37,20 +39,14 @@ def main():
                         help="multiply each leaf score by the routing path probability (XR-Linear); needed to "
                              "compare leaves in a beam when alpha < 1 (leaf matcher probs are only comparable within a leaf)")
     parser.add_argument("-verbose", action="store_true",
-                        help="show library prints, logs and progress bars (hidden by default)")
+                        help="show DEBUG diagnostics and progress bars; warnings are always visible")
     args = parser.parse_args()
 
-    quiet = contextlib.nullcontext if args.verbose else lambda: contextlib.redirect_stdout(io.StringIO())
-
-
     start = time.time()
-    print(f"evaluating {args.xmodel_path} on {args.test_path} (library output hidden; -verbose shows it) ...",
+    print(f"evaluating {args.xmodel_path} on {args.test_path} ...",
           flush=True)
 
-    with quiet():
-        trained_xtree = XModel.load(args.xmodel_path)
-    if args.verbose:
-        print(trained_xtree)
+    trained_xtree = XModel.load(args.xmodel_path)
 
     abbrev = trained_xtree.abbrev_expansion  # train side too: same dictionary keys
     test_set = Preprocessor.load_pubtator_file(
@@ -59,15 +55,14 @@ def main():
     golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
     n_total, n = len(labels), len(golden_labels)
 
-    with quiet():
-        routes, score_csr = trained_xtree.predict(input_texts,
-                                                  beam_size=args.beam_size,
-                                                  topk=args.topk,
-                                                  fusion="lp_fusion",
-                                                  alpha=args.alpha,
-                                                  topk_mode="per_leaf",
-                                                  path_score=args.path_score,
-                                                  scorer=args.scorer)
+    routes, score_csr = trained_xtree.predict(input_texts,
+                                             beam_size=args.beam_size,
+                                             topk=args.topk,
+                                             fusion="lp_fusion",
+                                             alpha=args.alpha,
+                                             topk_mode="per_leaf",
+                                             path_score=args.path_score,
+                                             scorer=args.scorer)
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}

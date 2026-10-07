@@ -22,6 +22,7 @@ small classifiers/hierarchies, so the project ML dependencies are still required
 | `integration/` | Config preservation, import behavior, label mapping, pipeline persistence. |
 | `test_eval.py` | Ranking metric self-check and known metric values. |
 | `test_eval_quiet.py` | Evaluation quiet/verbose settings in fresh Python processes. |
+| `test_logging.py` | Logging levels, application-owned handlers, and label-truncation warnings. |
 
 ## Run a subset
 

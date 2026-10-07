@@ -1,5 +1,6 @@
 """Embedding row order and OOM recovery."""
 from unittest.mock import Mock, patch
+import logging
 import numpy as np
 from xmr4el.features.transformers import Transformer
 from torch.cuda import OutOfMemoryError
@@ -42,7 +43,8 @@ def test_embedding_row_order():
     print("embedding row order ok")
 
 
-def test_mps_oom():
+def test_mps_oom(caplog, capsys):
+    caplog.set_level(logging.INFO, logger="xmr4el.features.transformers")
     prefix = "xmr4el.features.transformers"
     oom = RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")
     texts = ["0", "1", "2", "3"]
@@ -71,4 +73,8 @@ def test_mps_oom():
             else:
                 raise AssertionError("failed batch did not raise")
         assert clear.call_count == 3, "unrelated RuntimeError must not retry or clear cache"
+    assert capsys.readouterr().out == ""
+    assert any(record.levelno == logging.WARNING and "retry_batch_size=2" in record.getMessage()
+               for record in caplog.records)
+    assert not any("Transformer batch" in record.getMessage() for record in caplog.records)
     print("MPS OOM checks ok")

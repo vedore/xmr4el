@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import logging
 import numpy as np
 from abc import ABCMeta
 from copy import deepcopy
@@ -200,7 +201,9 @@ class SklearnTruncatedSVD(DimensionModel):
             config_n_components = config["n_components"]
             
             if X_n_features < config_n_components:
-                print(f"Value Error: Returning model as None, because n_components({config_n_components}) must be <= n_features({X_n_features}).")
+                logging.getLogger(__name__).warning(
+                    "Skipping SVD: n_components=%d exceeds n_features=%d; retaining unreduced features",
+                    config_n_components, X_n_features)
                 return cls(config, None)
             
             model = TruncatedSVD(**config)

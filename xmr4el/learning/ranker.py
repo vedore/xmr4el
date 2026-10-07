@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 import numpy as np
 import pickle
 from numpy import array
@@ -232,7 +233,8 @@ class RankerTrainer:
 
         model.partial_fit(X=X_combined, Y=y, classes=array([0, 1]), dtype=np.int32)
 
-        logger.info(f"[PID {os.getpid()}] Epoch {epoch} | label {global_idx} pos={n_pos} neg={n_neg} (cluster_size={X_cluster.shape[0]})")
+        logger.debug("Ranker label: epoch=%d label=%d pos=%d neg=%d cluster_rows=%d",
+                     epoch, global_idx, n_pos, n_neg, X_cluster.shape[0])
 
         return (global_idx, model)
 
@@ -271,6 +273,7 @@ class RankerTrainer:
         ranker_models: Dict[int, "ClassifierModel"] = {}
 
         for epoch in range(1, n_epochs + 1):
+            epoch_start = time.perf_counter()
             tasks = []
             for cluster_idx, label_list in labels_by_cluster.items():
                 candidate_indices = cluster_mentions.get(cluster_idx, array([], dtype=int))
@@ -292,6 +295,9 @@ class RankerTrainer:
             )
 
             ranker_models.update({gid: model for gid, model in results if model is not None})
+            logger.info("Ranker epoch completed: epoch=%d/%d trained_labels=%d skipped_labels=%d elapsed=%.1fs",
+                        epoch, n_epochs, len(ranker_models), sum(model is None for _, model in results),
+                        time.perf_counter() - epoch_start)
 
         return ranker_models
 

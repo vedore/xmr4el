@@ -66,6 +66,30 @@ PubTator annotations are grouped by label; each text combines the mention and co
 The default feature configuration uses transformer embeddings and may download a model.
 Saved trees are written to `outputs/saved_trees/xmodel_<timestamp>/`.
 
+Logging defaults to timestamped INFO summaries: input/config paths, selected groups,
+feature and label-matrix shapes, transformer model/device, hierarchy layers/nodes,
+elapsed seconds, and the saved model path. `-verbose` adds DEBUG batch, per-label,
+and cluster-size diagnostics; `-quiet` keeps warnings and errors. K-means progress
+bars default to DEBUG unless `tqdm_flag` is explicitly configured.
+Logs contain counts and settings, not training texts or embedding arrays.
+The saved tree retains its model configuration; evaluation prints metrics separately.
+
+Capture a run using the existing shell tools:
+
+```bash
+mkdir -p outputs/logs
+.venv/bin/python scripts/train.py \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
+  -model_config configs/xmr4el_base_config.json 2>&1 | tee outputs/logs/train.log
+```
+
+For Python callers, configure a handler with `logging.basicConfig(level=logging.INFO)`.
+The library uses a `NullHandler` and does not configure the application's console.
+`xmr4el.set_verbosity(0/1/2)` selects WARNING/INFO/DEBUG.
+This follows [Python's logging guidance](https://docs.python.org/3/howto/logging.html)
+and the experiment record of [parameters, metrics, and artifacts](https://mlflow.org/docs/latest/tracking/),
+using the existing logs, evaluation report, and saved tree without an extra tracking dependency.
+
 For grouped TSV input (`group_id<TAB>text`), supply one label per line aligned
 with sorted group IDs and use `emb_flag` 1:
 
@@ -97,7 +121,8 @@ routing path probabilities:
 
 Reports acc@1, MRR, recall@k, candidate recall, and vocabulary coverage.
 Only mentions with a gold label in the training vocabulary enter ranking metrics.
-`-train_path` adds the seen/unseen mention-string breakdown; `-verbose` shows library output.
+`-train_path` adds the seen/unseen mention-string breakdown; `-verbose` shows library diagnostics.
+Warnings (including ranker fallback and OOM recovery) remain visible in quiet evaluation.
 Use `-alpha 1 -scorer cosine` for cosine leaf scores or `-alpha 1 -scorer ranker`
 to evaluate trained rankers. `-topk` is per leaf; `0` disables that final cut.
 

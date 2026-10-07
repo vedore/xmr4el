@@ -1,6 +1,7 @@
 """Local readers, label grouping and text preparation."""
 import re
 import os
+import logging
 import pandas as pd
 from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -36,10 +37,9 @@ class Preprocessor:
             raw_labels = raw_labels[:truncate_data]
 
         if len(raw_labels) > len(grouped_texts):
+            logging.getLogger(__name__).warning(
+                "Truncating labels: supplied=%d text_groups=%d", len(raw_labels), len(grouped_texts))
             raw_labels = raw_labels[:len(grouped_texts)]
-            print(
-                f"Warning: Truncated labels from {len(raw_labels)} to {len(grouped_texts)} to match text groups"
-            )
         elif len(raw_labels) < len(grouped_texts):
             raise Exception(
                 f"Mismatch: Not enough labels ({len(raw_labels)}) for text groups ({len(grouped_texts)})"

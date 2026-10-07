@@ -25,7 +25,6 @@ def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
     """
     allowed_set = set(allowed_labels)
 
-    # print(allowed_set)
     # exit()
 
     filtered_labels = []

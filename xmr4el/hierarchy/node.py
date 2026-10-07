@@ -205,8 +205,6 @@ class MLModel():
             subdir = pjoin(base_dir, name)
             if pexists(subdir) and cls_ is not None:
                 setattr(model, name, cls_.load(subdir))
-            else:
-                print(f"Model {name} is not being loaded")
 
         # Load fused scores / label embeddings
         emb_path = pjoin(base_dir, "fused_scores.npy")
@@ -242,10 +240,9 @@ class MLModel():
         
         del global_to_local
         
-        self.logger.info("Training ML: Clustering Phase")
-        
         cluster_model = Clustering()
         if not self.is_last_layer:  # a leaf uses identity C below, so it is never clustered
+            self.logger.debug("Clustering started: layer_index=%s labels=%d", self.layer, self.label_embeddings.shape[0])
             cluster_model.train(Z=self.label_embeddings,
                                 local_to_global_idx=self.local_to_global_idx,
                                 min_leaf_size=self.min_leaf_size,
@@ -274,7 +271,7 @@ class MLModel():
 
         cluster_labels = np.asarray(C.argmax(axis=1)).flatten()
     
-        self.logger.info("Training ML: Matcher Phase")
+        self.logger.debug("Matcher started: layer_index=%s rows=%d targets=%d", self.layer, X_train.shape[0], C.shape[1])
 
         # With identity C above, the leaf matcher is one-vs-rest over labels and a leaf label can
         # have a single positive instance. SGDClassifier's `early_stopping` splits off a validation
@@ -329,9 +326,8 @@ class MLModel():
                 # b=5 leaves too few negatives for neg_mult * n_pos; 20 keeps the pool fed.
                 M_MAN = _topb_sparse(P, b=20)
             
-            self.logger.info("Training ML: Ranker Phase")
-            
-            # print("Ranker")
+            self.logger.debug("Rankers started: layer_index=%s labels=%d workers=%d",
+                              self.layer, self.label_embeddings.shape[0], self.n_workers)
             ranker_model = Ranker()
             ranker_model.train(X_train, 
                                 Y_train, 
@@ -355,7 +351,7 @@ class MLModel():
         
         self.fused_scores = None
         if not self.is_last_layer:
-            print("Fusing Scores")
+            self.logger.debug("Preparing matcher routing scores: layer_index=%s", self.layer)
             cluster_scores = self.matcher_model.predict_proba(X_train)
             self.fused_scores = csr_matrix(np.maximum(cluster_scores, 0.0))
         

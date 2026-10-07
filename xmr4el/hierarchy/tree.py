@@ -285,8 +285,8 @@ class HierarchicalMLModel():
 
 
             for layer in range(self.layers):
-                
-                self.logger.info(f"Training HML: layer: {layer}")
+                layer_start = time.perf_counter()
+                self.logger.info("Layer started: layer=%d/%d nodes=%d", layer + 1, self.layers, len(inputs))
                 
                 next_inputs: list[tuple] = []
                 ml_list: list[str] = []
@@ -302,14 +302,10 @@ class HierarchicalMLModel():
                     clustering_config = {**clustering_config,
                                          "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
                     
-                number_of_childs = len(inputs)
-                
-                # parent_idx
-                for (X_node, Y_node, Z_node, local_to_label_node, global_to_local_node) in inputs:
-                    
-                    n_child = len(inputs) - number_of_childs
-                    
-                    self.logger.info(f"Training ML: Number {n_child}")
+                for node_idx, (X_node, Y_node, Z_node, local_to_label_node, global_to_local_node) in enumerate(inputs):
+                    node_start = time.perf_counter()
+                    self.logger.info("Node started: layer=%d node=%d/%d rows=%d labels=%d leaf=%s",
+                                     layer + 1, node_idx + 1, len(inputs), X_node.shape[0], Z_node.shape[0], is_last_layer)
                     
                     ml = MLModel(
                         clustering_config=clustering_config,
@@ -340,7 +336,7 @@ class HierarchicalMLModel():
 
                     cluster_to_child = {}
                     if not is_last_layer:
-                        self.logger.info("Training ML: Preparing Layer")
+                        self.logger.debug("Preparing child inputs: layer=%d node=%d", layer + 1, node_idx + 1)
                         raw_children = self.prepare_layer(
                             X=X_node,
                             Y=Y_node,
@@ -356,6 +352,8 @@ class HierarchicalMLModel():
                         )
                     
                     ml_path = _save_ml_for_layer(ml, layer)
+                    self.logger.info("Node completed: layer=%d node=%d/%d elapsed=%.1fs",
+                                     layer + 1, node_idx + 1, len(inputs), time.perf_counter() - node_start)
                     del ml
                     ml_list.append(ml_path)
                     layer_child_maps.append(cluster_to_child)
@@ -364,6 +362,8 @@ class HierarchicalMLModel():
                 del ml_list
                 collect()
                 child_index_map.append(layer_child_maps)
+                self.logger.info("Layer completed: layer=%d/%d next_nodes=%d elapsed=%.1fs",
+                                 layer + 1, self.layers, len(inputs), time.perf_counter() - layer_start)
 
             # Reload all models for final hmodel
             self.hmodel = [[MLModel.load(p) for p in model_list] for model_list in self.hmodel]
@@ -389,7 +389,7 @@ class HierarchicalMLModel():
         # Leaf matcher probabilities are per-label sigmoids trained only against that leaf's labels, so
         # without it the beam's leaves are merged by max on scales that are not comparable.
 
-        time_start_routing = time.time()
+        time_start_routing = time.perf_counter()
 
         # --- helpers (keep loops minimal) ---
 
@@ -503,7 +503,8 @@ class HierarchicalMLModel():
         is_per_leaf_topk = (topk_mode == "per_leaf")
         is_global_topk = (topk_mode == "global")
 
-        print(f"Shape of the query: {X_query.shape[0]}")
+        self.logger.info("Routing started: rows=%d beam=%d topk=%s topk_mode=%s scorer=%s alpha=%s path_score=%s",
+                         n_queries, beam_size, topk, topk_mode, scorer or "auto", alpha, path_score)
 
         for qi in range(X_query.shape[0]):
             x0 = X_query[qi:qi+1]
@@ -556,9 +557,9 @@ class HierarchicalMLModel():
             if beam:
                 _add_beam_to_pending(beam, qi, pending_by_leaf)
 
-        time_end_routing = time.time()
-        time_start_ranking = time.time()
-        print("Routing: ", time_end_routing - time_start_routing)
+        time_start_ranking = time.perf_counter()
+        self.logger.info("Routing completed: visited_leaves=%d elapsed=%.1fs",
+                         len(pending_by_leaf), time_start_ranking - time_start_routing)
 
         # --- Batched leaf predictions per leaf model ---
         leaf_layer_models = self.hmodel[-1]
@@ -636,7 +637,7 @@ class HierarchicalMLModel():
             for qi in range(n_queries)
         ]
 
-        time_end_ranking = time.time()
-        print("Ranking: ", time_end_ranking - time_start_ranking)
+        self.logger.info("Ranking completed: rows=%d scores=%d elapsed=%.1fs",
+                         n_queries, scores_csr.nnz, time.perf_counter() - time_start_ranking)
 
         return out, scores_csr

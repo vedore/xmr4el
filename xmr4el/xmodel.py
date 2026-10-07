@@ -50,14 +50,10 @@ class XModel:
         # 0 = WARNING, 1 = INFO, 2 = DEBUG
         if logger is not None:
             self.logger = logger
-            self.logger.debug("Using user-supplied logger for XModel")
         else:
             if verbose is not None:
                 set_verbosity(verbose)
-            self.logger = get_logger("models.xmodel")
-
-        # rest of initialization
-        self.logger.info("Initializing XModel")
+            self.logger = get_logger("xmodel")
         
         self.vectorizer_config = vectorizer_config
         self.transformer_config = transformer_config
@@ -229,6 +225,7 @@ class XModel:
         self._Z = value        
         
     def save(self, save_dir):
+        start = time.perf_counter()
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         save_dir = os.path.join(save_dir, f"{self.__class__.__name__.lower()}_{timestamp}")
         os.makedirs(save_dir, exist_ok=False)
@@ -266,6 +263,7 @@ class XModel:
                           
         with open(os.path.join(save_dir, "xmodel.pkl"), "wb") as fout:
             pickle.dump(state, fout)
+        self.logger.info("Model saved: path=%s elapsed=%.1fs", save_dir, time.perf_counter() - start)
     
     @classmethod
     def load(cls, load_dir):
@@ -299,7 +297,7 @@ class XModel:
 
         with open(path, "r") as f:
             data = json.load(f)
-        
+
         return XModel(**data)
         
     
@@ -308,11 +306,12 @@ class XModel:
         
         self.training_set = deepcopy(X_text)
         
-        self.logger.info("Preparing Data")
+        self.logger.info("Preparing data: groups=%d", len(Y_text))
         
         X_processed, Y_label_to_indices = Preprocessor.prepare_data(X_text, Y_text)
         
-        self.logger.info("Started Encoding")
+        start = time.perf_counter()
+        self.logger.info("Encoding started: rows=%d emb_flag=%d", len(X_processed), self.emb_flag)
         
         # Encode X_processed
         text_encoder = TextEncoder(
@@ -327,6 +326,10 @@ class XModel:
         self.text_encoder = text_encoder
         
         X_emb = text_encoder.encode(X_processed)
+        self.logger.info("Encoding completed: shape=%s elapsed=%.1fs", X_emb.shape, time.perf_counter() - start)
+
+        start = time.perf_counter()
+        self.logger.info("Label embeddings started: method=PIFA")
         
         Y_label_matrix = LabelEmbeddingFactory.generate_label_matrix(Y_label_to_indices)
         
@@ -335,12 +338,14 @@ class XModel:
         # Label index j is column j of Y; empty label groups have no column
         self.initial_labels = classes.tolist()
         Z = LabelEmbeddingFactory.generate_PIFA(X_emb, Y_binazer)
+        self.logger.info("Label embeddings completed: labels=%d shape=%s elapsed=%.1fs",
+                         len(classes), Z.shape, time.perf_counter() - start)
         
         return X_emb, Y_binazer, Z 
     
     def train(self, X_text, Y_text):
         
-        self.logger.info("Started Training")
+        start = time.perf_counter()
         
         self.X, self.Y, self.Z = self._fit(X_text=X_text, Y_text=Y_text)
 
@@ -348,7 +353,9 @@ class XModel:
         local_to_global = np.arange(n_labels, dtype=int)
         global_to_local = {g: i for i, g in enumerate(local_to_global)}
 
-        self.logger.info("Hierarchical Model Pipeline")
+        hierarchy_start = time.perf_counter()
+        self.logger.info("Hierarchy started: depth=%d labels=%d rankers=%s",
+                         self.depth, n_labels, self.train_rankers)
 
         hml = HierarchicalMLModel(
             clustering_config=self.clustering_config,
@@ -373,6 +380,8 @@ class XModel:
         )
 
         self.model = hml
+        self.logger.info("Hierarchy completed: elapsed=%.1fs", time.perf_counter() - hierarchy_start)
+        self.logger.info("Training completed: elapsed=%.1fs", time.perf_counter() - start)
         
         
     def predict(self, X_text, 
@@ -409,13 +418,12 @@ class XModel:
             
             if scorer not in (None, "ranker", "cosine"):
                 raise ValueError(f"Unknown scorer: {scorer}")
-            time_start_encoding = time.time()
+            time_start_encoding = time.perf_counter()
 
             X_query = self.text_encoder.predict(X_text)
             
-            time_end_encoding = time.time()
-            
-            print("Encoding: ", time_end_encoding - time_start_encoding)
+            self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
+                             X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
             
             # topk_mode "global" is handled by the hierarchy too; its final_path follows its scores
             return self.model.predict(X_query,

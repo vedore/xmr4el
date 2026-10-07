@@ -1,5 +1,6 @@
 """Offline pipeline round-trip and independent training-text ownership."""
 from copy import deepcopy
+import logging
 import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +10,8 @@ import numpy as np
 from xmr4el.xmodel import XModel
 
 
-def test_pipeline_persistence():
+def test_pipeline_persistence(caplog, capsys):
+    caplog.set_level(logging.INFO, logger="xmr4el")
     config = dict(
         vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char", "ngram_range": [2, 4]}},
         dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 6, "random_state": 42}},
@@ -39,3 +41,10 @@ def test_pipeline_persistence():
         assert restored.initial_labels == sorted(labels)
         assert restored.training_set == first.training_set
         assert np.allclose(restored.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray(), expected)
+    assert capsys.readouterr().out == "", "library code must use logging, not stdout"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("Node started: layer=2 node=2/2" in message for message in messages)
+    for stage in ("Encoding completed", "Label embeddings completed", "Hierarchy completed",
+                  "Model saved: path=", "Routing completed", "Ranking completed"):
+        assert any(stage in message for message in messages), stage
+    assert not any("not being loaded" in message or "Matcher started" in message for message in messages)

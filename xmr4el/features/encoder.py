@@ -123,7 +123,7 @@ class TextEncoder():
     ) -> Tuple[csr_matrix, DimensionModel]:
         """Reduce dimensionality of sparse embeddings."""
         if dim_config is None:
-            print("Running on default config of TruncateSVD")
+            logging.getLogger(__name__).debug("Using default TruncatedSVD configuration")
         
         model = DimensionModel.fit(X_emb, dim_config)
         
@@ -146,7 +146,7 @@ class TextEncoder():
     ) -> Tuple[csr_matrix, Vectorizer]:
         """Fit a text vectorizer and transform input texts."""
         if vec_config is None:
-            print("Running on default config of TF-IDF")
+            logging.getLogger(__name__).debug("Using default TF-IDF configuration")
             
         model = Vectorizer.fit(X_test, vec_config)
         sparse_emb = model.transform(X_test) # CSR_MATRIX    

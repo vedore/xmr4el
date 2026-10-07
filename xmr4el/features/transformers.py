@@ -1,4 +1,5 @@
 import logging
+import time
 import torch
 import numpy as np
 
@@ -74,7 +75,9 @@ class Transformer:
 
         device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         
-        logger.info(f"Using PyTorch device: {device}")
+        start_time = time.perf_counter()
+        logger.info("Transformer started: model=%s device=%s rows=%d batch_size=%d",
+                    model_name, device, len(trn_corpus), batch_size or 400)
 
         model = sentence_model(model_name, device, pooling, max_seq_length)
         len_corpus = len(trn_corpus)
@@ -88,7 +91,7 @@ class Transformer:
 
         while start < len_corpus:
             end = min(start + batch_size, len_corpus)
-            print(f"Processing rows {start}-{end} of {len_corpus} (batch size: {batch_size})")
+            logger.debug("Transformer batch: rows=%d:%d/%d batch_size=%d", start, end, len_corpus, batch_size)
 
             try:
                 with no_grad():  # Disable gradient calculation
@@ -119,5 +122,9 @@ class Transformer:
                 # Reduce batch size more aggressively based on error frequency
                 reduction_factor = min(0.5, max(0.1, 1 - (0.2 * max_oom_retries)))
                 batch_size = max(1, int(batch_size * reduction_factor))
+                logger.warning("Transformer OOM: device=%s row=%d retry_batch_size=%d retries_left=%d",
+                               device, start, batch_size, max_oom_retries)
 
-        return np.vstack(batches).astype(dtype)
+        embeddings = np.vstack(batches).astype(dtype)
+        logger.info("Transformer completed: shape=%s elapsed=%.1fs", embeddings.shape, time.perf_counter() - start_time)
+        return embeddings
