@@ -35,7 +35,6 @@ import os, sys, warnings
 before = {k: os.environ.get(k) for k in ('JOBLIB_TEMP_FOLDER', 'OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS')}
 from xmr4el.xmodel import XModel
 assert before == {k: os.environ.get(k) for k in before}
-assert 'kmeans_pytorch' not in sys.modules
 assert not any(getattr(f[1], 'pattern', '') == '.*does not have valid feature names.*' for f in warnings.filters)
 """
     subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ, "OMP_NUM_THREADS": "2"})

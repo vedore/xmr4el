@@ -58,7 +58,7 @@
         "type": "balancedkmeans",
         "kwargs": {
             "n_clusters": 6,
-            "iter_limit": 400
+            "iter_limit": 20
         }
     },
     "matcher_config": {

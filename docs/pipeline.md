@@ -11,7 +11,7 @@ Moved out of `STATUS.md` (2026-10-06).
 | Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmodel.py` |
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `scripts/evaluate.py` |
 | Features | Flag 1: TF-IDF (-> dimension model) of the whole text (TSV). Flag 6: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Flags 2-5 raise | `TextEncoder._encode`, base / flag1 config |
-| Clustering | Seeded balanced k-means; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
+| Clustering | Seeded balanced spherical k-means (numpy): recursive balanced 2-means, then joint balanced refinement over all k clusters; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
 | Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/learning/ranker.py`, `configs/xmr4el_base_config.json` |
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
 | Leaf scoring | `evaluate.py` defaults to `-scorer cosine`; `XModel.predict(scorer=None)` uses trained rankers when present, else cosine. `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising and logging failures | `MLModel.predict`, `xmr4el/learning/scoring.py` |

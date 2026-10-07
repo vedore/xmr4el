@@ -35,9 +35,8 @@
         "type": "balancedkmeans",
         "kwargs": {
             "n_clusters": 8,
-            "iter_limit": 400,
-            "seed": 0,
-            "device": "gpu"
+            "iter_limit": 20,
+            "seed": 0
         }
     },
     "matcher_config": {

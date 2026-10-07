@@ -520,11 +520,13 @@ PECOS: `pecos_run.py -features ours -nr_splits 16 -max_leaf_size 100 -threshold 
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | XMR4EL `12-38-23` | train + CTD | 3 | 2 | 4305 | 0.747 | 0.789 | 0.841 | 0.891 (184) | 0.842 | 0.679 | 0.448 | 0.855 | 0.747 | 567 s |
 | XMR4EL `13-47-38` | train + CTD | 2 | 2 | 4305 | 0.838 | 0.874 | 0.919 | 0.943 (200) | 0.921 | 0.759 | 0.581 | 0.884 | 0.837 | 567 s |
-| XMR4EL `13-47-38` | train + CTD | 2 | 10 | 4305 | 0.845 | **0.887** | **0.938** | 0.992 (1000) | 0.928 | **0.778** | 0.587 | **0.886** | 0.845 | 567 s |
+| XMR4EL `13-47-38` | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | **0.778** | 0.587 | 0.886 | 0.845 | 567 s |
+| XMR4EL `15-15-09` (torch L-BFGS) | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | 0.778 | 0.587 | 0.886 | 0.845 | 454 s |
+| XMR4EL `17-28-48` (own balanced k-means) | train + CTD | 2 | 10 | 4305 | **0.853** | **0.895** | **0.950** | 0.994 (1000) | **0.930** | **0.778** | **0.615** | **0.892** | **0.853** | 179 s* |
 | XMR4EL `13-49-39` | train | 3 | 2 | 3631 | 0.801 | 0.824 | 0.847 | 0.881 (10) | 0.901 | 0.672 | 0.528 | 0.862 | 0.675 | 41 s |
 | XMR4EL `13-55-09` | train | 2 | 2 | 3631 | 0.879 | 0.910 | 0.947 | 0.965 (82) | 0.954 | 0.672 | 0.681 | 0.902 | 0.741 | 15 s |
 | PECOS, our features | train + CTD | 8 -> 128 -> labels | 2 | 4305 | 0.838 | 0.864 | 0.892 | (100) | 0.923 | 0.755 | 0.576 | 0.883 | 0.837 | 34.6 s |
-| PECOS, our features | train + CTD | 8 -> 128 -> labels | 10 | 4305 | **0.847** | 0.884 | 0.928 | (100) | **0.930** | 0.755 | **0.594** | **0.886** | **0.846** | 34.6 s |
+| PECOS, our features | train + CTD | 8 -> 128 -> labels | 10 | 4305 | 0.847 | 0.884 | 0.928 | (100) | **0.930** | 0.755 | 0.594 | 0.886 | 0.846 | 34.6 s |
 
 Dictionary acc@1 (most frequent train label for the exact string): 0.756 with CTD (seen 1-label 0.978), 0.726 without.
 Rows with the same train data share the same row set; the no-CTD rows cover 3631 rows and are compared only by `cov x acc`.
@@ -539,6 +541,15 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
   the BC5CDR train labels. Whether CTD costs accuracy on the 3631 rows both trees cover is not measured
   (no-CTD tree 0.879 there; the CTD tree's acc@1 on 4305 rows is not comparable).
 - Literature BC5CDR-disease **test** acc@1: BioSyn 93.2, SapBERT 93.5; these are dev rows.
+- `15-15-09` = `13-47-38` config with the joint matcher solved by torch L-BFGS instead of scipy L-BFGS-B: same
+  dev metrics, hierarchy 330.5 -> 197.9 s (16 leaves 251.4 -> 118.9 s, root 78.7 s unchanged; logs
+  `outputs/logs/speed_baseline2_bc5cdr_ctd.log`, `speed_torchlbfgs_bc5cdr_ctd.log`). SapBERT 197 / 222 s run to run (mps).
+- `17-28-48` = `15-15-09` plus the SapBERT embedding cache and the own balanced k-means (`balancedkmeans`, numpy:
+  recursive balanced 2-means, then joint balanced refinement; replaces kmeans-pytorch). *179 s is a cache-hit run
+  (encoding 25.2 s); hierarchy 148.4 s (root clustering 3.0 s, root node 34.9 s). Log
+  `outputs/logs/bkmeans_bc5cdr_ctd.log`. Same code with seed 1: acc@1 0.843, MRR 0.889, hybrid 0.887, so the
+  seed 0 gain over PECOS (+0.006) is within the seed spread; kmeans-pytorch had 0.845-0.847 at seed 0.
+  The test section below still uses `13-47-38`; not rerun with this clustering.
 
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 

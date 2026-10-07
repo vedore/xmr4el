@@ -23,11 +23,8 @@ dependencies = [
   "scikit-learn",
   "transformers",
   "sentence-transformers",
-  "numba",
 
-  "torch>=2.8.0",
-
-  "kmeans-pytorch @ git+https://github.com/kernelmachine/balanced-kmeans.git@main"
+  "torch>=2.8.0"
 ]
 
 [dependency-groups]
