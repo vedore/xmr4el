@@ -18,11 +18,12 @@ Python 3.12 or later is required. On macOS, install `uv` with `brew install uv`,
 
 ```bash
 uv sync --locked
-source .venv/bin/activate
 ```
 
+Local commands use `.venv/bin/python`; inside the Docker containers use `python3`.
+
 Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
-Transformer encoding uses CUDA when available, otherwise CPU. Its first use
+Transformer encoding uses CUDA when available, then Apple MPS, otherwise CPU. Its first use
 may download the configured pretrained model.
 
 ### Run on another server with Docker
@@ -39,13 +40,14 @@ The Linux x86-64 lock includes large CUDA packages, so the first build can take 
 space even when running on CPU.
 
 Copy your datasets into the checkout's `datasets/` or `data/` directory on the server;
-Git does not include them. Only the base config is tracked, so copy any local experiment
-config separately. First check the mounted code:
+Git does not include them. Git tracks only `configs/xmr4el_base_config.json`,
+`xmr4el_flag1_config.json`, `xmr4el_flag6_sapbert_config.json` and `xmr4el_full_cuda_config.json`;
+copy any other local experiment config separately. First check the mounted code:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" \
-  xmr4el python scripts/evaluate.py -selfcheck
+  xmr4el python3 scripts/evaluate.py -selfcheck
 ```
 
 For GPU access, the server needs an NVIDIA GPU and NVIDIA Container Toolkit configured.
@@ -68,7 +70,7 @@ docker run -it --name xmr4el-shell --init --gpus all \
 Inside the container, start training:
 
 ```bash
-python scripts/train.py \
+python3 scripts/train.py \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -model_config configs/xmr4el_base_config.json -ds_len 500
 ```
@@ -86,7 +88,7 @@ docker run -d --name xmr4el-train --init --gpus all \
   --mount "type=bind,src=$PWD,dst=/app" \
   --mount "type=bind,src=$HOME/.cache/huggingface,dst=/cache/huggingface" \
   -e HF_HOME=/cache/huggingface \
-  xmr4el python scripts/train.py \
+  xmr4el python3 scripts/train.py \
     -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
     -model_config configs/xmr4el_base_config.json -ds_len 500
 
@@ -108,7 +110,7 @@ git pull --ff-only
 Repeat the training command. Code-only updates need no rebuild; rebuild the image if
 `pyproject.toml`, `uv.lock`, or the Dockerfile changes. Pull updates between runs so a running
 experiment uses a consistent checkout. Evaluation uses the same mount and image with
-`python scripts/evaluate.py` and the arguments below.
+`python3 scripts/evaluate.py` and the arguments below.
 
 ## Local inputs
 
@@ -117,12 +119,15 @@ Keep input corpora and label files under `data/` or `datasets/`.
 ### PubTator
 
 The loader reads title, abstract, and annotation lines. Each annotation becomes
-`mention [SEP] title + abstract` paired with the label ID in column six.
-Training groups these examples by label. Prediction uses supplied mentions;
-mention detection is not implemented.
+`mention [SEP] context` paired with the label ID in column six. The context is
+title + abstract, or the `context_window` words on each side of the mention when the
+config sets it (10 in the flag-6 configs). Label ID `-1` is skipped; a composite ID
+`D1|D2` is split into one example per ID using column seven, and composites without
+column seven are skipped (BC5CDR). Training groups these examples by label.
+Prediction uses supplied mentions; mention detection is not implemented.
 
 ```bash
-python scripts/train.py \
+.venv/bin/python scripts/train.py \
   -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
   -model_config configs/xmr4el_base_config.json \
   -ds_len 500
@@ -134,11 +139,11 @@ Saved models go to `outputs/saved_trees/xmodel_<timestamp>/`.
 ### Grouped TSV
 
 Training rows are `group_id<TAB>text`. A separate file lists one label ID per
-line, aligned with the sorted group IDs. Use a copy of the base configuration
-with `emb_flag` `1` for plain text without `[SEP]` (`configs/xmr4el_flag1_config.json`).
+line, aligned with the sorted group IDs. Plain text has no `[SEP]`, so training
+requires `emb_flag` `1` (`configs/xmr4el_flag1_config.json`); `train.py` rejects other flags.
 
 ```bash
-python scripts/train.py \
+.venv/bin/python scripts/train.py \
   -train_path data/train/chemical/train_Chemical.txt \
   -labels_path data/train/chemical/labels.txt \
   -model_config configs/xmr4el_flag1_config.json \
@@ -151,12 +156,13 @@ groups; check that the files are aligned before training.
 ## Evaluation
 
 ```bash
-python scripts/evaluate.py \
+.venv/bin/python scripts/evaluate.py \
   -xmodel_path outputs/saved_trees/<run> \
   -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt \
-  -beam_size 5 -topk 20
+  -beam_size 2 -topk 0 -alpha 0 -path_score
 ```
 
+These are the flags for trees trained with the base config (see Configuration).
 Evaluation reports acc@1, MRR, recall@k, candidate recall, and vocabulary coverage.
 It excludes mentions whose gold labels are absent from training, so metrics are
 conditional on vocabulary coverage. `topk` is per leaf; `0` removes that final
@@ -169,13 +175,16 @@ from xmr4el.xmodel import XModel
 
 model = XModel.load("outputs/saved_trees/<run>")
 routes, scores = model.predict(
-    ["mention [SEP] context"], beam_size=5, topk=20, topk_mode="per_leaf"
+    ["mention [SEP] context"], beam_size=2, topk=20, topk_mode="per_leaf",
+    alpha=0, path_score=True,
 )
 ```
 
-The `per_leaf` mode keeps the best labels per visited leaf. `global` keeps the best
-labels across visited leaves using the same fused scores. Set `scorer="cosine"` or
-`scorer="ranker"` in `XModel.predict` to choose leaf scoring explicitly.
+`XModel.predict` defaults are `beam_size=5`, `topk=5`, `alpha=0.5`, `path_score=False`;
+pass the arguments above to match the base-config evaluation. The `per_leaf` mode keeps
+the best labels per visited leaf. `global` keeps the best labels across visited leaves
+using the same fused scores. `scorer=None` (default) uses the trained rankers when present,
+else cosine; set `scorer="cosine"` or `scorer="ranker"` to choose leaf scoring explicitly.
 
 ## Configuration
 
@@ -203,10 +212,10 @@ through the existing configuration registries.
 - `xmr4el/learning/`: classifier backends, matcher, per-label ranker training, and scoring/fusion.
 - `xmr4el/hierarchy/`: clustering, node training (`node.py`), tree construction/traversal/persistence (`tree.py`).
 - `xmr4el/xmodel.py`: public pipeline API. `xmr4el/eval.py`: shared evaluation metrics.
-- `scripts/`: train/evaluate, split CLI (`split_pubtator.py`), routing diagnostics; `experiments/` for screens/sweeps and `baselines/` for PECOS.
+- `scripts/`: train/evaluate, split CLI (`split_pubtator.py`), CTD dictionary conversion (`dict_to_pubtator.py`), routing diagnostics; `experiments/` for screens/sweeps and `baselines/` for PECOS.
 - `tests/`: domain checks and `integration/` pipeline/persistence checks. `configs/`: model configs.
-- Legacy flat modules contain compatibility imports so existing saved trees remain loadable.
-- `outputs/`: saved trees, ablation logs, PECOS exports (gitignored).
+- No compatibility code for old saved trees: trees pickled before the current layout do not load; retrain them.
+- `outputs/`: saved trees (`saved_trees/`), PECOS exports (`pecos/`) (gitignored).
 - `STATUS.md`: current state, next step. `docs/pipeline.md`: implemented behavior, observations. `docs/status_log.md`: history. `docs/results.md`: results.
 - `data/`, `datasets/`: local inputs, excluded from version control.
 
@@ -215,12 +224,11 @@ through the existing configuration registries.
 These checks use synthetic inputs and do not run corpus training:
 
 ```bash
-python -m pytest tests/
-python scripts/evaluate.py -selfcheck
-python scripts/diagnose_routing.py -selfcheck
-python scripts/experiments/screen_features.py -selfcheck
+.venv/bin/python -m pytest tests/
+.venv/bin/python scripts/evaluate.py -selfcheck
+.venv/bin/python scripts/diagnose_routing.py -selfcheck
+.venv/bin/python scripts/experiments/screen_features.py -selfcheck
 ```
 
 The user runs full training and evaluation. Keep experiment configurations and
-splits fixed when comparing changes; see `docs/results.md` for invalidated and
-post-fix runs.
+splits fixed when comparing changes; see `docs/results.md` for recorded runs.

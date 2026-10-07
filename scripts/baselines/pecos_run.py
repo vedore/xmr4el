@@ -27,6 +27,8 @@ def main():
     ap.add_argument("-nr_splits", type=int, default=8, help="power of 2; tree config has n_clusters 6")
     ap.add_argument("-max_leaf_size", type=int, default=100)
     ap.add_argument("-topk", type=int, default=100)
+    ap.add_argument("-threshold", type=float, default=0.1,
+                    help="XR-Linear weight pruning (PECOS default 0.1); 0 keeps all weights")
     args = ap.parse_args()
 
     Y = load_npz(os.path.join(args.data, "Y_trn.npz")).tocsr().astype(np.float32)
@@ -43,7 +45,7 @@ def main():
         label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
         chain = Indexer.gen(label_feat, indexer_type="hierarchicalkmeans",
                             nr_splits=args.nr_splits, max_leaf_size=args.max_leaf_size, seed=0)
-        xlm = XLinearModel.train(X, Y, C=chain)
+        xlm = XLinearModel.train(X, Y, C=chain, threshold=args.threshold)
         t_train = time.time() - t0
         print(f"[{feat}] X {X.shape}, cluster sizes {[c.shape for c in chain]}, train {t_train:.1f}s")
         xlm.save(os.path.join(args.data, f"model_{feat}"))

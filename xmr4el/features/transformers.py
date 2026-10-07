@@ -53,7 +53,6 @@ class Transformer:
         model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
         assert model_name, f"transformer config {config} needs a known 'type' or kwargs.model_name"
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
-        kwargs.pop("batch_dir", None), kwargs.pop("output_prefix", None)  # obsolete: batches stay in memory
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
         return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs)[inv.ravel()]

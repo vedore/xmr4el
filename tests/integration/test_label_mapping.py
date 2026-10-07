@@ -36,16 +36,10 @@ def test_label_mapping():
         (saved,) = Path(tmp).iterdir()
         assert XModel.load(saved).initial_labels == ["L1", "L2", "L3"]
 
-        # Legacy trees stored first-seen input order; loading must sort it
+        # More labels than Z rows (e.g. an empty group given a name) must be refused at load
         with open(saved / "xmodel.pkl", "rb") as f:
             state = pickle.load(f)
-        state["_original_labels"] = ["L3", "L1", "L2"]
-        with open(saved / "xmodel.pkl", "wb") as f:
-            pickle.dump(state, f)
-        assert XModel.load(saved).initial_labels == ["L1", "L2", "L3"]
-
-        # A legacy empty group has no Y column; sorting cannot repair it, so load must refuse
-        state["_original_labels"] = ["L3", "L1", "L0", "L2"]
+        state["_original_labels"] = ["L0", "L1", "L2", "L3"]
         with open(saved / "xmodel.pkl", "wb") as f:
             pickle.dump(state, f)
         try:

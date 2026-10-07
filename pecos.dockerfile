@@ -1,4 +1,4 @@
-# PECOS baseline runtime (libpecos has no macOS wheel). Used by scripts/pecos_run.py.
+# PECOS baseline runtime (libpecos has no macOS wheel). Used by scripts/baselines/pecos_run.py.
 #   docker build --platform linux/amd64 -f pecos.dockerfile -t xmr4el-pecos .
 FROM python:3.10-slim
 
@@ -12,3 +12,6 @@ RUN pip install --no-cache-dir --upgrade pip \
       --extra-index-url https://pypi.org/simple \
  && pip install --no-cache-dir libpecos \
  && python -c "from pecos.xmc.xlinear.model import XLinearModel"
+
+# Source and data are mounted here at runtime (see docs/full_cuda_comparison.md).
+WORKDIR /app

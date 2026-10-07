@@ -41,27 +41,27 @@ Inside that container:
 
 ```bash
 set -euo pipefail
-python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; print(torch.cuda.get_device_name(0))'
+python3 -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; print(torch.cuda.get_device_name(0))'
 
 TRAIN=datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
 DEV=datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt
 EXPORT=outputs/pecos/full_dev
 
 # Omit -ds_len to keep every training label (CLI default: 10,000,000).
-python scripts/train.py -train_path "$TRAIN" \
+python3 scripts/train.py -train_path "$TRAIN" \
   -model_config configs/xmr4el_full_cuda_config.json
 
 # Use the tree just trained; do not run another training concurrently.
-MODEL=$(python -c 'from pathlib import Path; print(max(Path("outputs/saved_trees").glob("xmodel_*"), key=lambda p: p.stat().st_mtime))')
+MODEL=$(python3 -c 'from pathlib import Path; print(max(Path("outputs/saved_trees").glob("xmodel_*"), key=lambda p: p.stat().st_mtime))')
 printf 'Model: %s\n' "$MODEL"
 
 for BEAM in 2 10; do
-  python scripts/evaluate.py -xmodel_path "$MODEL" \
+  python3 scripts/evaluate.py -xmodel_path "$MODEL" \
     -test_path "$DEV" -train_path "$TRAIN" \
     -beam_size "$BEAM" -topk 0 -alpha 0 -path_score
 done
 
-python scripts/baselines/pecos_compare.py export \
+python3 scripts/baselines/pecos_compare.py export \
   -xmodel_path "$MODEL" -train_path "$TRAIN" -test_path "$DEV" -out "$EXPORT"
 exit
 ```
@@ -71,15 +71,17 @@ Back on the host, train PECOS once on the exported features and score both beams
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" -w /app \
-  xmr4el-pecos python scripts/baselines/pecos_run.py \
+  xmr4el-pecos python3 scripts/baselines/pecos_run.py \
   -data outputs/pecos/full_dev -features ours \
-  -nr_splits 8 -max_leaf_size 100 -beams 2,10 -topk 100
+  -nr_splits 8 -max_leaf_size 100 -beams 2,10 -topk 100 -threshold 0
 
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" \
-  xmr4el python scripts/baselines/pecos_compare.py score -out outputs/pecos/full_dev
+  xmr4el python3 scripts/baselines/pecos_compare.py score -out outputs/pecos/full_dev
 ```
 
+`-threshold 0` disables XR-Linear weight pruning (script default 0.1, PECOS's default); on BC5CDR dev
+the default alone cost PECOS 0.075 acc@1 (`docs/results.md`).
 PECOS is saved under `outputs/pecos/full_dev/model_ours`. Its hierarchy automatically grows
 with the label count; XMR4EL uses the configured fixed depth. Compare the same-features `ours`
 baseline first. `-features ours,tfidf` also runs PECOS's own TF-IDF as a separate system baseline.
@@ -94,10 +96,10 @@ MODEL=outputs/saved_trees/xmodel_REPLACE_WITH_YOUR_RUN
 BEAM=2
 TRAIN=datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
 TEST=datasets/MedMentions/st21pv/data/corpus_pubtator_test.txt
-python scripts/evaluate.py -xmodel_path "$MODEL" \
+python3 scripts/evaluate.py -xmodel_path "$MODEL" \
   -test_path "$TEST" -train_path "$TRAIN" \
   -beam_size "$BEAM" -topk 0 -alpha 0 -path_score
-python scripts/baselines/pecos_compare.py export \
+python3 scripts/baselines/pecos_compare.py export \
   -xmodel_path "$MODEL" -train_path "$TRAIN" -test_path "$TEST" \
   -out outputs/pecos/full_test
 exit
@@ -109,7 +111,7 @@ On the host, set the selected beam and predict with the saved PECOS model:
 BEAM=2
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" -w /app -e BEAM="$BEAM" \
-  xmr4el-pecos python -c '
+  xmr4el-pecos python3 -c '
 import os
 from scipy.sparse import load_npz, save_npz
 from pecos.xmc.xlinear.model import XLinearModel
@@ -120,7 +122,7 @@ save_npz(f"outputs/pecos/full_test/pred_ours_b{beam}.npz", pred)
 '
 docker run --rm --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$PWD,dst=/app" \
-  xmr4el python scripts/baselines/pecos_compare.py score -out outputs/pecos/full_test
+  xmr4el python3 scripts/baselines/pecos_compare.py score -out outputs/pecos/full_test
 ```
 
 Export filenames still say `dev` even when `-test_path` points at test. Metrics exclude gold labels
@@ -139,5 +141,5 @@ JOBLIB_MULTIPROCESSING=0 .venv/bin/python -m pytest \
 .venv/bin/python scripts/baselines/pecos_compare.py selfcheck
 ```
 
-These checks do not validate CUDA hardware or full-corpus memory use. The previously observed
-legacy-import failure concerns old pickle paths; use a freshly trained tree for this comparison.
+These checks do not validate CUDA hardware or full-corpus memory use. Use a freshly trained tree
+for this comparison.

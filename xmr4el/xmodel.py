@@ -146,7 +146,7 @@ class XModel:
             f"  workers: n_workers={self.n_workers}",
             f"  depth={self.depth}, emb_flag={self.emb_flag}",
             f"  cluster: min_leaf_size={self.min_leaf_size}, max_leaf_size={self.max_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
-            f"  ranker_every_layer={self.ranker_every_layer}, train_rankers={getattr(self, 'train_rankers', True)}",
+            f"  ranker_every_layer={self.ranker_every_layer}, train_rankers={self.train_rankers}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
@@ -161,7 +161,6 @@ class XModel:
             f"    training_texts: {_short(self._training_texts)}",
             f"    original_labels: {_short(self._original_labels)}",
             f"    X/Y/Z: {_short(self._X)}, {_short(self._Y)}, {_short(self._Z)}",
-            f"  temp_var: {_short(getattr(self, 'temp_var', None))}",
         ]
         return "\n".join(parts)
 
@@ -254,7 +253,6 @@ class XModel:
         text_encoder = self.text_encoder
         text_encoder_path = os.path.join(save_dir, "text_encoder")
         state.pop("_text_encoder", None)
-        state.pop("temp_var", None)  # legacy temporary store is not model state
         
         if text_encoder is not None:
             if hasattr(text_encoder, "save"):
@@ -278,11 +276,8 @@ class XModel:
             model_data = pickle.load(fin)
             
         model = cls()
-        model_data.pop("temp_var", None)
         model.__dict__.update(model_data)
-        # Trees saved before the label-order fix stored input order; sorted() is idempotent
-        model.initial_labels = sorted(set(model.initial_labels))
-        # A legacy tree trained with empty label groups cannot be repaired by sorting
+        # Label index j is row j of Z: refuse a label list that does not match it
         if model.Z is not None:
             assert len(model.initial_labels) == model.Z.shape[0], (
                 f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows"
@@ -325,8 +320,8 @@ class XModel:
             transformer_config=self.transformer_config,
             dimension_config=self.dimension_config, 
             flag=self.emb_flag, # Needs to be a variable, could have a stop to check
-            context_vectorizer_config=getattr(self, "context_vectorizer_config", None),
-            context_dimension_config=getattr(self, "context_dimension_config", None),
+            context_vectorizer_config=self.context_vectorizer_config,
+            context_dimension_config=self.context_dimension_config,
             )
         
         self.text_encoder = text_encoder
@@ -366,7 +361,7 @@ class XModel:
             cut_half_cluster=self.cut_half_cluster,
             ranker_every_layer=self.ranker_every_layer,
             layer=self.depth,
-            train_rankers=getattr(self, "train_rankers", True),
+            train_rankers=self.train_rankers,
         )
 
         hml.train(

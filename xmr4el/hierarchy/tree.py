@@ -322,7 +322,7 @@ class HierarchicalMLModel():
                         is_last_layer=is_last_layer,
                         layer=layer,
                         n_workers=self.n_workers,
-                        train_rankers=getattr(self, "train_rankers", True),
+                        train_rankers=self.train_rankers,
                     )
 
                     ml.train(

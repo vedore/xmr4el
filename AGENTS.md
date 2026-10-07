@@ -117,7 +117,7 @@ Before making claims, verify them against the implementation.
 - Do not rewrite the whole pipeline unless explicitly requested
 - Keep component boundaries modular
 - Avoid coupling featurization, clustering, matcher, and ranker logic unnecessarily
-- Preserve backward compatibility where practical
+- Do not add compatibility code for old saved trees or configs; they are retrained instead
 - Add or update tests when changing behavior
 
 If editing model behavior, identify whether the change belongs in:
@@ -202,12 +202,14 @@ Do not jump directly to model replacement before checking pipeline quality.
 Then check these known error origins, in pipeline order (state in `STATUS.md`, evidence in `docs/pipeline.md`):
 - label index <-> label name mapping: model indices follow sorted `Y` columns; `XModel.initial_labels`
   must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
-- `-ds_len` selects the first N labels in file order, not a random sample
+- `-ds_len` selects the first N label groups (first-seen order for PubTator, sorted group ID for
+  grouped TSV), not a random sample
 - feature block balance (`emb_flag` 6 normalises each block before the concat)
 - PIFA label embeddings built from mention + context
 - per-label rankers whose label-embedding input is constant
 - child matchers trained without out-of-cluster negatives
-- leaf scores not comparable across leaves (`path_logscore` unused)
+- leaf scores not comparable across leaves unless `-path_score` (`predict(path_score=True)`)
+  multiplies them by the routing path probability
 
 Measure before fixing: prefer eval-only runs on saved trees and `scripts/diagnose_routing.py`
 over retraining, and always report the chance line next to routing numbers.

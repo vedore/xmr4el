@@ -13,7 +13,7 @@ from sklearn.preprocessing import normalize
 from xmr4el.hierarchy.clusterers import Clustering
 from xmr4el.learning.matcher import Matcher
 from xmr4el.learning.ranker import Ranker
-from xmr4el.learning.scoring import predict_labels, fused_cluster_scores
+from xmr4el.learning.scoring import predict_labels
 
 
 
@@ -224,10 +224,6 @@ class MLModel():
             f"Matcher Model: {self.matcher_model or 'None'}\n"
             f"Ranker Model: {self.ranker_model or 'None'}\n"
         )
-    
-    def fused_predict(self, X, Z, C, alpha=0.5, batch_size=32768,
-                      fusion="lp_hinge", p=3):
-        return fused_cluster_scores(self, X, Z, C, alpha, batch_size, fusion, p)
     
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
         """

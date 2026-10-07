@@ -4,8 +4,8 @@ from collections import defaultdict
 from scipy.sparse import csr_matrix
 from scipy.special import expit
 from xmr4el.learning.ranker import RankerTrainer, ranker_input
-from numpy import (asarray, array, concatenate, unique, ones, maximum, clip,
-                   float32, int32, int64, argsort, argpartition,
+from numpy import (asarray, array, concatenate, unique, clip,
+                   int32, int64, argsort, argpartition,
                    full, r_, full_like)
 
 
@@ -90,8 +90,7 @@ def predict_labels(node, X_query, beam_size: int = 5, topk: int | None = None, r
             queries_per_label[gid].extend(qis_sorted[start:end].tolist())
 
     # --- 4) Batch ranker per label and fuse with the label's cluster score ---
-    # Honor the saved eval-only switch when no explicit scorer was supplied.
-    cosine = scorer == "cosine" or (scorer is None and getattr(node, "cosine_scorer", False))
+    cosine = scorer == "cosine"
     no_rankers = cosine or node.ranker_model is None
     model_dict = {} if no_rankers else node.ranker_model.model_dict
     node.ranker_failed = set()  # gids whose trained ranker fell back to cosine
@@ -254,85 +253,3 @@ def predict_labels(node, X_query, beam_size: int = 5, topk: int | None = None, r
             scores_per_query.append(array(scs, dtype=float))
 
     return scores_per_query, labels_per_query
-
-
-def fused_cluster_scores(node, X, Z, C, alpha=0.5, batch_size=32768,
-                  fusion: str = "lp_hinge", p: int = 3):
-    """Batched matcher/ranker fusion."""
-    N = X.shape[0]
-    L_local = Z.shape[0]
-
-    # --- matcher (local label-level) scores ---
-    ms = csr_matrix(node.matcher_model.model.predict_proba(X), dtype=np.float32)
-
-    # --- flatten mention-local label pairs (vectorized; no Python loop) ---
-    indptr = ms.indptr
-    rows_list = np.repeat(np.arange(N, dtype=np.int32), np.diff(indptr).astype(np.int32))
-    cols_list = ms.indices.astype(np.int32, copy=False)
-    matcher_flat = ms.data.astype(np.float32, copy=False)
-
-    ranker_score = ones(len(rows_list), dtype=np.float32)
-
-    # ---- SINGLE RANKER SHORTCUT ----
-    if node.ranker_model and getattr(node.ranker_model, "model_dict", None):
-        try:
-            mdl = next(iter(node.ranker_model.model_dict.values()))
-        except StopIteration:
-            mdl = None
-
-        if mdl is not None:
-            clip_low, clip_high = 1e-6, 1.0
-            POS_COL = 1
-
-            # Detect hinge once
-            cfg = getattr(mdl, "config", {})
-            is_hinge = (cfg.get("type") == "sklearnsgdclassifier" and
-                        cfg.get("kwargs", {}).get("loss") == "hinge")
-
-            proba_fn = getattr(mdl, "predict_proba", None)
-            dec_fn   = getattr(mdl, "decision_function", None)
-
-            # Decide MODE ONCE (outside the loop), and bind a scorer callable.
-            if is_hinge and callable(dec_fn):
-                def scorer(Xb, _dec=dec_fn, _lo=clip_low, _hi=clip_high):
-                    return clip(expit(_dec(Xb)), _lo, _hi)
-            elif callable(proba_fn):
-                def scorer(Xb, _pf=proba_fn, _col=POS_COL, _lo=clip_low, _hi=clip_high):
-                    proba = _pf(Xb)
-                    return clip(proba[:, _col], _lo, _hi)
-            else:
-                def scorer(Xb):
-                    return ones(Xb.shape[0], dtype=float32)
-
-            num_pairs = len(rows_list)
-            for start in range(0, num_pairs, batch_size):
-                end = min(start + batch_size, num_pairs)
-                b_rows = rows_list[start:end]
-                b_cols = cols_list[start:end]
-
-                X_part = X[b_rows]
-                X_part = X_part.toarray() if hasattr(X_part, "toarray") else asarray(X_part)
-                Z_part = Z[b_cols]
-                batch_inp = ranker_input(X_part, Z_part)
-
-                # No loop-invariant checks here anymore:
-                ranker_score[start:end] = scorer(batch_inp)
-        else:
-            alpha = 0
-    else:
-        alpha = 0  # no ranker available
-
-    node.alpha = alpha
-
-    if fusion == "lp_hinge":
-        fused = ((1 - node.alpha) * (matcher_flat ** p) + node.alpha * (ranker_score ** p)) ** (1.0 / p)
-        fused = maximum(fused, 0.0)
-    else:
-        fused = (matcher_flat ** (1 - node.alpha)) * (ranker_score ** node.alpha)
-
-    # --- build local-label fused matrix ---
-    entity_fused = csr_matrix((fused, (rows_list, cols_list)), shape=(N, L_local), dtype=np.float32)
-
-    # --- project to clusters ---
-    cluster_fused = entity_fused.dot(C)
-    return csr_matrix(cluster_fused)

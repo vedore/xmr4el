@@ -52,9 +52,9 @@ def main():
     if args.verbose:
         print(trained_xtree)
 
-    abbrev = getattr(trained_xtree, "abbrev_expansion", None)  # train side too: same dictionary keys
+    abbrev = trained_xtree.abbrev_expansion  # train side too: same dictionary keys
     test_set = Preprocessor.load_pubtator_file(
-        args.test_path, window=getattr(trained_xtree, "context_window", None), abbrev=abbrev)
+        args.test_path, window=trained_xtree.context_window, abbrev=abbrev)
     labels = test_set["labels"]
     golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
     n_total, n = len(labels), len(golden_labels)
@@ -89,7 +89,7 @@ def main():
 
     print("-" * 72)
     print(f"tree     {os.path.basename(os.path.normpath(args.xmodel_path))}  "
-          f"({len(trained_labels)} labels, emb_flag {getattr(trained_xtree, 'emb_flag', '?')})")
+          f"({len(trained_labels)} labels, emb_flag {trained_xtree.emb_flag})")
     print(f"rows     {n}/{n_total} gold label in vocabulary ({n / max(n_total, 1):.1%}); "
           f"{len(set(golden_labels))} distinct gold labels")
     print(f"search   beam {args.beam_size}, scorer {args.scorer}, alpha {args.alpha}, "

@@ -4,6 +4,25 @@ Completed steps and history moved out of `STATUS.md`. Not a work order; results 
 `docs/results.md`.
 
 
+## 2026-10-07: legacy removal
+
+Removed compatibility code for old saved trees (user decision): `tests/integration/test_legacy_imports.py`,
+`XModel.load`'s first-seen label sorting (the label/`Z` count guard stays), the `temp_var` pops, the saved
+`cosine_scorer` switch (`scorer=None` now means rankers when present, else cosine), the `batch_dir` /
+`output_prefix` kwarg pops, `getattr` defaults for attributes every current tree has, and the
+`xmr4el/data/__init__.py` re-exports. `MLModel.fused_predict` / `scoring.fused_cluster_scores` (no callers)
+moved to future work. Invalid results deleted from `docs/results.md`. The three trees in
+`outputs/saved_trees/` carry every attribute the code now reads (checked on their `xmodel.pkl`).
+
+## 2026-10-06: four-domain restructure, BC5CDR
+
+Source moved into `xmr4el/data/`, `features/`, `learning/`, `hierarchy/` (`ff3badf`); `XModel` stays the
+entry point. Synthetic flag-1 train/save/load/predict matched the pre-move baseline within 1e-12. Texts owned
+by XModel, encoder components serialized once, scoring/fusion, label/PIFA, SVD and matcher logic extracted,
+`predict(scorer=...)` replaces eval's leaf mutation, input lengths validated, configs copied before fitting.
+The flat-layout pickle shims were deleted in the same commit. BC5CDR reader support and dev comparison
+with PECOS: `STATUS.md`, `docs/results.md`.
+
 ## Session 13 (2026-10-06)
 
 Restructure (STATUS.md plan) steps 0-7, 9, 10, one commit each. Flat package (`data`, `encoder`, `vectorizers`,
@@ -29,7 +48,7 @@ longer clustered at all; `cut_half_cluster` now really halves (it was a no-op; m
 internal node that cannot split raises `ValueError` instead of truncating the tree; `XModel.predict`'s global cosine
 rerank branch deleted (unused; topk_mode "global" goes to the hierarchy, whose final_path matches its scores).
 
-Repository-structure review done; restructure plan in `STATUS.md` § "Restructure plan".
+Repository-structure review done; restructure plan in `STATUS.md` (since removed; see Session 13).
 
 ## Session 11 (2026-10-02)
 
@@ -244,7 +263,7 @@ User decisions (2026-10-01): rankers left out of prediction (eval `-scorer` defa
 `-scorer ranker` reproduces the old rows); user will redesign rankers later. Leaf ranker training
 still runs (cost only). Explore featurization before scaling labels.
 
-## Alignment failures that invalidated earlier evaluation
+## Alignment bugs fixed (2026-09-30)
 
 1. Layer models loaded in filesystem order, so traversal visited the wrong child models.
    Numeric loading order and the parent/child invariant guard now address this.
@@ -253,10 +272,10 @@ still runs (cost only). Explore featurization before scaling labels.
 3. Transformer embedding batches were reassembled in lexicographic file order (`batch10` before
    `batch2`), permuting every row past batch 1 when a corpus spans more than 10 batches. This hit
    every flag 2-4 training run (23.5k rows = 12 batches); flag 1 is TF-IDF only. Now sorted
-   numerically; files are keyed by start row so OOM recovery cannot skip rows. The earlier
-   train-side figures (4.79x, 3.81x) came from permuted flag-4 features and are withdrawn.
+   numerically; files are keyed by start row so OOM recovery cannot skip rows. Results from
+   affected trees were deleted.
 
-Valid after the fixes (flag 1, 500 labels, `docs/results.md` Session 6): acc@1 0.113 at 23x the
+After the fixes (flag 1, 500 labels, `docs/results.md` Session 6): acc@1 0.113 at 23x the
 random line; dev root routing 0.546 vs majority cluster 0.598; flat nearest-label 0.267; mention
 dictionary 0.718.
 
@@ -267,14 +286,13 @@ dictionary 0.718.
 
 ## Step 2. Corrected saved-tree diagnostics — done (Session 6)
 
-Trees: flag 1 (`15-16-12`) and flag 4 (`15-58-50`), each 500 labels. Diagnostics, not a feature
-ablation; training history uncertain. Flag-1 rows are valid. The flag-4 tree was invalid
-(row-permuted features) and was retrained after the batch-order fix as a new baseline.
+Tree: flag 1 (`15-16-12`), 500 labels. Diagnostics, not a feature ablation; training history
+uncertain. The flag-4 tree of that day (row-permuted features) was retrained after the batch-order fix.
 
 Commands used:
 
 ```bash
-for t in xmodel_2026-09-29_15-16-12 xmodel_2026-09-29_15-58-50; do
+for t in xmodel_2026-09-29_15-16-12; do
   .venv/bin/python test/xmr4el/test_evaluate_pipeline.py \
     -xmodel_path "test/test_data/saved_trees/$t" \
     -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt \
@@ -288,9 +306,9 @@ for t in xmodel_2026-09-29_15-16-12 xmodel_2026-09-29_15-58-50; do
 done
 ```
 
-Exit: corrected dev rows for both trees plus both diagnostic reports in `docs/results.md`, with
+Exit: corrected dev rows plus the diagnostic report in `docs/results.md`, with
 tree ID, code revision, saved config, split, vocabulary, seed, beam, top-k, candidate counts,
-metrics and chance references; old rows marked invalid.
+metrics and chance references.
 
 ## Step 3. Controlled scoring ablation — done (Session 7)
 

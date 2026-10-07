@@ -70,3 +70,21 @@ def test_local_inputs():
                 raise AssertionError("plain TSV must reject the split-input encoder")
         model.train.assert_not_called()
     print("local input checks ok")
+
+
+def test_bc5cdr_ids():
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "cdr.txt"
+        path.write_text(
+            "1|t|Ocular and auditory toxicity\n1|a|x\n"
+            "1\t0\t28\tOcular and auditory toxicity\tDisease\tD1|D2\tOcular toxicity|auditory toxicity\n"
+            "1\t0\t6\tOcular\tDisease\t-1\n"
+            "1\t0\t28\taudiovisual toxicity\tDisease\tD1|D2\n"
+            "1\t0\t28\tA and B\tDisease\tD4|-1\tA|B\n"
+            "1\t0\t6\tOcular\tDisease\tD3\t\n"
+            "1\tCID\tD1\tD3\n",
+            encoding="utf-8",
+        )
+        d = Preprocessor.load_pubtator_file(str(path))
+        assert [t.split(" [SEP]")[0] for t in d["corpus"]] == ["Ocular toxicity", "auditory toxicity", "A", "Ocular"]
+        assert d["labels"] == ["D1", "D2", "D4", "D3"] and d["spans"] == [(0, 28), (0, 28), (0, 28), (0, 6)]

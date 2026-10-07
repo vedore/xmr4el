@@ -11,7 +11,6 @@ from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
-from xmr4el.hierarchy.node import MLModel
 from xmr4el.hierarchy.tree import HierarchicalMLModel
 
 
@@ -26,16 +25,13 @@ def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, c
     L = Z.shape[0]
     caller_config = hml.clustering_config
     original = deepcopy(caller_config)
-    with patch.object(hml, "prepare_layer", wraps=hml.prepare_layer) as prepare, \
-         patch.object(MLModel, "fused_predict", side_effect=AssertionError("unused leaf fusion")):
+    with patch.object(hml, "prepare_layer", wraps=hml.prepare_layer) as prepare:
         hml.train(X_train=X, Y_train=Y, Z_train=Z, local_to_global=np.arange(L),
                   global_to_local={i: i for i in range(L)})
     assert caller_config == original == hml.clustering_config, "training mutated clustering settings"
     assert prepare.call_count == sum(len(nodes) for nodes in hml.hmodel[:-1]), "prepared children of leaves"
     assert all(m.fused_scores is None for m in hml.hmodel[-1])
     assert hml.child_index_map[-1] == [{} for m in hml.hmodel[-1]]
-    for leaf in hml.hmodel[-1]:
-        leaf.cosine_scorer = True
     return hml
 
 
@@ -55,7 +51,7 @@ def test_no_rankers():
     assert all(m.ranker_model is None for layer in without_r.hmodel for m in layer), "rankers trained"
 
     kw = dict(beam_size=2, topk=0, alpha=1.0)
-    (_, a), (_, b) = with_r.predict(Xq, **kw), without_r.predict(Xq, **kw)  # (routes, scores_csr)
+    (_, a), (_, b) = with_r.predict(Xq, scorer="cosine", **kw), without_r.predict(Xq, **kw)  # (routes, scores_csr)
     a, b = a.toarray(), b.toarray()
     assert a.shape == b.shape and np.allclose(a, b), "cosine predictions must not depend on rankers"
     assert (a.argmax(axis=1) == np.arange(L)).mean() > 0.5, "synthetic labels should be easy"

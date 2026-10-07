@@ -16,6 +16,8 @@ uv sync --locked
 .venv/bin/python scripts/evaluate.py --help
 ```
 
+Local machine: `.venv/bin/python`. Inside the Docker containers (`xmr4el.dockerfile`, `pecos.dockerfile`): `python3`.
+
 Training accepts PubTator by default, or grouped TSV with `-labels_path`.
 Plain TSV requires `emb_flag` 1 (`configs/xmr4el_flag1_config.json`); PubTator uses 6 (base config).
 The base configuration is `configs/xmr4el_base_config.json`.
@@ -28,28 +30,27 @@ Saved trees are under `outputs/saved_trees/`.
 - Keep `data/`, `datasets/`, and `outputs/` (saved trees, exports) intact.
 - Start every session by reading `STATUS.md` § "Resume here"; it says what is in flight and what to
   do with pasted output. Update that block at the end of each step and before a chat reset.
-- `docs/results.md` holds valid results only. Pre-fix (invalid) results were removed 2026-10-06; recover with `git show b8b7e5a:docs/results_archive.md`.
-- Verify claims against code; old notes and pre-fix measurements may be superseded.
+- `docs/results.md` holds valid results only; invalid results are deleted, not marked.
+- Verify claims against code; old notes may be superseded.
+- No compatibility code for old saved trees or old configs; retrain instead.
 - Preserve the loader ordering guard, the sorted label order, leaf label-level matching,
   ranker warm-starting, small-cluster reassignment, and local data formats.
 
-## Current context (2026-09-30)
+## Current context
 
 - Out of scope: UMLS, the KB/Postgres layer, the old SapBERT/KRISSBERT wrappers — all removed.
   (User 2026-10-01: SapBERT as a mention encoder is allowed; see `STATUS.md`.) PubTator is
   only a local file format here.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
-  binarizer's `classes_` (sorted; labels with no training text have no column). `load` sorts legacy
-  first-seen lists and refuses a label/`Z` count mismatch; regression in `tests/integration/test_label_mapping.py`.
-  Before this fix eval scored dev against a permuted label list, so **every pre-fix dev number
-  (the deleted `docs/results_archive.md`) is invalid**.
-- Transformer embedding batches are kept in memory in row order (`xmr4el/features/transformers.py`; no `batch_dir`).
-  Before the numeric-order fix, every flag 2-4 training run over 10 batches had permuted rows: the flag-4 tree `15-58-50`
-  and the old 4.79x/3.81x train-side routing figures are invalid.
+  binarizer's `classes_` (sorted; labels with no training text have no column). `load` refuses a label/`Z`
+  count mismatch; regression in `tests/integration/test_label_mapping.py`.
+- Transformer embedding batches are kept in memory in row order (`xmr4el/features/transformers.py`).
 - Any new code that maps indices to label names must use `initial_labels`, never input order.
 
 ## Priorities
 
 `STATUS.md` owns the work order and the interpretation rules; `docs/pipeline.md` holds the
 implemented-behavior table, synthetic checks and pipeline observations. Do not
-duplicate them here. `fused_predict` (`xmr4el/hierarchy/node.py`) is not dead code: leaf training calls it.
+duplicate them here. Internal nodes set `fused_scores` from the matcher's cluster scores in
+`MLModel.train`, and `prepare_layer` consumes them; matcher/ranker score fusion for that step
+(`fused_predict`) is future work (`STATUS.md` § Future work).

@@ -101,8 +101,8 @@ def main():
     tr = rng.permutation(Y.shape[0])[:args.max_rows]
     report("train", xm.X[tr], Y.indices[tr], root, Z, cluster_of, blocks)
 
-    abbrev = getattr(xm, "abbrev_expansion", None)
-    test = Preprocessor.load_pubtator_file(args.test_path, window=getattr(xm, "context_window", None),
+    abbrev = xm.abbrev_expansion
+    test = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window,
                                            abbrev=abbrev)
     pairs = [(t, y) for t, y in zip(test["corpus"], test["labels"]) if y in label_to_idx]
     print(f"\nin-vocabulary dev mentions: {len(pairs)}/{len(test['labels'])}")

@@ -25,7 +25,7 @@ def export(args):
     xm = XModel.load(args.xmodel_path)
     labels = list(xm.initial_labels)
     l2i = {lab: i for i, lab in enumerate(labels)}
-    window, abbrev = getattr(xm, "context_window", None), getattr(xm, "abbrev_expansion", None)
+    window, abbrev = xm.context_window, xm.abbrev_expansion
     os.makedirs(args.out, exist_ok=True)
 
     # Training rows in the tree's order: first len(labels) label groups, flattened (scripts/train.py + XModel._fit)

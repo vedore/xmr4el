@@ -1,0 +1,111 @@
+{
+    "vectorizer_config": {
+        "type": "tfidf",
+        "kwargs": {
+            "analyzer": "char_wb",
+            "ngram_range": [
+                2,
+                4
+            ],
+            "sublinear_tf": true,
+            "max_df": 1.0
+        }
+    },
+    "transformer_config": {
+        "type": "sapbert",
+        "kwargs": {
+            "batch_size": 2000
+        }
+    },
+    "dimension_config": {
+        "type": "sklearntruncatedsvd",
+        "kwargs": {
+            "n_components": 768,
+            "algorithm": "randomized",
+            "n_iter": 5,
+            "n_oversamples": 10,
+            "power_iteration_normalizer": "auto",
+            "random_state": 42,
+            "tol": 0.0
+        }
+    },
+    "context_vectorizer_config": {
+        "type": "tfidf",
+        "kwargs": {
+            "ngram_range": [
+                1,
+                1
+            ],
+            "stop_words": "english",
+            "sublinear_tf": true,
+            "max_df": 1.0
+        }
+    },
+    "context_dimension_config": {
+        "type": "sklearntruncatedsvd",
+        "kwargs": {
+            "n_components": 768,
+            "algorithm": "randomized",
+            "n_iter": 5,
+            "n_oversamples": 10,
+            "power_iteration_normalizer": "auto",
+            "random_state": 42,
+            "tol": 0.0
+        }
+    },
+    "context_window": 10,
+    "abbrev_expansion": "append",
+    "clustering_config": {
+        "type": "balancedkmeans",
+        "kwargs": {
+            "n_clusters": 16,
+            "iter_limit": 400
+        }
+    },
+    "matcher_config": {
+        "type": "jointlogisticregression",
+        "kwargs": {
+            "C": 1.0,
+            "class_weight": "balanced",
+            "tol": 0.0001
+        }
+    },
+    "ranker_config": {
+        "type": "sklearnsgdclassifier",
+        "kwargs": {
+            "loss": "log_loss",
+            "penalty": "l1",
+            "alpha": 0.0001,
+            "max_iter": 1000,
+            "tol": 0.0001,
+            "n_jobs": -1,
+            "random_state": 42,
+            "verbose": 0,
+            "early_stopping": false,
+            "learning_rate": "adaptive",
+            "eta0": 0.01
+        }
+    },
+    "cur_config": {
+        "E_warm": 1,
+        "ratios_warm": [
+            0.7,
+            0.3
+        ],
+        "ratios_hard": [
+            0.6,
+            0.3,
+            0.1
+        ],
+        "neg_mult": 5,
+        "seed": 42
+    },
+    "min_leaf_size": 5,
+    "max_leaf_size": 200,
+    "cut_half_cluster": true,
+    "ranker_every_layer": true,
+    "depth": 2,
+    "emb_flag": 6,
+    "verbose": 1,
+    "train_rankers": false
+}

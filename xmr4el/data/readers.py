@@ -126,6 +126,7 @@ class Preprocessor:
             spans[i] = (start, end) of the mention in title + " " + abstract (PubTator offsets)
         `abbrev` "append" / "replace": a mention that is a short form defined in its document
         (`abbreviations`) becomes "SF long form" / "long form"; None keeps it.
+        BC5CDR: "-1" ids are skipped; composite "D1|D2" mentions are split via column 7.
         """
         assert abbrev in (None, "append", "replace"), abbrev
         assert os.path.exists(pubtator_filepath), f"{pubtator_filepath} does not exist"
@@ -160,22 +161,29 @@ class Preprocessor:
                 elif "\t" in line:
                     parts = line.split("\t")
                     if len(parts) >= 6:
-                        mention_text = parts[3]
-                        cui = parts[5]
-                        context = " ".join(x for x in [title, abstract] if x)
-
+                        # BC5CDR: "-1" = no concept (dropped, also as a composite part); a composite
+                        # mention "D1|D2" becomes one row per part, its text from column 7
+                        # ("t1|t2"); a composite without column 7 has no per-part text and is dropped.
+                        cuis = parts[5].split("|")
+                        texts = parts[6].split("|") if len(cuis) > 1 and len(parts) > 6 else [parts[3]]
+                        if len(texts) != len(cuis):
+                            continue
                         span = (int(parts[1]), int(parts[2]))
-                        if abbrev is not None:
-                            if abbrs is None:
-                                abbrs = Preprocessor.abbreviations(context)
-                            lf = abbrs.get(mention_text.strip())
-                            if lf is not None:
-                                mention_text = lf if abbrev == "replace" else f"{mention_text.strip()} {lf}"
-                        if window is not None:
-                            context = Preprocessor.context_window(context, span, window)
-                        corpus.append(f"{mention_text} [SEP] {context}")
-                        labels.append(cui)
-                        spans.append(span)
+                        doc = " ".join(x for x in [title, abstract] if x)
+                        if abbrev is not None and abbrs is None:
+                            abbrs = Preprocessor.abbreviations(doc)
+                        context = doc if window is None else Preprocessor.context_window(doc, span, window)
+
+                        for mention_text, cui in zip(texts, cuis):
+                            if cui == "-1":
+                                continue
+                            if abbrev is not None:
+                                lf = abbrs.get(mention_text.strip())
+                                if lf is not None:
+                                    mention_text = lf if abbrev == "replace" else f"{mention_text.strip()} {lf}"
+                            corpus.append(f"{mention_text} [SEP] {context}")
+                            labels.append(cui)
+                            spans.append(span)
 
         return {"corpus": corpus, "labels": labels, "spans": spans}
 

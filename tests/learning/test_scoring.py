@@ -36,7 +36,6 @@ def test_scoring():
     ranker = Mock(config={})
     ranker.predict_proba.side_effect = lambda rows: np.tile([0.1, 0.9], (len(rows), 1))
     node.ranker_model = SimpleNamespace(model_dict={4: ranker, 7: ranker})
-    node.cosine_scorer = True  # explicit arguments override the legacy saved switch
     scores, _ = node.predict(csr_matrix(X), beam_size=2, alpha=1, scorer="ranker")
     assert np.allclose(scores, 0.9)
     before = ranker.predict_proba.call_count
