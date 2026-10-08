@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-08 end of session (speed F/G done: train 61.6 s, eval 9 s; knn fusion `-knn_beta 10` committed: dev 0.904, test 0.916 / hybrid 0.921; next session = plan N (normalize run path), then U3 diagnosis).
 
-**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: N (normalize the run path, plan below) first, then U3 diagnosis on the normalized code. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: N (normalize the run path, plan below) first, then U3 diagnosis on the normalized code. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (with knn: dev 0.680, test 0.712).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
