@@ -6,14 +6,58 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1-N5 committed; N6 = user retrain + bare dev eval below; code frozen until pasted).
+Last updated 2026-10-08 (N1-N6 done; U3 code uncommitted; U3 D1/D2/D4 read; R reranker planned and decided; next = R code (Claude)).
 
-**Runs:** N6 (user; code frozen until pasted). Old trees no longer load (`features` replaced `emb_flag`).
-`python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/n6_train.log && python scripts/evaluate.py -xmodel_path outputs/saved_trees/$(ls -t outputs/saved_trees | head -1) -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator 2>&1 | tee outputs/logs/n6_dev_eval.log`
-Pass = eval line `search beam 10, topk 0, knn beta 10` with no flags given; dev within MPS root noise (~0.002) of
-`knn10_dev_eval.log` (acc@1 0.9041, unseen 0.6800, hybrid 0.9062); train ~62 s (cache hit). Then test once (same
-eval, `test.pubtator`, log `n6_test_eval.log`; reference 0.9163 / hybrid 0.9213), results.md row if numbers move,
-user deletes trees `11-31-05`, `11-45-47`, `12-21-30`. Then U3 diagnosis.
+**N6 passed:** tree `13-16-09` (`outputs/logs/n6_train.log`, `n6_dev_eval.log`, `n6_test_eval.log`): cache hit,
+hierarchy 31.9 s, run 64.1 s; bare eval prints `search beam 10, topk 0, knn beta 10`; dev and test identical to the
+knn10 references (dev 0.9041 / unseen 0.6800 / hybrid 0.9062; test 0.9163 / hybrid 0.9213): no results.md row.
+User deletes tree `12-21-30` (no longer loads). U3 uses `13-16-09`.
+**U3 code done (uncommitted):** `diagnose_unseen.py` had a latent N3 bug: `xm.predict` without `knn_beta` took
+the tree's beta 10, so the fusion screen fused twice. Now: `-knn_beta`/`-beam_size` (default the tree's) set the
+ranking behind acc@1, per-group rank buckets and the TSV (one `xm.predict`, = evaluate.py); the screen re-scores
+`knn_beta=0` scores. TSV = every error, columns `group`, `abbrev` (mention text changed by the tree's
+`abbrev_expansion`, from an abbrev-free reload), `gold_in_string_set`, `pred_in_string_set`, mention 1-NN for all
+rows. Check: screen row beta 10 must equal the header per group. Synthetic end-to-end (tfidf tree, forced
+errors, abbrevs) ok; pytest 23 + selfchecks pass.
+**U3 D1/D2/D4 result** (`outputs/logs/u3_diag.log`, `u3_errors.tsv`, tree `13-16-09`, dev, beta 10): header = screen
+row beta 10 per group (check ok). Errors 413: seen 1 68, seen >1 40, unseen 305.
+D1 unseen (n 953): rank 1 0.680, 2-5 0.187, 6-20 0.064, >20 0.031, not cand 0.038 -> mostly scoring; routing cap 36 rows.
+D2 unseen errors (hand read of 62 of 305; rough shares): pred a MeSH parent/child/sibling of gold or near-synonym
+   (renal failure vs nephropathy, birth defects vs congenital anomalies, ischemia vs myocardial ischemia) ~55%;
+   paraphrase needing knowledge (analgesia, writhing, startle, decrease of hr, contralateral rotation) ~20%;
+   abbreviation ~13% (30/305 flagged `abbrev`, e.g. "ptld post-transplant ..." not cand; unexpanded SFs oab, edds);
+   doubtful annotation ~10% (renal impairment and decreased renal function get opposite golds).
+D4 seen >1: pred inside the string's train label set 40/40; gold inside 33/40; dict picks gold on 11/40 (psychosis
+   7 rows: gold D011605 is the minority 2/9, so a prior hurts there). Seen 1 errors: gold outside the string set 66/68
+   (dict wrong too; unfixable by a prior). Ceiling of a string prior ~ +9..11 rows = +0.002..0.0025 all (= hybrid gap).
+User 2026-10-08: abbreviations later; D3/D4 screen deferred. Next = R (reranker) plan below.
+
+**R. Candidate reranker (plan 2026-10-08; fixes D2's ~55% near-synonym / granularity errors).**
+Target: gold in the tree's top K but not at 1. Dev headroom: acc@1 0.9041 vs R@10 0.9749 (unseen: rank 2-5 0.187,
+6-20 0.064). Not the old per-label rankers (`docs/results.md`: separately trained per-label models had scores that were
+not comparable across labels): one shared model scores every (mention, label) pair, so scores compare across labels.
+- Model: cross-encoder, input `mention [SEP] context window` paired with `label text` = the label's most frequent
+  distinct train mention strings (up to ~5, `; `-joined). Dataset-generic: on BC5CDR+CTD the annotators' strings come
+  first, then CTD MEDIC names (one row each); on MedMentions only train mentions (no UMLS). Head = linear on [CLS]
+  -> one logit. Init SapBERT (user 2026-10-08).
+- Training data: the 4,182 BC5CDR train mentions (697 labels; they carry the annotation conventions and context)
+  only (user 2026-10-08: no CTD rows; they lack context and SapBERT already covers synonymy). Per row: gold + K-1 negatives = the tree's top-K
+  on that row (beta 10, gold removed) topped up with mention-knn neighbours; listwise softmax CE over the K.
+  In-sample tree candidates are fine because the reranker never sees the tree score in training.
+- Scoring: final = log(tree score) + w * reranker logit over the top K (K 10 default; 20 if R@20 helps);
+  w swept in one eval (0, 0.5, 1, 2, inf) on dev, then fixed and saved; test once.
+- Code (Claude): `xmr4el/rerank.py` (`CrossEncoderReranker`: fit, score pairs, save/load; `torch_device()`),
+  `scripts/train_reranker.py -xmodel_path -train_path` -> `outputs/rerankers/<tree>_<ts>/` (records the tree name;
+  load refuses another tree), `evaluate.py -reranker_path [-rerank_k] [-rerank_w]` with a w sweep table per
+  string group. Label index -> name via `initial_labels` only. Synthetic test: tiny BERT config (random init,
+  no download) learns a separable toy task; save/load round trip; index mapping at random rows.
+- Runs (user): R1 train reranker (log `r1_train.log`); R2 dev eval with the w sweep (`r1_dev_eval.log`);
+  pass = unseen and overall acc@1 above 0.6800 / 0.9041 beyond noise, seen 1 not below 0.9783 - 0.002;
+  R3 test once, `docs/results.md` row (system comparison vs PECOS from here on: `docs/pipeline.md` note).
+- Cost, measured on the user's Mac (MPS, SapBERT, seq 96 padded, batch 4 rows x 10): train 38 pairs/s = 18 min
+  per epoch (41.8k pairs); dynamic padding should give ~1.5x -> 2-3 epochs ~25-55 min. Inference 130 pairs/s ->
+  dev 5.5 min at K 10; the eval scores once and sweeps w from the same scores.
+- Decided (user 2026-10-08): SapBERT init, Mac MPS, BC5CDR rows only, K 10.
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
