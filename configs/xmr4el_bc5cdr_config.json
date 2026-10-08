@@ -58,7 +58,7 @@
     "clustering_config": {
         "type": "balancedkmeans",
         "kwargs": {
-            "n_clusters": 16,
+            "n_clusters": 128,
             "iter_limit": 20
         }
     },
