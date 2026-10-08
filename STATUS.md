@@ -13,7 +13,7 @@ Last updated 2026-10-08 (N1-N6, U3, B, B1, C1, C2+C3 done; next: R code (Claude)
 `xmodel.json` next to `xmodel.pkl`. Trees before C2 do not load (`15-38-58` dead). Tree `17-28-02` (`c2_train.log`,
 `c2_dev_eval.log`): cache hit, hierarchy 32.7 s, run 59.1 s; dev acc@1 0.9045 / MRR 0.9335 / unseen 0.6821 /
 hybrid 0.9066 / @cand 0.9907 vs B1 0.9041 / 0.9335 / 0.6800 / 0.9062 / 0.9914 (+2 / -3 rows: PIFA k-means ties):
-within noise, no results.md row. R uses `17-28-02`; R's pass thresholds stay B1's (0.9041 / 0.6800) plus noise.
+within noise, no results.md row. R uses `17-28-02`; R's pass baseline is this tree (w 0 row of the sweep = 0.9045 / unseen 0.6821 / seen 1 0.9783).
 
 **C1 passed (pytest 32 + 4 selfchecks; `c1_dev_eval.log` on `15-38-58` identical to B1, eval 7 s).** As planned, plus: both configs set `max_leaf_size: 200`
 (never read by code) -> key deleted; `Clustering.train` lost its `local_to_global_idx` arg (only fed
