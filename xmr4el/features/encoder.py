@@ -40,6 +40,7 @@ class TextEncoder():
         self.context_dimension_config = context_dimension_config
         self.context_vectorizer_model = None
         self.context_dimension_model = None
+        self.block_widths = None  # "sapbert_char_context": fitted [transformer, char, context] widths
     
     @property
     def vectorizer_model(self) -> Optional[Vectorizer]:
@@ -206,6 +207,8 @@ class TextEncoder():
         blocks = [csr_matrix(self._encode_text_using_transformer(list(mentions), self.transformer_config)),
                   self._tfidf_block(list(mentions), "", fit),
                   self._tfidf_block(list(contexts), "context_", fit)]
+        if fit:  # an SVD can be skipped or give fewer columns than its n_components
+            self.block_widths = [b.shape[1] for b in blocks]
         return normalize(hstack([normalize(b) for b in blocks]))
 
     def encode(self, X_test: Sequence[str]) -> csr_matrix:

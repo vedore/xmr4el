@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+import tempfile
 import time
 import torch
 import numpy as np
@@ -74,9 +75,15 @@ class Transformer:
         else:
             emb = cls._predict(model_name, uniq.tolist(), **kwargs)
             os.makedirs(CACHE_DIR, exist_ok=True)
-            with open(path + ".tmp", "wb") as f:  # write-then-rename: an interrupted save leaves no partial cache file
-                np.save(f, emb)
-            os.replace(path + ".tmp", path)
+            # write-then-rename: an interrupted save leaves no partial cache file; a private tmp per writer
+            fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    np.save(f, emb)
+                os.replace(tmp, path)
+            except BaseException:
+                os.unlink(tmp)
+                raise
         return kwargs, emb[inv.ravel()]
 
     @classmethod

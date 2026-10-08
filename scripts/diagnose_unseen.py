@@ -11,6 +11,7 @@ For one saved tree, on in-vocabulary test rows, ranked as evaluate.py (`-beam_si
   - a TSV of every error with its group, `abbrev` (the mention got an expansion), whether gold / pred are among the
     labels train gives the exact string, and each label's most frequent train mention, for reading
 """
+import os
 import sys
 from argparse import ArgumentParser
 from collections import Counter, defaultdict
@@ -66,6 +67,7 @@ def main():
                     help="knn beta of the ranking behind acc@1, rank buckets and the TSV (default: the tree's)")
     ap.add_argument("-out", default="outputs/logs/unseen_errors.tsv")
     args = ap.parse_args()
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     xm = XModel.load(args.xmodel_path)
     labels = np.array(xm.initial_labels)
@@ -110,14 +112,10 @@ def main():
     Y = xm.Y.tocsr()
     assert (Y.getnnz(axis=1) == 1).all(), "expected exactly one gold label per training row"
     y_train = Y.indices
-    Z = _dense(xm.model.hmodel[0][0].label_embeddings)
+    Z = _dense(xm.Z)
     X = _dense(xm.text_encoder.predict(texts))
     blocks = {"all": slice(None)}
-    if xm.features == "sapbert_char_context":
-        n_c = xm.dimension_config["kwargs"]["n_components"]
-        n_x = xm.context_dimension_config["kwargs"]["n_components"]
-        d_t = X.shape[1] - n_c - n_x
-        blocks.update({"mention": slice(0, d_t), "char": slice(d_t, d_t + n_c), "context": slice(d_t + n_c, None)})
+    blocks.update(xm.feature_blocks())
     nn_pred = {}
     print("flat baselines on the unseen rows (acc@1):")
     for name, sl in blocks.items():

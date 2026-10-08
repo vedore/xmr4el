@@ -43,6 +43,7 @@ def test_text_encoder():
             enc6.save(d)
             X6q = TextEncoder.load(d).predict(texts6).toarray()
     assert X6.shape == (5, 8), X6.shape
+    assert enc6.block_widths == [3, 3, 2], "fitted widths, used by XModel.feature_blocks"
     assert np.allclose((X6[:4, :3] ** 2).sum(axis=1), 1 / 3), "three equal blocks"
     assert np.allclose(X6[0, :6], X6[1, :6]), "mention blocks see only the mention"
     assert not np.allclose(X6[0, 3:6], X6[2, 3:6]), "char block must depend on the mention"

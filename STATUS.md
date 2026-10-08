@@ -6,7 +6,19 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1-N6 done; U3 code uncommitted; U3 D1/D2/D4 read; R reranker planned and decided; next = R code (Claude)).
+Last updated 2026-10-08 (N1-N6, U3, B, B1 done; next = R code (Claude)).
+
+**B. Bug audit fixes (2026-10-08, 14 findings):** knn fused before topk and rows re-sorted
+(`tree.rank_rows`); split CLI rejects PMID overlap and output = input; fitted block widths
+(`TextEncoder.block_widths`, `XModel.feature_blocks`, used by knn and the diagnostics); private cache tmp file;
+TSV keeps "NA"/"NULL"; PubTator doc keeps title/abstract whitespace and the empty-title separator (BC5CDR,
+CTD, MedMentions texts unchanged: checked no trailing whitespace / empty titles); hierarchy save refuses a
+non-empty dir; sparse `fused_scores` unwrapped on load; same-second saves get `_1`; evaluate exits on 0
+in-vocabulary rows; diagnostics use `xm.Z` (routing refuses one-layer trees); diagnose_unseen makes `-out`'s
+dir; window 0 = empty context. Regressions `tests/test_audit_regressions.py`; pytest 28 + selfchecks pass.
+Trees saved before B have no `block_widths` -> no knn eval: retrain.
+**B1 passed:** tree `15-38-58` (`b1_train.log`, `b1_dev_eval.log`): cache hit, run 61.0 s; dev identical to N6
+(0.9041 / MRR 0.9335 / unseen 0.6800 / hybrid 0.9062): no results.md row. `13-16-09` deleted; R uses `15-38-58`. Next session: start R code (plan below).
 
 **N6 passed:** tree `13-16-09` (`outputs/logs/n6_train.log`, `n6_dev_eval.log`, `n6_test_eval.log`): cache hit,
 hierarchy 31.9 s, run 64.1 s; bare eval prints `search beam 10, topk 0, knn beta 10`; dev and test identical to the

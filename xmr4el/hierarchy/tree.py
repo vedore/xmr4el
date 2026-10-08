@@ -28,6 +28,19 @@ def augment_features(X, selected, total, maximum):
     return normalize(sp_hstack([X, extra], format="csr"), norm="l2", axis=1)
 
 
+def rank_rows(qis, cols, vals, shape, topk=0):
+    """CSR from (query, label, score) triples, each row sorted by descending score; topk > 0 keeps each row's
+    topk best."""
+    order = np.lexsort((-vals, qis))
+    qis, cols, vals = qis[order], cols[order], vals[order]
+    if topk > 0:
+        start = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=shape[0]))])
+        keep = np.arange(qis.size) - start[qis] < topk
+        qis, cols, vals = qis[keep], cols[keep], vals[keep]
+    indptr = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=shape[0]))])
+    return csr_matrix((vals, cols.astype(int32), indptr), shape=shape)
+
+
 class HierarchicalMLModel():
     """Loops MLModel"""
     LEAF_CANDIDATES = 100  # labels each visited leaf contributes (the cap on @cand)
@@ -80,6 +93,8 @@ class HierarchicalMLModel():
         
     def save(self, save_dir):
         pmakedirs(save_dir, exist_ok=True)
+        if plistdir(save_dir):  # load reads every layer_* dir: stale ones would join the tree
+            raise FileExistsError(f"{save_dir} is not empty")
         state = self.__dict__.copy()
 
         for layer_idx, model_list in enumerate(self.hmodel):
@@ -418,15 +433,8 @@ class HierarchicalMLModel():
         qis, cols, vals = np.concatenate(qis), np.concatenate(cols), np.concatenate(vals)
 
         # Each label sits in one leaf and a query reaches each leaf by one path: no (query, label) repeats
-        order = np.lexsort((-vals, qis))
-        qis, cols, vals = qis[order], cols[order], vals[order]
-        indptr = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=n_queries))])
-        if topk > 0:
-            keep = np.arange(qis.size) - indptr[qis] < topk
-            qis, cols, vals = qis[keep], cols[keep], vals[keep]
-            indptr = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=n_queries))])
         n_labels = len(self.hmodel[0][0].local_to_global_idx)  # root holds every label
-        scores = csr_matrix((vals, cols.astype(int32), indptr), shape=(n_queries, n_labels))
+        scores = rank_rows(qis, cols, vals, (n_queries, n_labels), topk)
 
         self.logger.info("Ranking completed: rows=%d scores=%d elapsed=%.1fs",
                          n_queries, scores.nnz, time.perf_counter() - time_start_ranking)

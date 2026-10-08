@@ -49,6 +49,9 @@ def main():
     labels = test_set["labels"]
     golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
     n_total, n = len(labels), len(golden_labels)
+    if n == 0:
+        print(f"rows     0/{n_total} gold label in vocabulary: nothing to evaluate")
+        return
 
     search = trained_xtree.resolve_predict_config(beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta)
     score_csr = trained_xtree.predict(input_texts, **search)

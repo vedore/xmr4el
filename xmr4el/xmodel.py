@@ -15,7 +15,7 @@ from typing import Optional
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
-from xmr4el.hierarchy.tree import HierarchicalMLModel
+from xmr4el.hierarchy.tree import HierarchicalMLModel, rank_rows
 from xmr4el.learning.scoring import label_max_cos
 
 
@@ -211,8 +211,14 @@ class XModel:
     def save(self, save_dir):
         start = time.perf_counter()
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        save_dir = os.path.join(save_dir, f"{self.__class__.__name__.lower()}_{timestamp}")
-        os.makedirs(save_dir, exist_ok=False)
+        base = os.path.join(save_dir, f"{self.__class__.__name__.lower()}_{timestamp}")
+        save_dir, n = base, 1
+        while True:  # two saves in one second: suffix _1, _2, ...
+            try:
+                os.makedirs(save_dir, exist_ok=False)
+                break
+            except FileExistsError:
+                save_dir, n = f"{base}_{n}", n + 1
     
         state = self.__dict__.copy()
         
@@ -368,8 +374,8 @@ class XModel:
         Arguments left None take the tree's `predict_config`.
 
         knn_beta > 0 multiplies each candidate's score by exp(knn_beta * knn), knn = max cosine of the query's
-        mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). Only scores change:
-        the candidates stay the tree's."""
+        mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). The candidates
+        stay the tree's; rows are re-sorted by the fused score before topk."""
         cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
         knn_beta = cfg["knn_beta"]
         time_start_encoding = time.perf_counter()
@@ -377,7 +383,8 @@ class XModel:
         self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
                          X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
 
-        scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=cfg["topk"])
+        # knn changes the order: rank all of the tree's candidates, then cut to topk
+        scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=0 if knn_beta else cfg["topk"])
         if knn_beta:
             time_start_knn = time.perf_counter()
             Y = self.Y.tocsr()
@@ -385,7 +392,8 @@ class XModel:
             block = self.mention_block()
             knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1])
             rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
-            scores.data *= np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
+            vals = scores.data * np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
+            scores = rank_rows(rows, scores.indices, vals, scores.shape, cfg["topk"])
             self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
                              time.perf_counter() - time_start_knn)
         return scores
@@ -395,10 +403,15 @@ class XModel:
         return {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
 
     def mention_block(self):
-        """Columns of the mention encoder in X: "sapbert_char_context" is [transformer | char SVD | context SVD];
-        else all."""
+        """Columns of the mention encoder in X (`feature_blocks`); all for "tfidf"."""
+        return self.feature_blocks().get("mention", slice(None))
+
+    def feature_blocks(self):
+        """{"mention", "char", "context"} column slices of X for "sapbert_char_context"
+        ([transformer | char SVD | context SVD], fitted widths); {} for "tfidf"."""
         if self.features != "sapbert_char_context":
-            return slice(None)
-        d = self.X.shape[1] - self.dimension_config["kwargs"]["n_components"] \
-            - self.context_dimension_config["kwargs"]["n_components"]
-        return slice(0, d)
+            return {}
+        widths = self.text_encoder.block_widths
+        assert widths is not None, "tree saved before TextEncoder.block_widths: retrain it"
+        ends = np.cumsum(widths)
+        return {name: slice(e - w, e) for name, w, e in zip(("mention", "char", "context"), widths, ends)}

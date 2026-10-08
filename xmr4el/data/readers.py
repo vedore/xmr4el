@@ -23,6 +23,7 @@ class Preprocessor:
             names=["group_id", "text"],
             delimiter="\t",
             dtype={"group_id": int, "text": str},
+            keep_default_na=False,  # "NA", "NULL", ... are mention strings here
         )
         
         train_df["text"] = train_df["text"].fillna("")
@@ -77,6 +78,8 @@ class Preprocessor:
     def context_window(document: str, span: Tuple[int, int], window: int) -> str:
         """Up to `window` words left and right of the mention at `span`, mention excluded."""
         start, end = span
+        if window <= 0:
+            return ""
         return " ".join(document[:start].split()[-window:] + document[end:].split()[:window])
 
     @staticmethod
@@ -138,14 +141,15 @@ class Preprocessor:
         title, abstract, abbrs = "", "", None
 
         with open(pubtator_filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
+            for raw in f:
+                raw = raw.rstrip("\r\n")  # title/abstract keep their whitespace: offsets count it
+                line = raw.strip()
                 if not line:
                     continue
 
                 # --- Title line ---
                 if "|t|" in line:
-                    parts = line.split("|", 2)
+                    parts = raw.split("|", 2)
                     if len(parts) == 3:
                         title = parts[2]
                         abstract = ""
@@ -153,7 +157,7 @@ class Preprocessor:
 
                 # --- Abstract line ---
                 elif "|a|" in line:
-                    parts = line.split("|", 2)
+                    parts = raw.split("|", 2)
                     if len(parts) == 3:
                         abstract = parts[2]
 
@@ -169,7 +173,7 @@ class Preprocessor:
                         if len(texts) != len(cuis):
                             continue
                         span = (int(parts[1]), int(parts[2]))
-                        doc = " ".join(x for x in [title, abstract] if x)
+                        doc = f"{title} {abstract}" if abstract else title  # PubTator offset layout
                         if abbrev is not None and abbrs is None:
                             abbrs = Preprocessor.abbreviations(doc)
                         context = doc if window is None else Preprocessor.context_window(doc, span, window)

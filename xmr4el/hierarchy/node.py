@@ -14,6 +14,12 @@ from xmr4el.learning.matcher import Matcher
 
 
 
+def _load_npy(path):
+    """np.load; a sparse matrix saved by np.save comes back as a 0-d object array: unwrap it."""
+    a = np.load(path, allow_pickle=True)
+    return a.item() if a.dtype == object and a.shape == () else a
+
+
 class MLModel():
 
     def __init__(self, 
@@ -169,10 +175,10 @@ class MLModel():
         # Load fused scores / label embeddings
         emb_path = pjoin(base_dir, "fused_scores.npy")
         assert pexists(emb_path) or model.is_last_layer, f"Expecting fused_scores at {emb_path}"
-        model.fused_scores = np.load(emb_path, allow_pickle=True) if pexists(emb_path) else None
+        model.fused_scores = _load_npy(emb_path) if pexists(emb_path) else None
 
         label_emb_path = pjoin(base_dir, "label_embeddings.npy")
-        model.label_embeddings = np.load(label_emb_path, allow_pickle=True) if pexists(label_emb_path) else None
+        model.label_embeddings = _load_npy(label_emb_path) if pexists(label_emb_path) else None
 
         return model
         

@@ -83,17 +83,15 @@ def main():
 
     xm = XModel.load(args.xmodel_path)
     root = xm.model.hmodel[0][0]
-    Z = _dense(root.label_embeddings)
+    if root.cluster_model is None:
+        ap.error("one-layer tree: the root is a leaf, no routing to diagnose")
+    Z = _dense(xm.Z)
     cluster_of = np.asarray(root.cluster_model.c_node.argmax(axis=1)).ravel()
     labels = list(xm.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
 
     blocks = {"all": slice(None)}
-    if xm.features == "sapbert_char_context":
-        n_c = xm.dimension_config["kwargs"]["n_components"]
-        n_x = xm.context_dimension_config["kwargs"]["n_components"]
-        d_t = Z.shape[1] - n_c - n_x
-        blocks.update({"mention": slice(0, d_t), "char": slice(d_t, d_t + n_c), "context": slice(d_t + n_c, None)})
+    blocks.update(xm.feature_blocks())
 
     # Train rows: X[i] pairs with Y[i]; Y rows are one-hot over label columns
     Y = xm.Y.tocsr()

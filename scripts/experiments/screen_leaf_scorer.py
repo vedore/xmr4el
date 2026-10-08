@@ -83,9 +83,7 @@ def main():
     xm = XModel.load(args.xmodel_path)
     leaves = [np.asarray(m.local_to_global_idx) for m in xm.model.hmodel[-1]]
     if args.svd_dims:
-        d_char = xm.dimension_config["kwargs"]["n_components"]
-        d_ctx = xm.context_dimension_config["kwargs"]["n_components"]
-        d_mention = X.shape[1] - d_char - d_ctx
+        d_mention, d_char, _ = xm.text_encoder.block_widths
         X, X_dev = (shrink_blocks(M, d_mention, d_char, args.svd_dims) for M in (X, X_dev))
     assert sorted(np.concatenate(leaves).tolist()) == list(range(len(labels))), "leaves must partition the labels"
     print(f"{len(leaves)} leaves, sizes {[len(g) for g in leaves]}; {len(gold)} dev rows; {X.shape[1]} features")

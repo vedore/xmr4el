@@ -17,7 +17,14 @@ def main():
     parser.add_argument("--emit_jsonl", action="store_true", help="Also emit JSONL for each split")
     args = parser.parse_args()
 
-    os.makedirs(args.outdir, exist_ok=True)
+    names = ["corpus_pubtator_%s.txt" % s for s in ("train", "dev", "test")]
+    if args.emit_jsonl:
+        names += ["%s.jsonl" % s for s in ("train", "dev", "test")]
+    for name in names:
+        out = os.path.join(args.outdir, name)
+        if os.path.exists(out) and os.path.samefile(out, args.input):
+            parser.error(f"output {out} is the input file")
+
     pmid_blocks = parse_pubtator(args.input)
     pmids = sorted(pmid_blocks.keys())
 
@@ -28,6 +35,12 @@ def main():
         splits["train"] = load_pmids(args.train_pmids)
         splits["dev"] = load_pmids(args.dev_pmids)
         splits["test"] = load_pmids(args.test_pmids)
+        seen = {}
+        for name, ids in splits.items():
+            for pmid in ids:
+                if pmid in seen:
+                    parser.error(f"PMID {pmid} listed in {seen[pmid]} and in {name}")
+                seen[pmid] = name
     else:
         # Deterministic split
         for pmid in pmids:
@@ -35,6 +48,7 @@ def main():
             splits[s].append(pmid)
 
     # Write PubTator files
+    os.makedirs(args.outdir, exist_ok=True)
     write_pubtator_file(splits["train"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_train.txt"))
     write_pubtator_file(splits["dev"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_dev.txt"))
     write_pubtator_file(splits["test"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_test.txt"))
