@@ -38,6 +38,9 @@ def main():
     parser.add_argument("-path_score", action="store_true",
                         help="multiply each leaf score by the routing path probability (XR-Linear); needed to "
                              "compare leaves in a beam when alpha < 1 (leaf matcher probs are only comparable within a leaf)")
+    parser.add_argument("-knn_beta", type=float, default=0.0,
+                        help="multiply each candidate's score by exp(beta * max cosine of the mention block to the "
+                             "label's training rows); 0 = off (docs/results.md 2026-10-08 knn fusion)")
     parser.add_argument("-verbose", action="store_true",
                         help="show DEBUG diagnostics and progress bars; warnings are always visible")
     args = parser.parse_args()
@@ -62,7 +65,8 @@ def main():
                                              alpha=args.alpha,
                                              topk_mode="per_leaf",
                                              path_score=args.path_score,
-                                             scorer=args.scorer)
+                                             scorer=args.scorer,
+                                             knn_beta=args.knn_beta)
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
@@ -88,7 +92,7 @@ def main():
     print(f"rows     {n}/{n_total} gold label in vocabulary ({n / max(n_total, 1):.1%}); "
           f"{len(set(golden_labels))} distinct gold labels")
     print(f"search   beam {args.beam_size}, scorer {args.scorer}, alpha {args.alpha}, "
-          f"path score {'on' if args.path_score else 'off'}, "
+          f"path score {'on' if args.path_score else 'off'}, knn beta {args.knn_beta:g}, "
           f"{nnz:.0f} candidates/query")
     if args.scorer == "cosine" and 0 < args.alpha < 1:
         print(f"WARNING  alpha {args.alpha} mixes the matcher probability into the cosine score; "

@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
 
-**Runs:** none in flight. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). Next: pick from F6 below. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next: U3 (below). Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -228,6 +228,47 @@ F6 (candidates, user picks): run 61.6 s = encoding 25.1 s (TF-IDF/SVD on cache h
    PECOS's 34.6 s compares to our hierarchy 31.1 s: training speed target met. Remaining options: encoding (SVD
    fit, the largest stage now), leaf residual (~0.06 s/leaf: temp save/load), or back to accuracy work.
    Test section rerun on `12-21-30` done (acc@1 0.873, hybrid 0.909 vs PECOS 0.862 / 0.904; `docs/results.md`).
+U. Unseen strings (2026-10-08, user priority). Dev only (test stays for final numbers).
+U0. `scripts/diagnose_unseen.py` (new, selfcheck ok): on dev unseen-string rows, tree acc@1 + gold-rank buckets
+   (not in candidates = routing loss), flat 1-NN over the tree's train rows and nearest-z per feature block
+   (all / mention=SapBERT / char / context), and `outputs/logs/unseen_errors.tsv` (tree errors with each label's most
+   frequent train mention and the mention-block 1-NN prediction). User:
+   `python scripts/diagnose_unseen.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_12-21-30 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator 2>&1 | tee outputs/logs/unseen_diag.log`
+   Read: tree acc@1 must equal the eval's unseen 0.5950 (same rows; else the script is wrong). Then: routing loss
+   large -> beam/root; gold in cand but ranked low -> leaf scoring; SapBERT 1-NN >> tree -> add a mention-kNN
+   scorer for unseen strings (SapBERT's own method); all baselines ~tree -> read the TSV (label granularity, CTD noise).
+U0 result (`outputs/logs/unseen_diag.log`, `unseen_errors.tsv`; tree acc@1 0.5950 = eval, script consistent):
+   gold rank 1 0.595, 2-5 0.207, 6-20 0.072, >20 0.088, not cand 0.038 -> routing is not the problem, leaf order is.
+   Flat 1-NN over train rows (acc@1 on the 953 rows): all 0.600, mention (SapBERT) 0.638, char 0.517, context 0.025;
+   nearest z: 0.594 / 0.619 / 0.408 / 0.020. Tree wrong + mention 1-NN right 0.143, the reverse 0.100 (oracle 0.738).
+   Errors: often a more specific CTD label ("obese" -> obesity, morbid; hypomagnesemia -> hypomagnesemia 4, renal),
+   abbreviation-appended keys ("ob obese", "dm diabetes mellitus"), some annotation-level choices. Label-prior idea
+   rejected: gold more frequent in BC5CDR train than pred in 41% of errors (pred 35%), 42% of error golds CTD-only.
+U1. `diagnose_unseen.py` now also screens fusion on all dev rows (no training): each tree candidate scored
+   log(tree score) + beta * knn, knn = max SapBERT-block cosine to the label's train rows; beta 0/5/10/20/40/inf,
+   printed as the string breakdown + hybrid. Selfcheck ok. User: same command as U0 (log `unseen_diag2.log`):
+   `python scripts/diagnose_unseen.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_12-21-30 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator 2>&1 | tee outputs/logs/unseen_diag2.log`
+   Check: beta 0 row ~ eval (all 0.8551, unseen 0.5950; argmax tie order may move it by <0.001). Pick beta on dev by
+   hybrid; if unseen gains >= ~0.03 without losing hybrid, implement it in `Tree.predict`/`evaluate.py` as a
+   `-knn_beta` option (train rows' mention block kept in the tree), then confirm once on test.
+U1 result (`unseen_diag2.log`, dev): beta 0 = eval exactly (0.8551 / unseen 0.5950 / hybrid 0.8873). beta 5: all
+   0.9015, unseen 0.6758, hybrid 0.9052; beta 10: all 0.9041, seen 1 0.9783, seen >1 0.8113, unseen 0.6800, hybrid
+   0.9062; 20: 0.9003 / 0.6621; 40: 0.8976 / 0.6506; knn only within candidates: 0.8846 (seen >1 0.590). Fusion lifts
+   every group; the tree alone (0.904) now ~ the old hybrid. Chosen beta 10 (5 within 0.003: flat optimum).
+U2. Done (uncommitted): `XModel.predict(knn_beta=0.0)`: candidates' scores x exp(beta * knn), knn =
+   `scoring.label_max_cos` (max cosine of the query's `mention_block()` to each label's rows of `self.X`, labels from
+   `self.Y`); candidates and routes unchanged. `evaluate.py -knn_beta`; `diagnose_unseen.py` reuses `label_max_cos`.
+   Test: `test_pipeline_persistence` checks the exact formula (its 6-d synthetic features tie cosines, so no argmax
+   check). pytest 25 pass. No retrain: X and Y are in `xmodel.pkl`.
+   User: `python scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_12-21-30 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score -knn_beta 10 2>&1 | tee outputs/logs/knn10_dev_eval.log && python scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_12-21-30 -test_path datasets/BC5CDR/disease/test.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score -knn_beta 10 2>&1 | tee outputs/logs/knn10_test_eval.log`
+   Pass = dev = U1 beta 10 row (0.9041 / unseen 0.6800 / hybrid 0.9062; tie order may move <0.001). Test is
+   reported as is (beta chosen on dev only). Then: results.md rows (dev + test), commit.
+U2 passed: dev = U1 beta 10 row exactly (0.9041, MRR 0.9335, unseen 0.6800, hybrid 0.9062); test (run once) 0.9163,
+   MRR 0.9402, seen 1 0.9845, seen >1 0.7299, unseen 0.7122, hybrid 0.9213 (was 0.873 / 0.653 / 0.909). Rows in
+   `docs/results.md`. Committed. Literature test 93.2 / 93.5 (protocol not matched).
+U3 (candidates): seen >1-label strings are now the tree's weakest vs the dictionary (test 0.730 vs 0.856); unseen
+   0.712 still the largest error mass (938 rows). Read the new unseen errors (rerun diagnose_unseen with the fusion
+   as tree order is not wired; or add -knn_beta to it) before choosing; knn over CTD-only names vs all rows untested.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned

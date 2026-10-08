@@ -17,6 +17,7 @@ from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
 from xmr4el.hierarchy.tree import HierarchicalMLModel
+from xmr4el.learning.scoring import label_max_cos
 
 
 
@@ -392,8 +393,13 @@ class XModel:
                 topk_mode: str = "per_leaf", 
                 n_jobs: int =-1,
                 path_score: bool = False,
-                scorer: str | None = None):
+                scorer: str | None = None,
+                knn_beta: float = 0.0):
             """Predict label scores for given text inputs.
+
+            knn_beta > 0 multiplies each returned candidate's score by exp(knn_beta * knn), knn = max cosine of the
+            query's mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). Only scores
+            change: the candidates and the routes' paths stay the tree's.
 
             Parameters
             ----------
@@ -426,7 +432,7 @@ class XModel:
                              X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
             
             # topk_mode "global" is handled by the hierarchy too; its final_path follows its scores
-            return self.model.predict(X_query,
+            routes, scores = self.model.predict(X_query,
                                       topk=topk,
                                       beam_size=beam_size,
                                       fusion=fusion,
@@ -435,3 +441,23 @@ class XModel:
                                       topk_mode=topk_mode,
                                       path_score=path_score,
                                       scorer=scorer)
+            if knn_beta:
+                time_start_knn = time.perf_counter()
+                Y = self.Y.tocsr()
+                assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
+                block = self.mention_block()
+                knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1])
+                scores = csr_matrix(scores, copy=True)
+                rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
+                scores.data *= np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
+                self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
+                                 time.perf_counter() - time_start_knn)
+            return routes, scores
+
+    def mention_block(self):
+        """Columns of the mention encoder in X: emb_flag 6 is [transformer | char SVD | context SVD]; else all."""
+        if self.emb_flag != 6:
+            return slice(None)
+        d = self.X.shape[1] - self.dimension_config["kwargs"]["n_components"] \
+            - self.context_dimension_config["kwargs"]["n_components"]
+        return slice(0, d)

@@ -16,6 +16,7 @@ Moved out of `STATUS.md` (2026-10-06).
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
 | Leaf scoring | `evaluate.py` defaults to `-scorer cosine`; `XModel.predict(scorer=None)` uses trained rankers when present, else cosine. `-scorer ranker` uses trained rankers, falling back to cosine when missing/raising and logging failures | `MLModel.predict`, `xmr4el/learning/scoring.py` |
 | Path score | `-path_score`: leaf score x exp(path_logscore); current trees eval with `-beam_size 2 -alpha 0 -path_score` | `HierarchicalMLModel.predict`, `XModel.predict` |
+| Knn fusion | `-knn_beta b`: each candidate x exp(b * max cosine of the query's mention block to the label's training rows); BC5CDR uses 10, off by default | `XModel.predict`, `scoring.label_max_cos` |
 
 Implemented does not mean validated on dev. Saved trees retain their trained classifiers and leaf
 structure; loading them with current code does not apply training changes retroactively.
@@ -26,6 +27,7 @@ Synthetic checks (all pass, 2026-10-07):
 .venv/bin/python -m pytest tests/
 .venv/bin/python scripts/evaluate.py -selfcheck
 .venv/bin/python scripts/diagnose_routing.py -selfcheck
+.venv/bin/python scripts/diagnose_unseen.py -selfcheck
 .venv/bin/python scripts/experiments/screen_features.py -selfcheck
 ```
 

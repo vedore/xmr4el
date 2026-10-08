@@ -568,16 +568,38 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
   34.9 -> 11.3 s, hierarchy 54.6 -> 31.1 s, run 61.6 s*. Eval (`-path_score`, beam 10) 42 -> 9 s after batching
   the leaf cosine (`g1a_eval.log`) and the routing (`g1b_eval.log`), output identical.
 
+## 2026-10-08: BC5CDR-disease dev, knn fusion (`-knn_beta`)
+
+Tree `12-21-30`, dev, `-beam_size 10 -topk 0 -alpha 0 -path_score`. Each candidate's tree score x exp(beta * knn),
+knn = max cosine of the query's SapBERT block to the label's training rows (train + CTD), no retraining. Screen:
+`scripts/diagnose_unseen.py` (`outputs/logs/unseen_diag2.log`); beta 10 run: `outputs/logs/knn10_dev_eval.log`.
+
+| beta | acc@1 | seen, 1 (n=3140) | seen, >1 (n=212) | unseen (n=953) | hybrid |
+|---|---|---|---|---|---|
+| 0 (tree) | 0.8551 | 0.9404 | 0.7594 | 0.5950 | 0.8873 |
+| 5 | 0.9015 | 0.9761 | 0.8113 | 0.6758 | 0.9052 |
+| **10** | **0.9041** | 0.9783 | **0.8113** | **0.6800** | **0.9062** |
+| 20 | 0.9003 | **0.9787** | 0.8113 | 0.6621 | 0.9022 |
+| 40 | 0.8976 | 0.9783 | 0.8113 | 0.6506 | 0.8997 |
+| knn only (in candidates) | 0.8846 | 0.9783 | 0.5896 | 0.6411 | 0.8976 |
+
+- Beta 10: MRR 0.8972 -> 0.9335, R@5 0.9473 -> 0.9668, R@20 0.9672 -> 0.9833 (R@cand unchanged 0.9914).
+- Why: on unseen strings the tree had gold at rank 2-5 for 0.207 of rows (routing loss 0.038); SapBERT 1-NN over
+  train rows alone is 0.638 vs tree 0.595, and they err on different rows (oracle 0.738). The tree prefers more
+  specific CTD labels ("obese" -> obesity, morbid); the nearest synonym corrects many of them.
+- Unseen-row flat 1-NN by feature block: all 0.600, SapBERT 0.638, char 0.517, context 0.025.
+
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 
-Trees `13-47-38` (depth 2, 16 leaves) and `12-21-30` (depth 2, 128 leaves, current config), both train + CTD, `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
+Trees `13-47-38` (depth 2, 16 leaves) and `12-21-30` (depth 2, 128 leaves, current config; also with `-knn_beta 10`), both train + CTD, `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
 labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in the dev section on export
 `outputs/pecos/bc5cdr_dict_test` (train 34.4 s). Dictionary acc@1 0.770 (seen 1-label 0.985).
 
 | system | beam | acc@1 | MRR | R@5 | R@10 | R@20 | seen, 1 (n=3287) | seen, >1 (n=174) | unseen (n=938) | hybrid | cov x acc | cov x hybrid |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| XMR4EL, 16 leaves (`13-47-38`) | 10 | 0.860 | 0.898 | 0.945 | **0.963** | **0.974** | 0.930 | 0.730 | 0.641 | 0.906 | 0.858 | 0.904 |
-| XMR4EL, 128 leaves (`12-21-30`) | 10 | **0.873** | **0.909** | **0.949** | 0.961 | 0.965 | **0.947** | 0.672 | **0.653** | **0.909** | **0.871** | **0.906** |
+| XMR4EL, 16 leaves (`13-47-38`) | 10 | 0.860 | 0.898 | 0.945 | 0.963 | 0.974 | 0.930 | 0.730 | 0.641 | 0.906 | 0.858 | 0.904 |
+| XMR4EL, 128 leaves (`12-21-30`) | 10 | 0.873 | 0.909 | 0.949 | 0.961 | 0.965 | 0.947 | 0.672 | 0.653 | 0.909 | 0.871 | 0.906 |
+| XMR4EL, 128 leaves + knn beta 10 (`12-21-30`) | 10 | **0.916** | **0.940** | **0.969** | **0.977** | **0.980** | **0.985** | 0.730 | **0.712** | **0.921** | **0.914** | **0.919** |
 | PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | **0.747** | 0.618 | 0.901 | 0.850 | 0.899 |
 | PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | **0.747** | 0.634 | 0.904 | 0.860 | 0.902 |
 
@@ -587,6 +609,8 @@ XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/
 - At 16 leaves XMR4EL ties PECOS on test (0.860 vs 0.862 at beam 10; hybrid 0.906 vs 0.904), as on dev.
 - At 128 leaves it leads PECOS by 1.1 pt acc@1 (0.873 vs 0.862), hybrid 0.909 vs 0.904. Versus 16 leaves: seen
   1-label +0.017 and unseen +0.012, but seen >1-label -0.058 (n=174) and R@20 -0.009 (cross-leaf scoring, as on dev).
+- `-knn_beta 10` (beta chosen on dev, test run once, `outputs/logs/knn10_test_eval.log`): acc@1 0.873 -> 0.916, unseen
+  0.653 -> 0.712, hybrid 0.909 -> 0.921; the tree alone (0.916) is now above the old hybrid. Dev section 2026-10-08 below.
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 

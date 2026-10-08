@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from xmr4el.learning.scoring import label_max_cos
 from xmr4el.xmodel import XModel
 
 
@@ -28,6 +29,10 @@ def test_pipeline_persistence(caplog, capsys):
     assert first.training_set == second.training_set and first.training_set != texts
     queries = [group[0] for group in texts]
     expected = first.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray()
+    # knn re-scoring keeps the tree's candidates and multiplies each by exp(beta * max cosine to the label's rows)
+    rescored = first.predict(queries, topk=0, beam_size=2, path_score=True, knn_beta=2)[1].toarray()
+    knn = label_max_cos(first.text_encoder.predict(queries), first.X, first.Y.tocsr().indices, len(labels))
+    assert ((rescored > 0) == (expected > 0)).all() and np.allclose(rescored, expected * np.exp(2 * knn))
     with TemporaryDirectory() as tmp:
         first.save(tmp)
         saved = next(Path(tmp).iterdir())

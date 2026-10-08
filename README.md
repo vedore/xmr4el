@@ -227,6 +227,7 @@ These checks use synthetic inputs and do not run corpus training:
 .venv/bin/python -m pytest tests/
 .venv/bin/python scripts/evaluate.py -selfcheck
 .venv/bin/python scripts/diagnose_routing.py -selfcheck
+.venv/bin/python scripts/diagnose_unseen.py -selfcheck
 .venv/bin/python scripts/experiments/screen_features.py -selfcheck
 ```
 
