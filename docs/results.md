@@ -570,19 +570,23 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
 
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 
-Tree `13-47-38` (depth 2, train + CTD), `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
+Trees `13-47-38` (depth 2, 16 leaves) and `12-21-30` (depth 2, 128 leaves, current config), both train + CTD, `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
 labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in the dev section on export
 `outputs/pecos/bc5cdr_dict_test` (train 34.4 s). Dictionary acc@1 0.770 (seen 1-label 0.985).
 
 | system | beam | acc@1 | MRR | R@5 | R@10 | R@20 | seen, 1 (n=3287) | seen, >1 (n=174) | unseen (n=938) | hybrid | cov x acc | cov x hybrid |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| XMR4EL | 10 | 0.860 | **0.898** | **0.945** | **0.963** | **0.974** | 0.930 | 0.730 | **0.641** | **0.906** | 0.858 | **0.904** |
+| XMR4EL, 16 leaves (`13-47-38`) | 10 | 0.860 | 0.898 | 0.945 | **0.963** | **0.974** | 0.930 | 0.730 | 0.641 | 0.906 | 0.858 | 0.904 |
+| XMR4EL, 128 leaves (`12-21-30`) | 10 | **0.873** | **0.909** | **0.949** | 0.961 | 0.965 | **0.947** | 0.672 | **0.653** | **0.909** | **0.871** | **0.906** |
 | PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | **0.747** | 0.618 | 0.901 | 0.850 | 0.899 |
-| PECOS, our features | 10 | **0.862** | 0.897 | 0.939 | 0.948 | 0.954 | **0.933** | **0.747** | 0.634 | 0.904 | **0.860** | 0.902 |
+| PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | **0.747** | 0.634 | 0.904 | 0.860 | 0.902 |
 
-XMR4EL recall@cand 0.991 (1000 cand/query). Eval 54 s; PECOS predict 2.3 s.
+XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/query). Eval 54 s at 16 leaves
+(before eval batching), 15 s at 128 (`outputs/logs/test_12-21-30_eval.log`); PECOS predict 2.3 s.
 
-- XMR4EL ties PECOS on test (0.860 vs 0.862 at beam 10; hybrid 0.906 vs 0.904), as on dev.
+- At 16 leaves XMR4EL ties PECOS on test (0.860 vs 0.862 at beam 10; hybrid 0.906 vs 0.904), as on dev.
+- At 128 leaves it leads PECOS by 1.1 pt acc@1 (0.873 vs 0.862), hybrid 0.909 vs 0.904. Versus 16 leaves: seen
+  1-label +0.017 and unseen +0.012, but seen >1-label -0.058 (n=174) and R@20 -0.009 (cross-leaf scoring, as on dev).
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 

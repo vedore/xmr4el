@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
 
-**Runs:** none in flight. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). Next: see F6 below. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). Next: pick from F6 below. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -227,7 +227,7 @@ F5 passed: tree `12-21-30` (`nogc_bc5cdr_ctd*.log`) dev metrics = `11-45-47` exa
 F6 (candidates, user picks): run 61.6 s = encoding 25.1 s (TF-IDF/SVD on cache hit) + root 19.5 s + leaves 11.3 s.
    PECOS's 34.6 s compares to our hierarchy 31.1 s: training speed target met. Remaining options: encoding (SVD
    fit, the largest stage now), leaf residual (~0.06 s/leaf: temp save/load), or back to accuracy work.
-   Also pending: BC5CDR test-section rerun on the current tree.
+   Test section rerun on `12-21-30` done (acc@1 0.873, hybrid 0.909 vs PECOS 0.862 / 0.904; `docs/results.md`).
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned
