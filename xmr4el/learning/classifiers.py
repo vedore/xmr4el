@@ -11,6 +11,7 @@ import torch
 from scipy.special import expit
 from threadpoolctl import threadpool_limits
 from typing import Any, Dict, List, Tuple, Optional
+from xmr4el import torch_device
 
 
 classifier_dict = {}
@@ -289,8 +290,15 @@ class SklearnSGDClassifier(ClassifierModel):
 # ---------------------------
 # Joint one-vs-rest L2 logistic regression
 # ---------------------------
+# Fits with n * L >= this run on `torch_device()`. MPS per L-BFGS iteration: 89929x128 0.20 -> 0.12 s, 20000x128
+# break-even, 2064x92 leaves 2x slower (transfer and launch overhead).
+# ponytail: threshold measured on MPS only; re-measure on a CUDA box, where the break-even is likely lower.
+GPU_MIN_ENTRIES = 5_000_000
+
+
 class JointOvRLogistic:
-    """Every one-vs-rest L2 logistic problem of a node solved at once by torch L-BFGS (CPU, float32).
+    """Every one-vs-rest L2 logistic problem of a node solved at once by torch L-BFGS (float32; CPU, or
+    `torch_device()` if n * L >= GPU_MIN_ENTRIES).
 
     Per label the objective is liblinear's (`LogisticRegression(solver="liblinear")`): 0.5 ||w||^2 + C sum_i c_i
     log(1 + exp(-y_i w.x_i)), the bias a regularised constant-1 feature, c_i from `class_weight` "balanced" or 1.
@@ -336,8 +344,9 @@ class JointOvRLogistic:
         # 6000x2304x734 leaf fit; torch runs both multithreaded (4x faster, 0.999 top-1 agreement). Stops when the
         # max |gradient| <= tol, scipy's gtol rule. The objective is divided by n (sklearn's lbfgs scaling, same
         # minimizer): unscaled, the gradient never reached tol and every fit ran to the float32 loss stall.
-        Xt, St, cwt = (torch.from_numpy(a) for a in (Xb, S, cw))
-        W = torch.zeros(Xb.shape[1], L)
+        dev = torch_device() if n * L >= GPU_MIN_ENTRIES else torch.device("cpu")
+        Xt, St, cwt = (torch.from_numpy(a).to(dev) for a in (Xb, S, cw))
+        W = torch.zeros(Xb.shape[1], L, device=dev)
         opt = torch.optim.LBFGS([W], lr=1, max_iter=self.max_iter, tolerance_grad=self.tol, tolerance_change=1e-9,
                                 history_size=10, line_search_fn="strong_wolfe")
 
@@ -348,7 +357,7 @@ class JointOvRLogistic:
 
         with torch.no_grad():
             opt.step(closure)
-        self.W_, self.n_iter_ = W.numpy(), opt.state[W]["n_iter"]
+        self.W_, self.n_iter_ = W.cpu().numpy(), opt.state[W]["n_iter"]
         return self
 
     def decision_function(self, X):

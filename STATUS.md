@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (training speed F: tol fix + 1e-3 (F1b), 128 leaves (F2), faster balanced assignment (F2c) all passed; tree `11-31-05` acc@1 0.856, hierarchy 65.8 s; next = user commits, then F3).
+Last updated 2026-10-08 (training speed F: tol fix + 1e-3 (F1b), 128 leaves (F2), faster balanced assignment (F2c) all passed; tree `11-31-05` acc@1 0.856, hierarchy 65.8 s; committed `caa6cd5`, `1377488`, `250a31d`; F3 passed (`11-45-47`, hierarchy 54.6 s); F3 committed; next = F5 leaf overhead).
 
-**Runs:** none in flight. Next: user commits F1b / F2 / F2c separately (list under F2c), then F3. Saved trees: `17-28-48`, `10-50-53` (redundant), `11-04-56`, `11-09-56`.
+**Runs:** none in flight. F3 committed ("Joint matcher on cuda/mps for large fits"). Next: F5 (below). Saved trees: `17-28-48`, `11-45-47` (current); `11-31-05`, `10-50-53`, `11-04-56`, `11-09-56` superseded.
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -162,7 +162,16 @@ F2c passed: tree `11-31-05` (`k128c_bc5cdr_ctd*.log`) = `11-09-56` metrics exact
    3. `clusterers.py` + `test_clusterers.py`: vectorized balanced assignment.
    STATUS.md / results.md go with the last commit. Trees `10-50-53`, `11-04-56`, `11-09-56` are superseded (user may delete).
    Next: F3 (root matcher ~27 s on MPS, synthetic 2.2x) and the BC5CDR test-section rerun on `11-31-05`.
-F3. Code: root matcher on MPS (synthetic root 2.2x, leaves no gain); worth it only if the root dominates after F2.
+F3. Done (uncommitted): `xmr4el.torch_device()` (cuda -> mps -> cpu; shared with `Transformer`). `JointOvRLogistic.fit`
+   runs on it when n * L >= `GPU_MIN_ENTRIES` (5M), else CPU as before; Linux CPU-only = unchanged path.
+   Synthetic per L-BFGS iteration on MPS: 89929x128 0.20 -> 0.12 s; 20000x128 break-even; 2064x92 leaves 2x slower,
+   so at k=128 only the root qualifies. CUDA break-even not measured (ponytail note at the constant). pytest 25 pass.
+   User: bc5cdr config train + eval, logs `mps_bc5cdr_ctd*.log`. Not bit-identical (MPS float32 reductions).
+   Pass = acc@1 within ~0.002 of 0.8560, root node well below 32.0 s (matcher ~27 s -> ~16 s expected).
+F3 passed: tree `11-45-47` (`mps_bc5cdr_ctd*.log`) acc@1 0.8551, MRR 0.8972, hybrid 0.8873; root node 32.0 -> 20.1 s
+   (matcher ~27 -> ~15 s, 124 iterations), leaves 34.9 s, hierarchy 54.6 s, run 85.5 s (cache hit).
+F5. Leaves are now 35 of 55 s (128 x ~0.27 s) while a synthetic leaf-sized fit is 0.04-0.16 s: profile one leaf's
+   `MLModel.train` path for non-solver overhead before touching the solver.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned

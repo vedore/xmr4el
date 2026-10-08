@@ -10,6 +10,7 @@ from numpy import array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
 from sentence_transformers import SentenceTransformer
+from xmr4el import torch_device
 from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
 
 
@@ -93,7 +94,7 @@ class Transformer:
         Optimized function for efficient memory usage during CPU or GPU-based embedding extraction.
         """
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+        device = torch_device()
         
         start_time = time.perf_counter()
         logger.info("Transformer started: model=%s device=%s rows=%d batch_size=%d",

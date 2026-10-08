@@ -562,6 +562,8 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
   Log `outputs/logs/k128_bc5cdr_ctd.log`. Beam 20: R@cand 0.9940 (1835 cand), all ranked metrics identical, so
   the lower R@20-R@100 is cross-leaf scoring, not routing. Rerun `11-31-05` with the vectorized balanced assignment:
   identical metrics, root clustering 17.6 -> 5.0 s, hierarchy 65.8 s, run 96.3 s* (`k128c_bc5cdr_ctd.log`).
+  Root matcher on MPS (`11-45-47`, `mps_bc5cdr_ctd.log`): acc@1 0.8551, MRR 0.8972, hybrid 0.8873 (float32 order
+  noise); root node 32.0 -> 20.1 s, hierarchy 54.6 s, run 85.5 s*.
 
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 

@@ -1,4 +1,5 @@
 import logging
+import torch
 
 from typing import Optional
 
@@ -19,3 +20,8 @@ def set_verbosity(level: int):
     mapping = [logging.WARNING, logging.INFO, logging.DEBUG]
     lvl = mapping[min(max(level, 0), len(mapping) - 1)]
     _pkg_logger.setLevel(lvl)
+
+
+def torch_device() -> torch.device:
+    """cuda, then mps (Apple GPU), then cpu."""
+    return torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
