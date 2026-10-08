@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (training speed F: tol fix + 1e-3 (F1b), 128 leaves (F2), faster balanced assignment (F2c) all passed; tree `11-31-05` acc@1 0.856, hierarchy 65.8 s; committed `caa6cd5`, `1377488`, `250a31d`; F3 passed (`11-45-47`, hierarchy 54.6 s); F3 committed; next = F5 leaf overhead).
+Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed, eval 42 -> 15 s; next = G1b routing batch, F5).
 
-**Runs:** none in flight. F3 committed ("Joint matcher on cuda/mps for large fits"). Next: F5 (below). Saved trees: `17-28-48`, `11-45-47` (current); `11-31-05`, `10-50-53`, `11-04-56`, `11-09-56` superseded.
+**Runs:** none in flight. Next: G1b (routing batch, 6.3 s of 15 s), then F5. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -172,6 +172,36 @@ F3 passed: tree `11-45-47` (`mps_bc5cdr_ctd*.log`) acc@1 0.8551, MRR 0.8972, hyb
    (matcher ~27 -> ~15 s, 124 iterations), leaves 34.9 s, hierarchy 54.6 s, run 85.5 s (cache hit).
 F5. Leaves are now 35 of 55 s (128 x ~0.27 s) while a synthetic leaf-sized fit is 0.04-0.16 s: profile one leaf's
    `MLModel.train` path for non-solver overhead before touching the solver.
+G. Eval speed (plan 2026-10-08; eval of `11-45-47` = 42 s wall, stages unmeasured: eval logs WARNING only).
+   Suspects from code (`scripts/evaluate.py`, `XModel.predict`, `Tree.predict`):
+   - Routing: one `matcher_model.predict_proba(x_row)` per query per internal node (`tree.py` ~521): 4305 single-row
+     calls at the root, each re-densifying one row (`JointOvRLogistic._dense`) plus Python trail dicts.
+   - Load: `XModel.load` of 129 nodes + the SapBERT model, even when the eval encodings are a cache hit.
+   - Test encoding: SapBERT cache hit? + TF-IDF/SVD transform.
+   - `-train_path` breakdown: re-parses the 89,929-row train PubTator (with abbreviation expansion).
+   - `evaluate.py`: three Python loops of `score_csr.getrow(qi)` over 4305 rows (gold rank, @cand, tree top-1).
+G0. User (first step next session, code frozen): profile one eval with stage logs, nothing else changes:
+   `python -m cProfile -o outputs/logs/eval_profile.prof scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_11-45-47 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score -verbose 2>&1 | tee outputs/logs/eval_profile.log`
+   Claude then reads the .prof (pstats, cumtime) + the INFO/DEBUG stage lines and ranks the suspects by seconds.
+G1. Fix the largest stages, one at a time, cheapest first. Likely: batch routing per layer (group the beam by parent
+   node, one `predict_proba` GEMM per node, same top-k/trail logic); lazy SapBERT load on cache hit; vectorized
+   CSR loops in `evaluate.py` (indptr slices); cache or skip the train re-parse. Pass for each = the eval output
+   identical to `11-45-47`'s (acc@1 0.8551, MRR 0.8972, hybrid 0.8873; batched GEMM may move float32 ties: then
+   within ~0.001) and lower wall time. Synthetic check first where possible (README selfchecks).
+G0 result (`outputs/logs/eval_profile.{log,prof}`, `11-45-47`): 52 s = load + parse ~2 s, encoding 0.3 s (cache hit),
+   routing 14.3 s (`augment_features` 13.7 s: 43,050 single-row sparse hstack + sklearn `normalize`), ranking 35.5 s
+   (`predict_labels` 32.5 s, of which `_cos_fallback` 25.9 s: per label, re-slices the leaf rows and recomputes their
+   norms, 11,744 calls; row norms 16.3 s, matvec 9.5 s, slicing 3.2 s). Load, train re-parse, evaluate.py loops: minor.
+G1a. Done (uncommitted): `scoring.py` `_cos_fallback(q_idx, li)` computes `X_query @ Z.T`, row norms and per-vector
+   Z norms once per leaf call and gathers. Bit-identical to the per-label code on random float32/float64 CSR
+   (per-vector `norm(z)`; `norm(Z, axis=1)` differs by 1 ulp). pytest 25 pass.
+   User: `python scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_11-45-47 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score -verbose 2>&1 | tee outputs/logs/g1a_eval.log`
+   Pass = output identical to `eval_profile.log` (acc@1 0.8551, MRR 0.8972, hybrid 0.8873, every recall), Ranking
+   35.5 -> ~7 s. Then commit G1a, then G1b: batch routing per layer (group rows by parent node, one predict_proba +
+   one `augment_features` per node; same top-k/trail logic).
+G1a passed (`outputs/logs/g1a_eval.log`): output identical to `eval_profile.log`; ranking 35.5 -> 6.6 s, wall 15 s
+   (was 42 s unprofiled). Without cProfile routing is 6.3 s (14.3 s was profiler overhead on many small calls),
+   so G1b gains ~5 s at most. Committed.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned

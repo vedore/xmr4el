@@ -106,12 +106,18 @@ def predict_labels(node, X_query, beam_size: int = 5, topk: int | None = None, r
     # Accumulate all (qi, gid, score) triples; we’ll pack at the end
     triples_qi, triples_gid, triples_sc = [], [], []
 
-    def _cos_fallback(rows, zv):
+    cos_parts = []
+
+    def _cos_fallback(q_idx, li):
         """Score for labels with no ranker (38.4% of them: n_pos < 2 in ranker.py).
         Returning ones() collapsed them onto the shared cluster score; cosine at least
-        orders them. Mapped to [0, 1] to match the probability range _fuse expects."""
-        den = RankerTrainer._row_norms(rows) * np.linalg.norm(zv) + 1e-12
-        return ((rows @ zv) / den + 1.0) / 2.0
+        orders them. Mapped to [0, 1] to match the probability range _fuse expects.
+        One GEMM per call instead of per label; per-vector Z norms keep the old per-label values exactly."""
+        if not cos_parts:
+            cos_parts.extend((X_query @ Z.T, RankerTrainer._row_norms(X_query),
+                              np.array([np.linalg.norm(z) for z in Z])))
+        XZ, x_norms, z_norms = cos_parts
+        return (XZ[q_idx, li] / (x_norms[q_idx] * z_norms[li] + 1e-12) + 1.0) / 2.0
 
     for gid, q_indices in queries_per_label.items():
         li = g2l.get(gid)
@@ -123,12 +129,11 @@ def predict_labels(node, X_query, beam_size: int = 5, topk: int | None = None, r
         q_idx = asarray(q_indices, dtype=int)
         m = cluster_scores[q_idx, c]
 
-        zvec = Z[li]
-        rows = X_query[q_idx]
-
         if mdl is None:
-            r = _cos_fallback(rows, zvec)
+            r = _cos_fallback(q_idx, li)
         else:
+            zvec = Z[li]
+            rows = X_query[q_idx]
             try:
                 dense_rows = rows.toarray() if hasattr(rows, "toarray") else np.asarray(rows)
                 batch_inp = ranker_input(dense_rows, zvec)
@@ -143,7 +148,7 @@ def predict_labels(node, X_query, beam_size: int = 5, topk: int | None = None, r
             except Exception as exc:
                 node.logger.warning("Ranker failed for label %s; using cosine: %s", gid, exc)
                 node.ranker_failed.add(gid)
-                r = _cos_fallback(rows, zvec)
+                r = _cos_fallback(q_idx, li)
 
         fused = _fuse(m, r)   # branch decided once above
 
