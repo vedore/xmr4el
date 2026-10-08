@@ -14,14 +14,12 @@ from pickle import dump as pkl_dump, load as pkl_load
 from joblib import dump as jdump, load as jload
 from scipy.sparse import hstack as sp_hstack, csr_matrix
 from numpy import (
-    asarray, array, int32, argsort, log, hstack as np_hstack,
+    asarray, int32, log, hstack as np_hstack,
     vstack as np_vstack, zeros
 )
 from sklearn.preprocessing import normalize
 from collections import defaultdict
-from typing import Tuple
 from uuid import uuid4
-from heapq import nlargest
 from pathlib import Path
 from xmr4el.hierarchy.node import MLModel
 
@@ -33,6 +31,8 @@ def augment_features(X, selected, total, maximum):
 
 class HierarchicalMLModel():
     """Loops MLModel"""
+    LEAF_CANDIDATES = 100  # labels each visited leaf contributes (the cap on @cand)
+
     def __init__(self, 
                  clustering_config=None, 
                  matcher_config=None, 
@@ -371,133 +371,24 @@ class HierarchicalMLModel():
             return self.hmodel
         
     
-    def predict(self, 
-                X_query, 
-                topk: int = 5, 
-                beam_size: int = 5, 
-                fusion: str = "lp_fusion", 
-                eps: float = 1e-9, 
-                alpha: float = 0.5,
-                topk_mode: str = "per_leaf",   # "per_leaf" | "global" | "none"
-                include_global_path: bool = True,
-                n_jobs: int = None,
-                path_score: bool = False,
-                scorer: str | None = None):
-        if scorer not in (None, "ranker", "cosine"):
-            raise ValueError(f"Unknown scorer: {scorer}")
-        # path_score: leaf score x routing path probability (exp(path_logscore)), as XR-Linear does.
-        # Leaf matcher probabilities are per-label sigmoids trained only against that leaf's labels, so
-        # without it the beam's leaves are merged by max on scales that are not comparable.
+    def predict(self, X_query, beam_size: int = 5, topk: int = 0):
+        """Score CSR (n_queries x n_labels), each row sorted by descending score.
 
+        Beam search over the internal layers; every visited leaf contributes its LEAF_CANDIDATES labels with the
+        highest matcher probability, scored matcher probability x routing path probability (XR-Linear). Leaf
+        matcher probabilities are per-label sigmoids trained only against that leaf's labels, so the path
+        probability is what makes leaves in one beam comparable. topk > 0 keeps each row's topk best labels."""
         time_start_routing = time.perf_counter()
-
-        # --- helpers (keep loops minimal) ---
-
-        def _select_topk_indices(scores: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:
-            if k is None or k <= 0 or scores.size == 0:
-                return np.array([], dtype=int), np.array([], dtype=float)
-            k = min(k, scores.size)
-            idx = np.argpartition(scores, scores.size - k)[-k:]
-            vals = scores[idx]
-            order = np.argsort(-vals)
-            return idx[order], vals[order]
-
-        def _norm_topk(k):
-            return None if (k is None or k <= 0) else int(k)
-
-        def _parent_to_child(layer_i: int, parent_model_i: int) -> dict:
-            return self.child_index_map[layer_i][parent_model_i]
-
-        def _maybe_leaf_topk(labels, scores, k_norm):
-            # Leaf predict returns labels in index order, not score order: sort before cutting.
-            if k_norm is None:
-                return labels, scores
-            labels, scores = asarray(labels), asarray(scores)
-            top = np.argsort(-scores, kind="stable")[:k_norm]
-            return labels[top], scores[top]
-
-        def _append_path(paths_per_q, qi, trail, leaf_idx, labels, scores, source=None):
-            paths_per_q[qi].append({
-                "trail": trail,
-                "leaf_model_idx": int(leaf_idx),
-                "leaf_global_labels": labels.astype(int32, copy=False),
-                "scores": scores.astype(float, copy=False),
-                **({"source": source} if source is not None else {})
-            })
-
-        def _acc(per_query_scores_list, qi):
-            return per_query_scores_list[qi]
-
-        def _maybe_global_topk_items(items, k_norm):
-            return items if k_norm is None else nlargest(k_norm, items, key=lambda kv: kv[1])
-
-        def _predict_one_leaf(leaf_idx, items, per_leaf_topk, topk_norm, fusion, alpha,
-                            paths_per_query, per_query_scores):
-            """Encapsulate leaf loop body to avoid W8201 on helper calls/branches."""
-            q_indices, rows, trails = zip(*items)
-            X_batch = X_beam[list(rows)]
-
-            leaf_ml = leaf_layer_models[leaf_idx]
-            scores_list, labels_list = leaf_ml.predict(
-                X_batch,
-                beam_size=100,
-                fusion=fusion,
-                alpha=alpha,
-                scorer=scorer
-            )
-
-            for (qi, trail), labels, scores in zip(zip(q_indices, trails), labels_list, scores_list):
-                if path_score and trail:
-                    scores = asarray(scores) * np.exp(trail[-1]["path_logscore"])
-                if per_leaf_topk:
-                    labels, scores = _maybe_leaf_topk(labels, scores, topk_norm)
-
-                _append_path(paths_per_query, qi, trail, leaf_idx, labels, scores)
-
-                acc = _acc(per_query_scores, qi)
-                for lid, sc in zip(labels, scores):
-                    lid_i = int(lid); sc_f = float(sc)
-                    if sc_f > acc.get(lid_i, 0.0):
-                        acc[lid_i] = sc_f
-
-        def _empty_global_path(source_tag):
-            return {
-                "trail": [],
-                "leaf_model_idx": -1,
-                "source": source_tag,
-                "leaf_global_labels": array([], dtype=int32),
-                "scores": array([], dtype=float),
-            }
-
-        topk_norm = _norm_topk(topk)
-
-        if self.hmodel is None:
-            out = [{"query_index": i, "paths": [], "new_path": None} for i in range(X_query.shape[0])]
-            n_labels = int(getattr(getattr(self, "label_embeddings", np.empty((0,))), "shape", [0])[0]) if getattr(self, "label_embeddings", None) is not None else 0
-            return out, csr_matrix((X_query.shape[0], n_labels), dtype=float)
-
-        n_layers = len(self.hmodel)
         n_queries = X_query.shape[0]
-
-        paths_per_query = [[] for _ in range(n_queries)]
-        per_query_scores = [defaultdict(float) for _ in range(n_queries)]
-        pending_by_leaf: dict[int, list[tuple[int, int, list]]] = defaultdict(list)
-
-        # precompute invariants that were flagged
-        is_per_leaf_topk = (topk_mode == "per_leaf")
-        is_global_topk = (topk_mode == "global")
-
-        self.logger.info("Routing started: rows=%d beam=%d topk=%s topk_mode=%s scorer=%s alpha=%s path_score=%s",
-                         n_queries, beam_size, topk, topk_mode, scorer or "auto", alpha, path_score)
+        self.logger.info("Routing started: rows=%d beam=%d topk=%d", n_queries, beam_size, topk)
 
         # Beam entries of all queries, in query order then beam order; row i of X_beam belongs to entry i.
         # One matcher call and one augment_features call per layer instead of per query and beam entry.
         n_roots = len(self.hmodel[0])
-        beam = [(qi, mi, 0.0, []) for qi in range(n_queries) for mi in range(n_roots)]
+        beam = [(qi, mi, 0.0) for qi in range(n_queries) for mi in range(n_roots)]
         X_beam = X_query[np.repeat(np.arange(n_queries), n_roots)]
 
-        # Traverse all non-final layers
-        for layer in range(n_layers - 1):
+        for layer in range(len(self.hmodel) - 1):
             ml_list = self.hmodel[layer]
             parents = asarray([e[1] for e in beam])
             cs_rows = [None] * len(beam)
@@ -508,128 +399,61 @@ class HierarchicalMLModel():
                     cs_rows[r] = cs
 
             candidates_by_query = defaultdict(list)
-            for row, ((qi, parent_model_idx, logscore, trail), cs) in enumerate(zip(beam, cs_rows)):
+            for row, ((qi, parent_model_idx, logscore), cs) in enumerate(zip(beam, cs_rows)):
                 if cs.size == 0 or np.all(cs <= 0):
                     continue
-
-                idx_top, vals_top = _select_topk_indices(cs, min(beam_size, cs.size))
-                parent_to_child = _parent_to_child(layer, parent_model_idx)
-
+                k = min(beam_size, cs.size)
+                idx_top = np.argpartition(cs, cs.size - k)[-k:]
+                idx_top = idx_top[np.argsort(-cs[idx_top])]
+                parent_to_child = self.child_index_map[layer][parent_model_idx]
                 sum_cs = float(cs.sum()); max_cs = float(cs.max())
-
-                for c, p_child in zip(idx_top, vals_top):
+                for c in idx_top:
                     child_idx = parent_to_child.get(int(c))
                     if child_idx is None:
                         continue
-
-                    logscore_next = logscore + float(log(max(p_child, eps)))
-
-                    trail_next = trail + [{
-                        "layer": layer,
-                        "parent_model_idx": int(parent_model_idx),
-                        "chosen_cluster": int(c),
-                        "matcher_prob": float(p_child),
-                        "child_model_idx": int(child_idx),
-                        "path_logscore": float(logscore_next)
-                    }]
-
-                    candidates_by_query[qi].append((int(child_idx), logscore_next, trail_next,
-                                                    row, float(p_child), sum_cs, max_cs))
+                    p_child = float(cs[c])
+                    candidates_by_query[qi].append((int(child_idx), logscore + float(log(max(p_child, 1e-9))),
+                                                    row, p_child, sum_cs, max_cs))
 
             beam, rows, selected, total, maximum = [], [], [], [], []
             for qi, candidates in candidates_by_query.items():
                 candidates.sort(key=lambda t: -t[1])
-                for child_idx, logscore_next, trail_next, row, p_child, sum_cs, max_cs in candidates[:beam_size]:
-                    beam.append((qi, child_idx, logscore_next, trail_next))
+                for child_idx, logscore_next, row, p_child, sum_cs, max_cs in candidates[:beam_size]:
+                    beam.append((qi, child_idx, logscore_next))
                     rows.append(row); selected.append(p_child); total.append(sum_cs); maximum.append(max_cs)
             if not beam:
                 break
             X_beam = augment_features(X_beam[rows], selected, total, maximum)
 
-        for row, (qi, leaf_idx, _, trail) in enumerate(beam):
-            pending_by_leaf[int(leaf_idx)].append((qi, row, trail))
-
         time_start_ranking = time.perf_counter()
+        leaves = asarray([e[1] for e in beam], dtype=int)
         self.logger.info("Routing completed: visited_leaves=%d elapsed=%.1fs",
-                         len(pending_by_leaf), time_start_ranking - time_start_routing)
+                         np.unique(leaves).size, time_start_ranking - time_start_routing)
 
-        # --- Batched leaf predictions per leaf model ---
-        leaf_layer_models = self.hmodel[-1]
-        for leaf_idx, items in pending_by_leaf.items():
-            _predict_one_leaf(
-                leaf_idx=leaf_idx,
-                items=items,
-                per_leaf_topk=is_per_leaf_topk,
-                topk_norm=topk_norm,
-                fusion=fusion,
-                alpha=alpha,
-                paths_per_query=paths_per_query,
-                per_query_scores=per_query_scores,
-            )
+        qis, cols, vals = [np.empty(0, dtype=int)], [np.empty(0, dtype=int)], [np.empty(0)]
+        for leaf_idx in np.unique(leaves):
+            rows = np.flatnonzero(leaves == leaf_idx)
+            leaf = self.hmodel[-1][leaf_idx]
+            P = asarray(leaf.matcher_model.predict_proba(X_beam[rows]), dtype=float)  # column j = local label j
+            k = min(self.LEAF_CANDIDATES, P.shape[1])
+            top = np.argpartition(P, P.shape[1] - k, axis=1)[:, -k:]
+            path = np.exp([beam[r][2] for r in rows])
+            qis.append(np.repeat([beam[r][0] for r in rows], k))
+            cols.append(asarray(leaf.local_to_global_idx)[top].ravel())
+            vals.append((np.take_along_axis(P, top, axis=1) * path[:, None]).ravel())
+        qis, cols, vals = np.concatenate(qis), np.concatenate(cols), np.concatenate(vals)
 
-        # Build CSR (n_queries x n_labels)
-        n_labels_total = int(self.hmodel[0][0].label_embeddings.shape[0])  # root holds every label
-
-        indptr = [0]; indices = []; data = []
-
-        for qi in range(n_queries):
-            acc = _acc(per_query_scores, qi)
-            if not acc:
-                indptr.append(len(indices))
-                continue
-
-            items = acc.items()
-            if is_global_topk:
-                items = _maybe_global_topk_items(items, topk_norm)
-
-            lids, scs = zip(*items)
-            lids = asarray(lids, dtype=int32)
-            scs = asarray(scs, dtype=float)
-
-            order = argsort(-scs)
-            indices.extend(lids[order].tolist())
-            data.extend(scs[order].tolist())
-            indptr.append(len(indices))
-
-        scores_csr = csr_matrix(
-            (asarray(data, dtype=float),
-            asarray(indices, dtype=int32),
-            asarray(indptr, dtype=int32)),
-            shape=(n_queries, n_labels_total),
-            dtype=float
-        )
-
-        # Optional fused/global path
-        new_paths = [None] * n_queries
-        if include_global_path:
-            source_tag = f"global_from_scores_csr[{topk_mode}]"
-            for qi in range(n_queries):
-                row = scores_csr.getrow(qi)
-                if row.nnz == 0:
-                    new_paths[qi] = _empty_global_path(source_tag)
-                    continue
-                lbls = row.indices; scs = row.data
-                order = argsort(-scs)
-                lbls = asarray(lbls[order], dtype=int32)
-                scs = asarray(scs[order], dtype=float)
-                new_paths[qi] = {
-                    "trail": [],
-                    "leaf_model_idx": -1,
-                    "source": source_tag,
-                    "leaf_global_labels": lbls,
-                    "scores": scs,
-                }
-
-        out = [
-            {
-                "query_index": int(qi),
-                "paths": paths_per_query[qi],
-                "final_path": new_paths[qi] if include_global_path else None,
-            }
-            for qi in range(n_queries)
-        ]
+        # Each label sits in one leaf and a query reaches each leaf by one path: no (query, label) repeats
+        order = np.lexsort((-vals, qis))
+        qis, cols, vals = qis[order], cols[order], vals[order]
+        indptr = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=n_queries))])
+        if topk > 0:
+            keep = np.arange(qis.size) - indptr[qis] < topk
+            qis, cols, vals = qis[keep], cols[keep], vals[keep]
+            indptr = np.concatenate([[0], np.cumsum(np.bincount(qis, minlength=n_queries))])
+        n_labels = len(self.hmodel[0][0].local_to_global_idx)  # root holds every label
+        scores = csr_matrix((vals, cols.astype(int32), indptr), shape=(n_queries, n_labels))
 
         self.logger.info("Ranking completed: rows=%d scores=%d elapsed=%.1fs",
-                         n_queries, scores_csr.nnz, time.perf_counter() - time_start_ranking)
-
-        return out, scores_csr
+                         n_queries, scores.nnz, time.perf_counter() - time_start_ranking)
+        return scores

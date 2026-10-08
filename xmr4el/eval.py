@@ -54,11 +54,6 @@ def ranking_metrics(ranks, ks=(5, 10, 20)):
     return metrics
 
 
-def split_by_ranker(gold_idx, trained):
-    has = np.isin(gold_idx, list(trained))
-    return (("with ranker", has), ("without ranker", ~has))
-
-
 def string_breakdown(test_texts, gold, tree_top1, train_pairs):
     """acc@1 of the tree and of the mention dictionary, split by whether the exact mention string
     occurs in train (and with how many labels). Returns {group: (n, tree, dict, either)} plus the
@@ -85,8 +80,6 @@ def _selfcheck():
     assert gold_rank(m.getrow(0), 2) == 2
     assert gold_rank(m.getrow(0), 0) == 3
     assert gold_rank(m.getrow(1), 0) == 0, "empty row must report not-found"
-    (_, has), (_, no) = split_by_ranker(np.array([0, 2, 2, 5]), {2})
-    assert has.tolist() == [False, True, True, False] and (has ^ no).all()
     b = string_breakdown(["Aspirin [SEP] q", "aspirin [SEP] r", "tumor [SEP] s", "new [SEP] t"],
                          ["A", "B", "T", "N"], ["B", "B", "X", "N"],
                          [("aspirin [SEP] a", "A"), ("aspirin [SEP] b", "A"), ("aspirin [SEP] c", "B"),

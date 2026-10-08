@@ -12,7 +12,6 @@ from xmr4el import get_logger, set_verbosity
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from scipy.sparse import csr_matrix
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
@@ -385,74 +384,29 @@ class XModel:
         self.logger.info("Training completed: elapsed=%.1fs", time.perf_counter() - start)
         
         
-    def predict(self, X_text, 
-                topk: int = 5, 
-                beam_size: int = 5, 
-                fusion: str = "geometric", 
-                alpha: float = 0.5,
-                topk_mode: str = "per_leaf", 
-                n_jobs: int =-1,
-                path_score: bool = False,
-                scorer: str | None = None,
-                knn_beta: float = 0.0):
-            """Predict label scores for given text inputs.
+    def predict(self, X_text, beam_size: int = 5, topk: int = 0, knn_beta: float = 0.0):
+        """Score CSR (n_queries x n_labels) for raw text queries (`HierarchicalMLModel.predict`).
 
-            knn_beta > 0 multiplies each returned candidate's score by exp(knn_beta * knn), knn = max cosine of the
-            query's mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). Only scores
-            change: the candidates and the routes' paths stay the tree's.
+        knn_beta > 0 multiplies each candidate's score by exp(knn_beta * knn), knn = max cosine of the query's
+        mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). Only scores change:
+        the candidates stay the tree's."""
+        time_start_encoding = time.perf_counter()
+        X_query = self.text_encoder.predict(X_text)
+        self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
+                         X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
 
-            Parameters
-            ----------
-            X_text : list-like
-                Raw text queries.
-            topk : int, optional
-                Number of labels to consider when computing hit counts.
-            beam_size : int, optional
-                Beam width for hierarchical traversal.
-            golden_labels : Sequence[Sequence[str]], optional
-                Gold standard label IDs per query (strings).
-            return_hits : bool, optional
-                If ``True`` and ``golden_labels`` provided, returns hit counts.
-
-            Returns
-            -------
-            csr_matrix
-                Sparse score matrix for all queries.
-            list, optional
-                Hit counts per query when ``return_hits`` is ``True``.
-            """
-            
-            if scorer not in (None, "ranker", "cosine"):
-                raise ValueError(f"Unknown scorer: {scorer}")
-            time_start_encoding = time.perf_counter()
-
-            X_query = self.text_encoder.predict(X_text)
-            
-            self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
-                             X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
-            
-            # topk_mode "global" is handled by the hierarchy too; its final_path follows its scores
-            routes, scores = self.model.predict(X_query,
-                                      topk=topk,
-                                      beam_size=beam_size,
-                                      fusion=fusion,
-                                      alpha=alpha,
-                                      n_jobs=n_jobs,
-                                      topk_mode=topk_mode,
-                                      path_score=path_score,
-                                      scorer=scorer)
-            if knn_beta:
-                time_start_knn = time.perf_counter()
-                Y = self.Y.tocsr()
-                assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
-                block = self.mention_block()
-                knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1])
-                scores = csr_matrix(scores, copy=True)
-                rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
-                scores.data *= np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
-                self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
-                                 time.perf_counter() - time_start_knn)
-            return routes, scores
+        scores = self.model.predict(X_query, beam_size=beam_size, topk=topk)
+        if knn_beta:
+            time_start_knn = time.perf_counter()
+            Y = self.Y.tocsr()
+            assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
+            block = self.mention_block()
+            knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1])
+            rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
+            scores.data *= np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
+            self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
+                             time.perf_counter() - time_start_knn)
+        return scores
 
     def mention_block(self):
         """Columns of the mention encoder in X: emb_flag 6 is [transformer | char SVD | context SVD]; else all."""

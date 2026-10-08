@@ -6,9 +6,10 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 end of session (speed F/G done: train 61.6 s, eval 9 s; knn fusion `-knn_beta 10` committed: dev 0.904, test 0.916 / hybrid 0.921; next session = plan N (normalize run path), then U3 diagnosis).
+Last updated 2026-10-08 (N1 passed and committed; N2 in progress: delete rankers and unused matcher/clusterer types).
 
-**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: N (normalize the run path, plan below) first, then U3 diagnosis on the normalized code. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (with knn: dev 0.680, test 0.712).
+**Runs:** none in flight. N1 passed (`outputs/logs/n1_dev_eval.log` = `knn10_dev_eval.log` exactly, eval 12 -> 6 s).
+Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (with knn: dev 0.680, test 0.712).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -279,6 +280,14 @@ N. Normalize how the model runs (plan 2026-10-08, user decisions: remove rankers
       (evaluate's @cand = row nnz, same set as final_path labels). `evaluate.py` keeps -beam_size, -knn_beta, -topk as
       overrides, defaults read from the tree's config (N3). Drop evaluate's ranker report and tie detector branch.
       Pass = dev output = `knn10_dev_eval.log` (<= 0.001 if the fusion round trip moved ties); eval ~3 s.
+      N1 passed, committed (dev identical to `knn10_dev_eval.log`, eval 6 s): `HierarchicalMLModel.predict(X, beam_size, topk=0)` returns the CSR only; each visited
+      leaf gives its `LEAF_CANDIDATES` = 100 best labels (the old leaf `beam_size=100`), score = matcher prob x
+      exp(path_logscore), rows sorted; `XModel.predict(X_text, beam_size, topk, knn_beta)`. Deleted
+      `scoring.predict_labels`, `MLModel.predict`, `eval.split_by_ranker`, evaluate's -alpha/-scorer/-path_score,
+      ranker report and tie detector; @cand = mean(rank > 0). Evaluate defaults for now: beam 5, topk 0, knn 0
+      (N3 moves them to the config). Tests rewritten (`test_no_rankers` checks the exact root x leaf product;
+      `test_scoring` now tests `label_max_cos`); pytest 25 + 4 selfchecks pass. README, scripts/README, pipeline.md
+      eval docs updated.
    N2 training path: delete rankers (`ranker.py`, `Ranker`, `ranker_config`, `cur_config`, `ranker_every_layer`,
       `train_rankers`, `MLModel.ranker_model`, `_topb_sparse`/M_MAN, matcher `m_node` if only rankers read it), leaf
       label embeddings if only cosine/rankers read them, matcher types `sklearnsgdclassifier` and

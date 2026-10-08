@@ -12,7 +12,6 @@ from sklearn.preprocessing import normalize
 from xmr4el.hierarchy.clusterers import Clustering
 from xmr4el.learning.matcher import Matcher
 from xmr4el.learning.ranker import Ranker
-from xmr4el.learning.scoring import predict_labels
 
 
 
@@ -350,7 +349,3 @@ class MLModel():
             self.logger.debug("Preparing matcher routing scores: layer_index=%s", self.layer)
             cluster_scores = self.matcher_model.predict_proba(X_train)
             self.fused_scores = csr_matrix(np.maximum(cluster_scores, 0.0))
-        
-    def predict(self, X_query, beam_size=5, topk=None, return_matrix=False,
-                fusion="lp_fusion", eps=1e-6, alpha=0.5, p=3, scorer=None):
-        return predict_labels(self, X_query, beam_size, topk, return_matrix, fusion, eps, alpha, p, scorer)

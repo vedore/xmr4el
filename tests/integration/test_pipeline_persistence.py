@@ -28,9 +28,9 @@ def test_pipeline_persistence(caplog, capsys):
     texts[0].append("caller mutation")
     assert first.training_set == second.training_set and first.training_set != texts
     queries = [group[0] for group in texts]
-    expected = first.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray()
+    expected = first.predict(queries, beam_size=2).toarray()
     # knn re-scoring keeps the tree's candidates and multiplies each by exp(beta * max cosine to the label's rows)
-    rescored = first.predict(queries, topk=0, beam_size=2, path_score=True, knn_beta=2)[1].toarray()
+    rescored = first.predict(queries, beam_size=2, knn_beta=2).toarray()
     knn = label_max_cos(first.text_encoder.predict(queries), first.X, first.Y.tocsr().indices, len(labels))
     assert ((rescored > 0) == (expected > 0)).all() and np.allclose(rescored, expected * np.exp(2 * knn))
     with TemporaryDirectory() as tmp:
@@ -45,7 +45,7 @@ def test_pipeline_persistence(caplog, capsys):
         restored = XModel.load(saved)
         assert restored.initial_labels == sorted(labels)
         assert restored.training_set == first.training_set
-        assert np.allclose(restored.predict(queries, topk=0, beam_size=2, path_score=True)[1].toarray(), expected)
+        assert np.allclose(restored.predict(queries, beam_size=2).toarray(), expected)
     assert capsys.readouterr().out == "", "library code must use logging, not stdout"
     messages = [record.getMessage() for record in caplog.records]
     assert any("Node started: layer=2 node=2/2" in message for message in messages)

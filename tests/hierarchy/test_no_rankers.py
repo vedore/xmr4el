@@ -1,4 +1,4 @@
-"""train_rankers=False skips every ranker and leaves cosine-scored predictions unchanged.
+"""train_rankers=False skips every ranker and leaves predictions unchanged.
 Small synthetic hierarchy, trained twice (with / without rankers); runs offline in seconds."""
 import json
 from copy import deepcopy
@@ -11,7 +11,7 @@ from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
 
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
-from xmr4el.hierarchy.tree import HierarchicalMLModel
+from xmr4el.hierarchy.tree import HierarchicalMLModel, augment_features
 
 
 def train(X, Y, Z, cfg, train_rankers, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
@@ -50,35 +50,30 @@ def test_no_rankers():
     assert any(m.ranker_model is not None for layer in with_r.hmodel for m in layer)
     assert all(m.ranker_model is None for layer in without_r.hmodel for m in layer), "rankers trained"
 
-    kw = dict(beam_size=2, topk=0, alpha=1.0)
-    (_, a), (_, b) = with_r.predict(Xq, scorer="cosine", **kw), without_r.predict(Xq, **kw)  # (routes, scores_csr)
-    a, b = a.toarray(), b.toarray()
-    assert a.shape == b.shape and np.allclose(a, b), "cosine predictions must not depend on rankers"
-    assert (a.argmax(axis=1) == np.arange(L)).mean() > 0.5, "synthetic labels should be easy"
+    kw = dict(beam_size=2, topk=0)
+    a, b = with_r.predict(Xq, **kw).toarray(), without_r.predict(Xq, **kw).toarray()
+    assert a.shape == b.shape and np.allclose(a, b), "predictions must not depend on rankers"
+    assert (b.argmax(axis=1) == np.arange(L)).mean() > 0.5, "synthetic labels should be easy"
 
-    # per_leaf topk must keep each leaf's best labels: the top-1 under topk=1 equals the top-1 under topk=0
-    (_, t1) = without_r.predict(Xq, beam_size=2, topk=1, alpha=1.0)
-    t1 = t1.toarray()
-    assert (t1 > 0).sum(axis=1).max() <= 2, "topk=1 keeps at most one label per visited leaf"
-    assert (t1.argmax(axis=1) == b.argmax(axis=1)).all(), "per-leaf topk cut the wrong labels"
+    # topk keeps each row's best labels
+    t1 = without_r.predict(Xq, beam_size=2, topk=1).toarray()
+    assert ((t1 > 0).sum(axis=1) == 1).all() and (t1.argmax(axis=1) == b.argmax(axis=1)).all()
 
-    # path_score: each leaf's score is multiplied by its routing path probability, nothing else changes
-    kw0 = dict(beam_size=2, topk=0, alpha=0.0)
-    (routes, off), (_, on) = without_r.predict(Xq, **kw0), without_r.predict(Xq, path_score=True, **kw0)
-    expect = off.toarray()
-    for r in routes:
-        for p in r["paths"]:
-            if p["trail"]:
-                expect[r["query_index"], p["leaf_global_labels"]] *= np.exp(p["trail"][-1]["path_logscore"])
-    assert np.allclose(on.toarray(), expect), "path_score must scale each leaf by exp(path_logscore)"
-    assert not np.allclose(on.toarray(), off.toarray()), "beam 2 visits leaves with different path scores"
+    # score = root matcher prob of the label's cluster x leaf matcher prob (beam 3 visits all 3 leaves)
+    P = np.asarray(without_r.hmodel[0][0].matcher_model.predict_proba(Xq))
+    expect = np.zeros((L, L))
+    for c, child in without_r.child_index_map[0][0].items():
+        leaf = without_r.hmodel[1][child]
+        Xa = augment_features(Xq, P[:, c], P.sum(axis=1), P.max(axis=1))
+        expect[:, leaf.local_to_global_idx] = P[:, [c]] * leaf.matcher_model.predict_proba(Xa)
+    assert np.allclose(without_r.predict(Xq, beam_size=3).toarray(), expect)
 
     # score matrix width is the label count, not the highest retrieved label + 1
-    assert without_r.predict(Xq[:1], beam_size=1, topk=1)[1].shape == (1, L)
+    assert without_r.predict(Xq[:1], beam_size=1, topk=1).shape == (1, L)
 
     # leaves too small to cluster (8 labels, min_leaf_size 8) still train with identity C
     small = train(X, Y, Z, cfg, False, min_leaf_size=8)
-    assert len(small.hmodel) == 2 and small.predict(Xq, beam_size=2, topk=0)[1].shape == (L, L)
+    assert len(small.hmodel) == 2 and small.predict(Xq, beam_size=2).shape == (L, L)
 
     # targets follow row order when a label repeats across groups
     assert LabelEmbeddingFactory.generate_label_matrix({"A": [0, 2], "B": [1]}) == [["A"], ["B"], ["A"]]
@@ -98,12 +93,7 @@ def test_no_rankers():
         restored = HierarchicalMLModel.load(d)
     assert restored.clustering_config == deep.clustering_config
     assert restored.clustering_config["kwargs"]["n_clusters"] == 4
-    assert np.allclose(deep.predict(Xq, **kw)[1].toarray(), restored.predict(Xq, **kw)[1].toarray())
+    assert np.allclose(deep.predict(Xq, **kw).toarray(), restored.predict(Xq, **kw).toarray())
 
-    # global topk: final_path ranks the same labels as the returned scores
-    routes, g = without_r.predict(Xq, beam_size=2, topk=1, topk_mode="global")
-    for r in routes:
-        row = g.getrow(r["query_index"])
-        assert list(r["final_path"]["leaf_global_labels"]) == list(row.indices[np.argsort(-row.data)])
     print("ok")
 

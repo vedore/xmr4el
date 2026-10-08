@@ -174,17 +174,13 @@ For prediction from Python:
 from xmr4el.xmodel import XModel
 
 model = XModel.load("outputs/saved_trees/<run>")
-routes, scores = model.predict(
-    ["mention [SEP] context"], beam_size=2, topk=20, topk_mode="per_leaf",
-    alpha=0, path_score=True,
-)
+scores = model.predict(["mention [SEP] context"], beam_size=10, topk=0, knn_beta=10)
 ```
 
-`XModel.predict` defaults are `beam_size=5`, `topk=5`, `alpha=0.5`, `path_score=False`;
-pass the arguments above to match the base-config evaluation. The `per_leaf` mode keeps
-the best labels per visited leaf. `global` keeps the best labels across visited leaves
-using the same fused scores. `scorer=None` (default) uses the trained rankers when present,
-else cosine; set `scorer="cosine"` or `scorer="ranker"` to choose leaf scoring explicitly.
+`scores` is a CSR matrix (queries x labels); column `j` is `model.initial_labels[j]`. Each visited
+leaf contributes its 100 best labels, scored leaf matcher probability x routing path probability;
+`topk > 0` keeps each row's best `topk`. `knn_beta` multiplies each candidate's score by
+`exp(beta * max cosine of the mention block to the label's training rows)`.
 
 ## Configuration
 

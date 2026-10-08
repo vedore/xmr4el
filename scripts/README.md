@@ -110,22 +110,21 @@ TRAIN=datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
 DEV=datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt
 ```
 
-For the base configuration's logistic matchers, use matcher probabilities with
-routing path probabilities:
+Leaf score = leaf matcher probability x routing path probability (`HierarchicalMLModel.predict`):
 
 ```bash
 .venv/bin/python scripts/evaluate.py \
   -xmodel_path "$MODEL" -test_path "$DEV" \
-  -beam_size 5 -topk 20 -alpha 0 -path_score \
+  -beam_size 10 -knn_beta 10 \
   -train_path "$TRAIN"
 ```
 
 Reports acc@1, MRR, recall@k, candidate recall, and vocabulary coverage.
 Only mentions with a gold label in the training vocabulary enter ranking metrics.
 `-train_path` adds the seen/unseen mention-string breakdown; `-verbose` shows library diagnostics.
-Warnings (including ranker fallback and OOM recovery) remain visible in quiet evaluation.
-Use `-alpha 1 -scorer cosine` for cosine leaf scores or `-alpha 1 -scorer ranker`
-to evaluate trained rankers. `-topk` is per leaf; `0` disables that final cut.
+Warnings (including OOM recovery) remain visible in quiet evaluation.
+`-topk k` keeps each query's `k` best labels (default 0 = all candidates); `-knn_beta` (default 0) is the
+mention-kNN fusion.
 
 Diagnose routing before retraining; compare routing accuracy with the printed chance line:
 
@@ -157,14 +156,13 @@ For leaf scoring, first export features with the PECOS baseline export command b
 
 This measures within-leaf accuracy with perfect routing, not end-to-end accuracy.
 
-Sweep beams 5, 10, 15, 20, and 25 with 20 results per leaf:
+Sweep beams 5, 10, 15, 20, and 25 with the 20 best labels per query:
 
 ```bash
 .venv/bin/python scripts/experiments/beam_sweep.py "$MODEL" "$DEV" 5 25 20
 ```
 
-The sweep uses `evaluate.py` defaults (`-alpha 1`, cosine scoring, no path score);
-it does not accept scorer/fusion overrides.
+The sweep uses the other `evaluate.py` defaults (no `-knn_beta`).
 
 ## PECOS baseline
 

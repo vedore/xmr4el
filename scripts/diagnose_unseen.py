@@ -79,9 +79,7 @@ def main():
         by_label[y][mention_key(t)] += 1
     u_idx = np.flatnonzero([mention_key(t) not in by_string for t in texts])
 
-    _, score_csr = xm.predict(texts, beam_size=args.beam_size, topk=0, fusion="lp_fusion", alpha=0.0,
-                              topk_mode="per_leaf", path_score=True, scorer="cosine")
-    score_csr = csr_matrix(score_csr)
+    score_csr = xm.predict(texts, beam_size=args.beam_size)
     ranks = np.array([gold_rank(score_csr.getrow(i), gold_idx[i]) for i in u_idx])
 
     print("-" * 72)
