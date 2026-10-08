@@ -20,7 +20,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers and save the model. |
 | `evaluate.py` | Traverse a saved tree and report ranking metrics and candidate recall. |
 | `diagnose_routing.py` | Compare root matcher, cosine routing, flat retrieval, and a mention dictionary on train/dev inputs. |
-| `diagnose_unseen.py` | Unseen-string rows: gold-rank buckets, flat 1-NN per feature block, knn fusion screen over beta, error TSV. |
+| `diagnose_unseen.py` | Ranking as `evaluate.py` (`-beam_size`, `-knn_beta`, default the tree's): acc@1 + gold-rank buckets per string group; unseen rows: flat 1-NN per feature block; knn fusion screen over beta (knn-free base); TSV of all errors (group, abbrev, gold/pred in the string's train label set). |
 | `experiments/screen_features.py` | Compare feature variants with flat label retrieval, without training a tree. |
 | `experiments/screen_leaf_scorer.py` | Fit and compare leaf scorers with oracle routing using exported tree features. |
 | `experiments/beam_sweep.py` | Repeat evaluation for beam sizes in steps of five. |
