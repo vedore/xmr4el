@@ -6,7 +6,14 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1-N6, U3, B, B1, C1 done; next: C2+C3 code (Claude), user retrain, then R).
+Last updated 2026-10-08 (N1-N6, U3, B, B1, C1, C2+C3 done; next: R code (Claude) on tree `17-28-02`).
+
+**C2+C3 passed (pytest 33 + 4 selfchecks).** Plain attributes instead of pass-through properties; `NodeInput`,
+`prepare_layer` -> `[(c, NodeInput)]`, `tree.train` helpers inlined; shape docstrings; PIFA = `normalize(Y.T @ X)`;
+`xmodel.json` next to `xmodel.pkl`. Trees before C2 do not load (`15-38-58` dead). Tree `17-28-02` (`c2_train.log`,
+`c2_dev_eval.log`): cache hit, hierarchy 32.7 s, run 59.1 s; dev acc@1 0.9045 / MRR 0.9335 / unseen 0.6821 /
+hybrid 0.9066 / @cand 0.9907 vs B1 0.9041 / 0.9335 / 0.6800 / 0.9062 / 0.9914 (+2 / -3 rows: PIFA k-means ties):
+within noise, no results.md row. R uses `17-28-02`; R's pass thresholds stay B1's (0.9041 / 0.6800) plus noise.
 
 **C1 passed (pytest 32 + 4 selfchecks; `c1_dev_eval.log` on `15-38-58` identical to B1, eval 7 s).** As planned, plus: both configs set `max_leaf_size: 200`
 (never read by code) -> key deleted; `Clustering.train` lost its `local_to_global_idx` arg (only fed
@@ -53,7 +60,7 @@ in-vocabulary rows; diagnostics use `xm.Z` (routing refuses one-layer trees); di
 dir; window 0 = empty context. Regressions `tests/test_audit_regressions.py`; pytest 28 + selfchecks pass.
 Trees saved before B have no `block_widths` -> no knn eval: retrain.
 **B1 passed:** tree `15-38-58` (`b1_train.log`, `b1_dev_eval.log`): cache hit, run 61.0 s; dev identical to N6
-(0.9041 / MRR 0.9335 / unseen 0.6800 / hybrid 0.9062): no results.md row. `13-16-09` deleted; R uses `15-38-58`. Next session: start R code (plan below).
+(0.9041 / MRR 0.9335 / unseen 0.6800 / hybrid 0.9062): no results.md row. `13-16-09` deleted; R uses `15-38-58`. R moved to tree `17-28-02` (C2).
 
 **N6 passed:** tree `13-16-09` (`outputs/logs/n6_train.log`, `n6_dev_eval.log`, `n6_test_eval.log`): cache hit,
 hierarchy 31.9 s, run 64.1 s; bare eval prints `search beam 10, topk 0, knn beta 10`; dev and test identical to the

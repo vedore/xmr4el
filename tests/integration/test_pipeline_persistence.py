@@ -41,10 +41,10 @@ def test_pipeline_persistence(caplog, capsys):
         saved = next(Path(tmp).iterdir())
         with open(saved / "xmodel.pkl", "rb") as f:
             state = pickle.load(f)
-        assert "_text_encoder" not in state and "_hml" not in state and "temp_var" not in state
+        assert "text_encoder" not in state and "model" not in state and "temp_var" not in state
         with open(saved / "text_encoder/text_encoder.pkl", "rb") as f:
             state = pickle.load(f)
-        assert "_vectorizer_model" not in state and "_dimension_model" not in state
+        assert "vectorizer_model" not in state and "dimension_model" not in state
         restored = XModel.load(saved)
         assert restored.initial_labels == sorted(labels)
         assert restored.predict_config == first.predict_config == {"beam_size": 10, "topk": 0, "knn_beta": 0.0}

@@ -1,6 +1,8 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
 widths, persistence (fused_scores, stale layers, same-second saves), reader edge cases; second audit (C1)."""
 from copy import deepcopy
+import json
+import pickle
 from pathlib import Path
 import subprocess
 import sys
@@ -129,3 +131,16 @@ def test_split_cli_partial_and_ratios(tmp_path):
     assert r.returncode != 0 and "all three" in r.stderr
     r = run("--train_ratio", "0.9", "--dev_ratio", "0.2")
     assert r.returncode != 0 and "<= 1" in r.stderr and not (tmp_path / "out").exists()
+
+
+# C3: xmodel.json mirrors the pickled state's keys
+
+def test_xmodel_json(xm, tmp_path):
+    xm.save(str(tmp_path))
+    (saved,) = tmp_path.iterdir()
+    state = pickle.loads((saved / "xmodel.pkl").read_bytes())
+    view = json.loads((saved / "xmodel.json").read_text())
+    assert view.keys() == state.keys()
+    assert view["initial_labels"] == {"type": "list", "len": 8, "first": "L0"}
+    assert view["Z"]["shape"] == list(xm.Z.shape) and view["Y"]["nnz"] == xm.Y.nnz
+    assert view["predict_config"] == xm.predict_config

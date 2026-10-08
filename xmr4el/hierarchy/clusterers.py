@@ -282,29 +282,9 @@ class Clustering:
         self,
     ) -> None:
         """Initialize the clustering pipeline."""
-        self._C_node: Optional[csr_matrix] = None
-        self._model: Optional[ClusteringModel] = None
+        self.c_node: Optional[csr_matrix] = None  # C, L x K (one 1 per row)
+        self.model: Optional[ClusteringModel] = None
 
-    @property
-    def c_node(self) -> Optional[csr_matrix]:
-        """C (n_labels x n_clusters, CSR, one 1 per row)."""
-        return self._C_node
-    
-    @c_node.setter
-    def c_node(self, value: csr_matrix) -> None:
-        """Set the cluster assignment matrix."""
-        self._C_node = value
-        
-    @property
-    def model(self) -> Optional[ClusteringModel]:
-        """Return the underlying clustering model."""
-        return self._model
-    
-    @model.setter
-    def model(self, value: ClusteringModel) -> None:
-        """Set the underlying clustering model."""
-        self._model = value
-        
     @property
     def is_empty(self) -> bool:
         """Return ``True`` if clustering was not trained."""
@@ -320,7 +300,7 @@ class Clustering:
         state = self.__dict__.copy()
         if model is not None:
             model.save(os.path.join(save_dir, "clustering"))
-            state.pop("_model", None)
+            state.pop("model", None)
 
         # Save remaining state
         with open(os.path.join(save_dir, "clustering.pkl"), "wb") as fout:
@@ -342,7 +322,7 @@ class Clustering:
         model_path = os.path.join(load_dir, "clustering")
         # A leaf too small to cluster saves no model (identity C only)
         if os.path.exists(model_path):
-            setattr(model, "_model", ClusteringModel.load(model_path))
+            model.model = ClusteringModel.load(model_path)
         
         return model
     

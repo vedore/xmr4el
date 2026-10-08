@@ -133,7 +133,7 @@ Prediction uses supplied mentions; mention detection is not implemented.
 ```
 
 `-ds_len` limits the number of label groups, not documents or mentions.
-Saved models go to `outputs/saved_trees/xmodel_<timestamp>/`.
+Saved models go to `outputs/saved_trees/xmodel_<timestamp>/`; `xmodel.json` there is a readable summary of the saved state (configs, shapes, label count), never loaded.
 
 ### Grouped TSV
 

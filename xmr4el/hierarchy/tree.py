@@ -17,9 +17,19 @@ from numpy import (
 )
 from sklearn.preprocessing import normalize
 from collections import defaultdict
+from typing import NamedTuple
 from uuid import uuid4
-from pathlib import Path
 from xmr4el.hierarchy.node import MLModel
+
+class NodeInput(NamedTuple):
+    """Training input of one tree node: X (n x d), Y (n x L, the node's label columns), Z (L x d),
+    local_to_global[j] = global label index of local label j, global_to_local its inverse."""
+    X: object
+    Y: object
+    Z: object
+    local_to_global: np.ndarray
+    global_to_local: dict
+
 
 def augment_features(X, selected, total, maximum):
     """Append routing probabilities and normalize identically during train and predict."""
@@ -58,35 +68,10 @@ class HierarchicalMLModel():
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
         
-        self._hmodel = []
-        self._layer = layer
-        self._child_index_map = None
-        
-        self.ml_dir = None
-        
-    @property
-    def hmodel(self):
-        return self._hmodel
-    
-    @hmodel.setter
-    def hmodel(self, value):
-        self._hmodel = value
+        self.hmodel = []  # hmodel[layer][node] = MLModel, in training order
+        self.layers = layer
+        self.child_index_map = None  # [layer][parent] -> {cluster id: child index in hmodel[layer + 1]}
 
-    @property
-    def layers(self):
-        return self._layer
-    
-    @layers.setter
-    def layers(self, value):
-        self._layer = value
-        
-    @property
-    def child_index_map(self):
-        return self._child_index_map
-    
-    @child_index_map.setter
-    def child_index_map(self, value):
-        self._child_index_map = value
         
     def save(self, save_dir):
         pmakedirs(save_dir, exist_ok=True)
@@ -105,7 +90,7 @@ class HierarchicalMLModel():
                 pmakedirs(sub_model_path, exist_ok=True)
                 model.save(sub_model_path)
 
-        state.pop("_hmodel", None)
+        state.pop("hmodel", None)
 
         with open(os.path.join(save_dir, "hml.pkl"), "wb") as fout:
             pkl_dump(state, fout)
@@ -154,7 +139,7 @@ class HierarchicalMLModel():
                 raise ValueError(f"No models found in layer folder {layer_path}")
             hmodel.append(layer_models)
 
-        setattr(model, "_hmodel", hmodel)
+        model.hmodel = hmodel
 
         # Regression guard for the load-order bug above: every parent cluster must hand the beam a
         # child that holds exactly that cluster's labels. When this silently failed, routing sat at
@@ -182,20 +167,14 @@ class HierarchicalMLModel():
 
         return model
     
-    def save_ml_temp(self, model, name):
-        sub_dir =  self.ml_dir / str(name)
-        sub_dir.mkdir(parents=True, exist_ok=True)
-        model.save(str(sub_dir))
-        return str(sub_dir)
-            
     def prepare_layer(self, X, Y, Z, C, fused_scores, local_to_global_idx):
-        """
-        Returns a list of tuples, one per (non-empty) cluster c:
-        (X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next, c)
-        where `c` is the *cluster id* in the parent.
-        """
+        """Children of one internal node: [(c, NodeInput)] per non-empty parent cluster c, in cluster order.
+
+        X (n x d) node rows, Y (n x L) their labels, Z (L x d), C (L x K), fused_scores (n x K) the node's matcher
+        cluster scores. A child gets the rows with a label in its cluster, X augmented with [fused c, sum, max]
+        (n_c x (d + 3)), its labels' columns of Y and their parent Z rows (normalized)."""
         K_next = C.shape[1]
-        inputs = []
+        children = []
         fused_dense = fused_scores.toarray() if hasattr(fused_scores, "toarray") else asarray(fused_scores)
 
         for c in range(K_next):
@@ -222,51 +201,28 @@ class HierarchicalMLModel():
             X_aug = augment_features(X_node, feat_c, feat_sum, feat_max)
 
             Z_node = normalize(Z[local_idxs, :], norm="l2", axis=1)
-            inputs.append((X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next, c))
+            children.append((c, NodeInput(X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next)))
 
-        return inputs
+        return children
             
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
-        """
-        Train multiple layers of MLModel; intermediate models are saved in a
-        temporary folder which is automatically deleted at the end of training.
-        """
-        inputs = ((X_train, Y_train, Z_train, local_to_global, global_to_local),)
+        """Train the tree layer by layer: X_train (n x d), Y_train (n x L), Z_train (L x d).
+
+        Each node is saved to a temporary folder once trained (only the next layer's inputs stay in memory),
+        then all nodes are reloaded into `hmodel`."""
+        inputs = [NodeInput(X_train, Y_train, Z_train, local_to_global, global_to_local)]
         clustering_config = deepcopy(self.clustering_config)
         last_layer_index = self.layers - 1
 
-        save_temp = self.save_ml_temp  # local bind
-
-        def _accumulate_children(raw_children, start_idx, next_inputs_list):
-            """Convert raw_children into next_inputs and a cluster->child map."""
-            if not raw_children:
-                return {}
-            payloads, c_ids = zip(*(((rc[:-1]), int(rc[-1])) for rc in raw_children))
-            next_inputs_list.extend(payloads)  # payloads are already tuples
-            return {c: (start_idx + i) for i, c in enumerate(c_ids)}
-
-        def _save_ml_for_layer(ml, layer):
-            """Create a unique save name for this model and store it."""
-            save_name = f"{layer}_{uuid4()}"
-            return save_temp(ml, save_name)
-
-        def _finalize_layer(layer, ml_list, next_inputs):
-            """Append saved model paths and freeze next_inputs -> inputs tuple."""
-            self.hmodel.append(ml_list)
-            return tuple(next_inputs)
-
-        # Use TemporaryDirectory to ensure cleanup
         with tempfile.TemporaryDirectory(prefix="ml_store_") as temp_dir:
-            self.ml_dir = Path(temp_dir)
-            self.hmodel = []
+            ml_paths = []  # [layer][node] saved node dirs
             child_index_map = []
-
 
             for layer in range(self.layers):
                 layer_start = time.perf_counter()
                 self.logger.info("Layer started: layer=%d/%d nodes=%d", layer + 1, self.layers, len(inputs))
                 
-                next_inputs: list[tuple] = []
+                next_inputs: list[NodeInput] = []
                 ml_list: list[str] = []
                 layer_child_maps: list[dict[int, int]] = []
                 
@@ -279,10 +235,10 @@ class HierarchicalMLModel():
                     clustering_config = {**clustering_config,
                                          "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
                     
-                for node_idx, (X_node, Y_node, Z_node, local_to_label_node, global_to_local_node) in enumerate(inputs):
+                for node_idx, node in enumerate(inputs):
                     node_start = time.perf_counter()
                     self.logger.info("Node started: layer=%d node=%d/%d rows=%d labels=%d leaf=%s",
-                                     layer + 1, node_idx + 1, len(inputs), X_node.shape[0], Z_node.shape[0], is_last_layer)
+                                     layer + 1, node_idx + 1, len(inputs), node.X.shape[0], node.Z.shape[0], is_last_layer)
                     
                     ml = MLModel(
                         clustering_config=clustering_config,
@@ -293,52 +249,50 @@ class HierarchicalMLModel():
                     )
 
                     ml.train(
-                        X_train=X_node,
-                        Y_train=Y_node,
-                        Z_train=Z_node,
-                        local_to_global=local_to_label_node,
-                        global_to_local=global_to_local_node
+                        X_train=node.X,
+                        Y_train=node.Y,
+                        Z_train=node.Z,
+                        local_to_global=node.local_to_global,
+                        global_to_local=node.global_to_local
                     )
 
                     if ml.is_empty:  # only internal nodes can be empty; leaves use identity C
                         raise ValueError(
-                            f"layer {layer} node with {Z_node.shape[0]} labels cannot be split into clusters of "
+                            f"layer {layer} node with {node.Z.shape[0]} labels cannot be split into clusters of "
                             f">= min_leaf_size={self.min_leaf_size}; lower depth or min_leaf_size")
 
                     cluster_to_child = {}
                     if not is_last_layer:
                         self.logger.debug("Preparing child inputs: layer=%d node=%d", layer + 1, node_idx + 1)
-                        raw_children = self.prepare_layer(
-                            X=X_node,
-                            Y=Y_node,
-                            Z=Z_node,
+                        children = self.prepare_layer(
+                            X=node.X,
+                            Y=node.Y,
+                            Z=node.Z,
                             C=ml.cluster_model.c_node,
                             fused_scores=ml.fused_scores,
-                            local_to_global_idx=local_to_label_node
+                            local_to_global_idx=node.local_to_global
                         )
-                        cluster_to_child = _accumulate_children(
-                            raw_children,
-                            start_idx=len(next_inputs),
-                            next_inputs_list=next_inputs
-                        )
+                        for c, child in children:
+                            cluster_to_child[int(c)] = len(next_inputs)
+                            next_inputs.append(child)
                     
-                    ml_path = _save_ml_for_layer(ml, layer)
+                    ml_path = pjoin(temp_dir, f"{layer}_{uuid4()}")
+                    ml.save(ml_path)
                     self.logger.info("Node completed: layer=%d node=%d/%d elapsed=%.1fs",
                                      layer + 1, node_idx + 1, len(inputs), time.perf_counter() - node_start)
                     del ml
                     ml_list.append(ml_path)
                     layer_child_maps.append(cluster_to_child)
 
-                inputs = _finalize_layer(layer, ml_list, next_inputs)
-                del ml_list
+                ml_paths.append(ml_list)
+                inputs = next_inputs
                 collect()
                 child_index_map.append(layer_child_maps)
                 self.logger.info("Layer completed: layer=%d/%d next_nodes=%d elapsed=%.1fs",
                                  layer + 1, self.layers, len(inputs), time.perf_counter() - layer_start)
 
-            # Reload all models for final hmodel
-            self.hmodel = [[MLModel.load(p) for p in model_list] for model_list in self.hmodel]
-            self._child_index_map = child_index_map
+            self.hmodel = [[MLModel.load(p) for p in model_list] for model_list in ml_paths]
+            self.child_index_map = child_index_map
             return self.hmodel
         
     

@@ -37,13 +37,13 @@ class MLModel():
         self.is_last_layer = is_last_layer
         self.layer = layer
         
-        self._local_to_global_idx = None
-        self._global_to_local_idx = None
+        self._local_to_global_idx = None  # see the setter
+        self.global_to_local_idx = None
         
-        self._cluster_model = None
-        self._matcher_model = None
-        self._fused_scores = None
-        self._label_embeddings = None
+        self.cluster_model = None  # Clustering; a leaf holds identity C
+        self.matcher_model = None
+        self.fused_scores = None  # internal node: matcher cluster scores on its train rows (n x K), consumed by prepare_layer
+        self.label_embeddings = None  # internal node: normalised Z (L x d)
     
     @property
     def local_to_global_idx(self):
@@ -56,60 +56,16 @@ class MLModel():
         """
         self._local_to_global_idx = arr
         # build inverse map
-        self._global_to_local_idx = {g: i for i, g in enumerate(arr)}
-    
-    @property
-    def global_to_local_idx(self):
-        return self._global_to_local_idx
-    
-    @global_to_local_idx.setter
-    def global_to_local_idx(self, value):
-        self._global_to_local_idx = value
-    
-    @property
-    def cluster_model(self):
-        return self._cluster_model
-    
-    @cluster_model.setter
-    def cluster_model(self, value):
-        self._cluster_model = value
-
-    @property
-    def matcher_model(self):
-        return self._matcher_model
-    
-    @matcher_model.setter
-    def matcher_model(self, value):
-        self._matcher_model = value
-
-    @property
-    def fused_scores(self):
-        return self._fused_scores
-    
-    @fused_scores.setter
-    def fused_scores(self, value):
-        self._fused_scores = value
-        
-    @property
-    def label_embeddings(self):
-        return self._label_embeddings
-    
-    @label_embeddings.setter
-    def label_embeddings(self, value):
-        self._label_embeddings = value
+        self.global_to_local_idx = {g: i for i, g in enumerate(arr)}
     
     @property
     def is_empty(self):
-        return True if self.cluster_model is None else False
+        return self.cluster_model is None
     
 
     
     def save(self, save_dir):
-        # Mapping attribute names to their internal keys
-        model_attrs = {
-            "cluster_model": "_cluster_model",
-            "matcher_model": "_matcher_model",
-        }
+        model_attrs = ("cluster_model", "matcher_model")
         for model_name in model_attrs:
             model = getattr(self, model_name)
             if model is not None and not callable(getattr(model, "save", None)):
@@ -117,11 +73,10 @@ class MLModel():
         os.makedirs(save_dir, exist_ok=True)  # Ensure directory exists
 
         state = self.__dict__.copy()
-        for model_name, attr_key in model_attrs.items():
-            model = getattr(self, model_name)
+        for model_name in model_attrs:
+            model = state.pop(model_name)  # saved in its own dir, not pickled
             if model is not None:
                 model.save(pjoin(save_dir, model_name))
-                state.pop(attr_key, None)  # Remove model from state before pickling
 
         # Save fused scores separately
         fused_scores = self.fused_scores
@@ -129,13 +84,13 @@ class MLModel():
             raise ValueError("fused_scores is None. Cannot save.")
         if fused_scores is not None:
             np.save(pjoin(save_dir, "fused_scores.npy"), fused_scores)
-        state.pop("_fused_scores", None)
+        state.pop("fused_scores", None)
 
         # Save label embeddings separately
         label_embeddings = self.label_embeddings
         if label_embeddings is not None:
             np.save(pjoin(save_dir, "label_embeddings.npy"), label_embeddings)
-            state.pop("_label_embeddings", None)
+            state.pop("label_embeddings", None)
 
         # Save remaining state
         with open(pjoin(save_dir, "mlmodel.pkl"), "wb") as fout:
@@ -183,11 +138,9 @@ class MLModel():
         )
     
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
-        """
-            X_train: X_processed
-            Y_train, Y_binary
-            Z, Pifa embeddings
-        """
+        """Train one node: X_train (n x d), Y_train (n x L, the node's labels), Z_train (L x d, PIFA rows of
+        those labels); local_to_global[j] = global label index of local label j. An internal node clusters Z
+        into C (L x K) and trains its matcher on Y @ C; a leaf uses identity C (L x L)."""
         
         # Clustering input; a leaf only needs its label count (identity C)
         Z_train = normalize(Z_train, norm="l2", axis=1)

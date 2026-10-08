@@ -32,8 +32,8 @@ class TextEncoder():
         self.transformer_config = transformer_config
         self.dimension_config = dimension_config
         
-        self._vectorizer_model: Optional[Vectorizer] = None
-        self._dimension_model: Optional[DimensionModel] = None
+        self.vectorizer_model: Optional[Vectorizer] = None
+        self.dimension_model: Optional[DimensionModel] = None
         self.features = features  # see `_encode`
         self.context_vectorizer_config = context_vectorizer_config
         self.context_dimension_config = context_dimension_config
@@ -41,26 +41,6 @@ class TextEncoder():
         self.context_dimension_model = None
         self.block_widths = None  # "sapbert_char_context": fitted [transformer, char, context] widths
     
-    @property
-    def vectorizer_model(self) -> Optional[Vectorizer]:
-        """Return the fitted vectorizer model, if any."""
-        return self._vectorizer_model
-    
-    @vectorizer_model.setter
-    def vectorizer_model(self, value: Vectorizer) -> None:
-        """Set the fitted vectorizer model."""
-        self._vectorizer_model = value
-        
-    @property
-    def dimension_model(self) -> Optional[DimensionModel]:
-        """Return the fitted dimensionality reduction model."""
-        return self._dimension_model
-    
-    @dimension_model.setter
-    def dimension_model(self, value: DimensionModel) -> None:
-        """Set the fitted dimensionality reduction model."""
-        self._dimension_model = value
-        
     def save(self, save_dir: str) -> None:
         """Persist the encoder and its models to ``save_dir``."""
         models = ["vectorizer_model", "dimension_model", "context_vectorizer_model", "context_dimension_model"]
@@ -74,7 +54,7 @@ class TextEncoder():
         for idx, model in enumerate(models_data):
             if model is not None:
                 model.save(os.path.join(save_dir, models[idx]))
-                state.pop("_" + models[idx] if idx < 2 else models[idx], None)
+                state.pop(models[idx], None)
 
         with open(os.path.join(save_dir, "text_encoder.pkl"), "wb") as fout:
             pickle.dump(state, fout)

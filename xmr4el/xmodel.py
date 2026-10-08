@@ -20,6 +20,24 @@ from xmr4el.learning.scoring import label_max_cos
 
 
 
+def _json_state(state):
+    """xmodel.json view of the pickled state: JSON values as is, arrays/sparse matrices as type/shape/dtype (+nnz),
+    lists (labels, training texts) as type/len/first; json.dump's default=repr covers the rest."""
+    out = {}
+    for key, v in state.items():
+        if hasattr(v, "shape") and hasattr(v, "dtype"):
+            out[key] = {"type": type(v).__name__, "shape": list(v.shape), "dtype": str(v.dtype)}
+            if hasattr(v, "nnz"):
+                out[key]["nnz"] = int(v.nnz)
+        elif isinstance(v, (list, tuple)):
+            first = v[0] if len(v) else None
+            out[key] = {"type": type(v).__name__, "len": len(v),
+                        "first": first if isinstance(first, (str, int, float, type(None))) else repr(first)[:200]}
+        else:
+            out[key] = v
+    return out
+
+
 class XModel:
     
     def __init__(self, 
@@ -69,13 +87,14 @@ class XModel:
         # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
         self.predict_config = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, **(predict_config or {})}
         
-        self._text_encoder = None
-        self._hml = None
-        self._training_texts = None
-        self._original_labels = None
-        self._X = None
-        self._Y = None
-        self._Z = None
+        self.text_encoder = None
+        self.model = None  # HierarchicalMLModel
+        self.training_set = None  # grouped training texts as given to train
+        # Label index j = column j of Y = row j of Z = initial_labels[j] (binarizer classes_, sorted)
+        self.initial_labels = None
+        self.X = None  # train features, n x d (row i = i-th text after Preprocessor.prepare_data)
+        self.Y = None  # train labels, n x L (sparse, one label per row)
+        self.Z = None  # PIFA label embeddings, L x d
         
     
     def __str__(self) -> str:
@@ -131,11 +150,11 @@ class XModel:
             f"    clustering: {_short(self.clustering_config)}",
             f"    matcher: {_short(self.matcher_config)}",
             f"  internal state:",
-            f"    text_encoder: {_short(self._text_encoder)}",
-            f"    hml: {_short(self._hml)}",
-            f"    training_texts: {_short(self._training_texts)}",
-            f"    original_labels: {_short(self._original_labels)}",
-            f"    X/Y/Z: {_short(self._X)}, {_short(self._Y)}, {_short(self._Z)}",
+            f"    text_encoder: {_short(self.text_encoder)}",
+            f"    hml: {_short(self.model)}",
+            f"    training_texts: {_short(self.training_set)}",
+            f"    original_labels: {_short(self.initial_labels)}",
+            f"    X/Y/Z: {_short(self.X)}, {_short(self.Y)}, {_short(self.Z)}",
         ]
         return "\n".join(parts)
 
@@ -147,62 +166,6 @@ class XModel:
             return "<XModel (repr error)>"
 
     
-    @property
-    def text_encoder(self):
-        return self._text_encoder
-    
-    @text_encoder.setter
-    def text_encoder(self, value):
-        self._text_encoder = value
-
-    @property
-    def model(self):
-        return self._hml
-    
-    @model.setter
-    def model(self, value):
-        self._hml = value
-        
-    @property
-    def training_set(self):
-        return self._training_texts
-    
-    @training_set.setter
-    def training_set(self, value):
-        self._training_texts = value
-        
-    @property
-    def initial_labels(self):
-        return self._original_labels
-    
-    @initial_labels.setter
-    def initial_labels(self, value):
-        self._original_labels = value
-        
-    @property
-    def X(self):
-        return self._X
-    
-    @X.setter
-    def X(self, value):
-        self._X = value
-        
-    @property
-    def Y(self):
-        return self._Y
-    
-    @Y.setter
-    def Y(self, value):
-        self._Y = value
-        
-    @property 
-    def Z(self):
-        return self._Z
-    
-    @Z.setter
-    def Z(self, value):
-        self._Z = value        
-        
     def save(self, save_dir):
         start = time.perf_counter()
         parts = {"hml": self.model, "text_encoder": self.text_encoder}
@@ -220,13 +183,15 @@ class XModel:
                 save_dir, n = f"{base}_{n}", n + 1
     
         state = self.__dict__.copy()
-        state.pop("_hml"), state.pop("_text_encoder")
+        state.pop("model"), state.pop("text_encoder")
         for name, part in parts.items():
             if part is not None:
                 part.save(os.path.join(save_dir, name))
 
         with open(os.path.join(save_dir, "xmodel.pkl"), "wb") as fout:
             pickle.dump(state, fout)
+        with open(os.path.join(save_dir, "xmodel.json"), "w") as fout:  # readable view, never loaded
+            json.dump(_json_state(state), fout, indent=2, default=repr)
         self.logger.info("Model saved: path=%s elapsed=%.1fs", save_dir, time.perf_counter() - start)
     
     @classmethod
@@ -244,13 +209,8 @@ class XModel:
         if model.Z is not None and len(model.initial_labels) != model.Z.shape[0]:
             raise ValueError(f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows")
         
-        model_path = os.path.join(load_dir, "hml")
-        hml = HierarchicalMLModel.load(model_path)
-        setattr(model, "_hml", hml)
-        
-        text_encoder_path = os.path.join(load_dir, "text_encoder")
-        text_encoder = TextEncoder.load(text_encoder_path)
-        setattr(model, "_text_encoder", text_encoder)
+        model.model = HierarchicalMLModel.load(os.path.join(load_dir, "hml"))
+        model.text_encoder = TextEncoder.load(os.path.join(load_dir, "text_encoder"))
         
         return model
     
@@ -265,7 +225,7 @@ class XModel:
         
     
     def _fit(self, X_text, Y_text):
-        """Returns embeddings: ndarray"""
+        """Encode the grouped texts: returns X (n x d), Y (n x L, sparse), Z = PIFA (L x d)."""
         
         self.training_set = deepcopy(X_text)
         
@@ -307,7 +267,8 @@ class XModel:
         return X_emb, Y_binary, Z
     
     def train(self, X_text, Y_text):
-        
+        """X_text: one list of training texts per label group, Y_text: the group labels. Sets X (n x d),
+        Y (n x L), Z (L x d), initial_labels and the tree."""
         start = time.perf_counter()
         
         self.X, self.Y, self.Z = self._fit(X_text=X_text, Y_text=Y_text)

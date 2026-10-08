@@ -79,17 +79,7 @@ class Matcher:
             Desired data type for internal numpy arrays.
         """
 
-        self._model: Optional[ClassifierModel] = None
-        
-    @property
-    def model(self) -> Optional[ClassifierModel]:
-        """Return the trained classification model."""
-        return self._model
-    
-    @model.setter
-    def model(self, value: ClassifierModel) -> None:
-        """Set the trained classification model."""
-        self._model = value
+        self.model: Optional[ClassifierModel] = None
         
     def save(self, save_dir: str) -> None:
         """Persist the matcher object to disk.
@@ -108,7 +98,7 @@ class Matcher:
         state = self.__dict__.copy()
         if model is not None:
             model.save(os.path.join(save_dir, "matcher"))
-            state.pop("_model", None)
+            state.pop("model", None)
 
         with open(os.path.join(save_dir, "matcher.pkl"), "wb") as fout:
             pickle.dump(state, fout)
@@ -140,7 +130,7 @@ class Matcher:
         
         model_path = os.path.join(load_dir, "matcher")
         matcher = ClassifierModel.load(model_path)
-        setattr(model, "_model", matcher)
+        model.model = matcher
         
         return model
     

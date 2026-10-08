@@ -39,7 +39,7 @@ def test_label_mapping():
         # More labels than Z rows (e.g. an empty group given a name) must be refused at load
         with open(saved / "xmodel.pkl", "rb") as f:
             state = pickle.load(f)
-        state["_original_labels"] = ["L0", "L1", "L2", "L3"]
+        state["initial_labels"] = ["L0", "L1", "L2", "L3"]
         with open(saved / "xmodel.pkl", "wb") as f:
             pickle.dump(state, f)
         try:
