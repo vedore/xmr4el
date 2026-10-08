@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
 
-**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: U3 plan (below) — Claude extends `diagnose_unseen.py` first, then one user run. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: N (normalize the run path, plan below) first, then U3 diagnosis on the normalized code. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -266,6 +266,35 @@ U2. Done (uncommitted): `XModel.predict(knn_beta=0.0)`: candidates' scores x exp
 U2 passed: dev = U1 beta 10 row exactly (0.9041, MRR 0.9335, unseen 0.6800, hybrid 0.9062); test (run once) 0.9163,
    MRR 0.9402, seen 1 0.9845, seen >1 0.7299, unseen 0.7122, hybrid 0.9213 (was 0.873 / 0.653 / 0.909). Rows in
    `docs/results.md`. Committed. Literature test 93.2 / 93.5 (protocol not matched).
+N. Normalize how the model runs (plan 2026-10-08, user decisions: remove rankers; keep a TF-IDF-only feature
+   option for plain TSV but under a descriptive name, not flag 1/6; keep configs base + bc5cdr only).
+   Goal: one canonical train path and one canonical predict path, settings stored in the config/tree, so a bare
+   `evaluate.py` reproduces the reported numbers. Today a bare eval uses beam 5, topk 20, alpha 1, no path score.
+   Key fact: at the validated `-alpha 0` the leaf score is the matcher probability; the cosine/ranker fusion
+   (`scorer`, `alpha`, `fusion`, `p`, `eps`) only costs time (6.3 s of the 9 s dev eval), except an lp-fusion
+   cube/cube-root round trip and an eps clip that may move float ties.
+   N1 predict path (inference only, verify on `12-21-30`): `XModel.predict(X_text, beam_size, topk=0, knn_beta)`;
+      leaf score = matcher prob x path prob (path score always on); remove alpha/fusion/p/eps/scorer/topk_mode/
+      include_global_path/n_jobs/return_matrix; `topk` = global cut of the final row; return the score CSR only
+      (evaluate's @cand = row nnz, same set as final_path labels). `evaluate.py` keeps -beam_size, -knn_beta, -topk as
+      overrides, defaults read from the tree's config (N3). Drop evaluate's ranker report and tie detector branch.
+      Pass = dev output = `knn10_dev_eval.log` (<= 0.001 if the fusion round trip moved ties); eval ~3 s.
+   N2 training path: delete rankers (`ranker.py`, `Ranker`, `ranker_config`, `cur_config`, `ranker_every_layer`,
+      `train_rankers`, `MLModel.ranker_model`, `_topb_sparse`/M_MAN, matcher `m_node` if only rankers read it), leaf
+      label embeddings if only cosine/rankers read them, matcher types `sklearnsgdclassifier` and
+      `sklearnlogisticregression` (+ the leaf SGD early-stopping override), clusterer `sklearnkmeans` (tests move to
+      `balancedkmeans`; the liblinear parity test calls sklearn directly). Each deletion: grep every reader first.
+   N3 config: `emb_flag` 1/6 -> `"features": "tfidf"` (TF-IDF->SVD of the text; plain TSV) | `"sapbert_char_context"`
+      (today's flag 6); joint matcher for both; `"predict_config": {"beam_size": 10, "topk": 0, "knn_beta": 10}` (bc5cdr;
+      base keeps knn_beta 0 until measured on MedMentions, U3 D5). Delete configs bc5cdr_dict, flag6_sapbert, full_cuda,
+      flag1 (their rows stay in `docs/results.md`; `docs/full_cuda_comparison.md` gets a note). The TSV option stays
+      covered by `test_pipeline_persistence` (already the TF-IDF path).
+   N4 scripts: adapt `diagnose_routing.py`, `diagnose_unseen.py` (blocks from the features name), `beam_sweep.py`,
+      PECOS baselines; delete `screen_leaf_scorer.py` if it only screens removed scorers (its results stay).
+   N5 docs: README, `scripts/README.md`, `docs/pipeline.md` table, CLAUDE.md commands (`emb_flag` lines) updated.
+   N6 verification: N1 on `12-21-30` (eval only). N2/N3 rename breaks old trees (no compat code): one bc5cdr retrain +
+      bare dev eval (no flags) = `knn10_dev_eval.log` within MPS root noise (~0.002), then test once, then the user
+      deletes trees `11-31-05`, `11-45-47`, `12-21-30`. pytest + all selfchecks after each step. One commit per step.
 U3. Next-session diagnosis plan (2026-10-08). Dev only; test once per retained change. Tree `12-21-30`, base eval
    `-beam_size 10 -topk 0 -alpha 0 -path_score -knn_beta 10` (dev 0.9041; unseen 0.6800 n=953, seen >1 0.8113 n=212,
    seen 1 0.9783 n=3140 = dict). Remaining dev errors ~413: unseen ~305, seen >1 ~40, seen 1 ~68.
