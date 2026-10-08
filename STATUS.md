@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; next = F5 leaf overhead).
+Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
 
-**Runs:** none in flight. Next: F5 (leaf training overhead, below). Eval now 10 s (ranking 6.3 s is the rest). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). Next: see F6 below. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -214,6 +214,20 @@ G1b. Done (uncommitted): `HierarchicalMLModel.predict` routes all queries layer 
    Pass = output identical to `g1a_eval.log` (else within ~0.001: float32 ulp), `Routing completed` 6.3 s -> ~1 s.
 G1b passed (`outputs/logs/g1b_eval.log`): output identical to `g1a_eval.log`; routing 6.3 -> 1.6 s, wall 15 -> 10 s.
    Committed.
+F5 result (synthetic leaf 630x2307, 92 labels, bc5cdr config, torch + transformers imported): `MLModel.train` + save
+   0.174 s, of which 3 `gc.collect()` per node 0.14 s (47 ms each; more in the real process's larger heap); solver
+   ~0.03 s. Done (uncommitted): removed the 3 `gc.collect()` calls in `MLModel.train` (refcounting frees the `del`ed
+   arrays; only cycles needed gc). Per-layer `collect()` in `tree.py` kept. Synthetic leaf 0.174 -> 0.032 s. pytest 25 pass.
+   User: `python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/nogc_bc5cdr_ctd.log && python scripts/evaluate.py -xmodel_path outputs/saved_trees/$(ls -t outputs/saved_trees | head -1) -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score 2>&1 | tee outputs/logs/nogc_bc5cdr_ctd_eval.log`
+   Pass = dev metrics = `11-45-47` (acc@1 0.8551, MRR 0.8972, hybrid 0.8873; gc does not touch numerics, only MPS
+   root noise ~0.002 possible), leaf layer 34.9 -> ~5-8 s, hierarchy 54.6 -> ~25 s. Then commit, add row to results.
+F5 passed: tree `12-21-30` (`nogc_bc5cdr_ctd*.log`) dev metrics = `11-45-47` exactly; root node 19.5 s (clustering
+   ~5 s, matcher ~14 s), leaf layer 34.9 -> 11.3 s (~0.09 s/leaf vs synthetic 0.03 s), hierarchy 31.1 s, run 61.6 s
+   (encoding 25.1 s, cache hit). Row in `docs/results.md`. Committed.
+F6 (candidates, user picks): run 61.6 s = encoding 25.1 s (TF-IDF/SVD on cache hit) + root 19.5 s + leaves 11.3 s.
+   PECOS's 34.6 s compares to our hierarchy 31.1 s: training speed target met. Remaining options: encoding (SVD
+   fit, the largest stage now), leaf residual (~0.06 s/leaf: temp save/load), or back to accuracy work.
+   Also pending: BC5CDR test-section rerun on the current tree.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned

@@ -564,6 +564,9 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
   identical metrics, root clustering 17.6 -> 5.0 s, hierarchy 65.8 s, run 96.3 s* (`k128c_bc5cdr_ctd.log`).
   Root matcher on MPS (`11-45-47`, `mps_bc5cdr_ctd.log`): acc@1 0.8551, MRR 0.8972, hybrid 0.8873 (float32 order
   noise); root node 32.0 -> 20.1 s, hierarchy 54.6 s, run 85.5 s*.
+  No per-node `gc.collect()` (`12-21-30`, `nogc_bc5cdr_ctd.log`): dev metrics identical to `11-45-47`; leaf layer
+  34.9 -> 11.3 s, hierarchy 54.6 -> 31.1 s, run 61.6 s*. Eval (`-path_score`, beam 10) 42 -> 9 s after batching
+  the leaf cosine (`g1a_eval.log`) and the routing (`g1b_eval.log`), output identical.
 
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 

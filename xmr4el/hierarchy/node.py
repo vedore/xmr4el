@@ -1,5 +1,4 @@
 import os
-import gc
 import pickle
 import logging
 
@@ -255,7 +254,6 @@ class MLModel():
         
         self.cluster_model = cluster_model
         del cluster_model
-        gc.collect()
         
         # Retrieve C
         C = self.cluster_model.c_node
@@ -298,7 +296,6 @@ class MLModel():
          
         self.matcher_model = matcher_model 
         del matcher_model
-        gc.collect()
         
         # Rankers are only used for prediction with -scorer ranker; internal training scores
         # are matcher-only. train_rankers=False skips them; predict then uses cosine.
@@ -347,7 +344,6 @@ class MLModel():
         else:
             self.ranker_model = None
             
-        gc.collect()
         
         self.fused_scores = None
         if not self.is_last_layer:
