@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
+Last updated 2026-10-08 end of session (speed F/G done: train 61.6 s, eval 9 s; knn fusion `-knn_beta 10` committed: dev 0.904, test 0.916 / hybrid 0.921; next session = plan N (normalize run path), then U3 diagnosis).
 
 **Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: N (normalize the run path, plan below) first, then U3 diagnosis on the normalized code. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
