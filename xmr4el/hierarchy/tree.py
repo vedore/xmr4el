@@ -12,7 +12,7 @@ from os.path import join as pjoin, exists as pexists, isdir as pisdir
 from os import makedirs as pmakedirs, listdir as plistdir
 from pickle import dump as pkl_dump, load as pkl_load
 from joblib import dump as jdump, load as jload
-from scipy.sparse import hstack as sp_hstack, vstack, csr_matrix
+from scipy.sparse import hstack as sp_hstack, csr_matrix
 from numpy import (
     asarray, array, int32, argsort, log, hstack as np_hstack,
     vstack as np_vstack, zeros
@@ -405,15 +405,8 @@ class HierarchicalMLModel():
         def _norm_topk(k):
             return None if (k is None or k <= 0) else int(k)
 
-        def _init_beam_first_layer(n_models: int, x0_row):
-            # tuple per perflint W8301
-            return tuple((mi, x0_row, 0.0, []) for mi in range(n_models))
-
         def _parent_to_child(layer_i: int, parent_model_i: int) -> dict:
             return self.child_index_map[layer_i][parent_model_i]
-
-        def _stack_batch(xs):
-            return xs[0] if len(xs) == 1 else vstack(xs, format="csr")
 
         def _maybe_leaf_topk(labels, scores, k_norm):
             # Leaf predict returns labels in index order, not score order: sort before cutting.
@@ -438,20 +431,11 @@ class HierarchicalMLModel():
         def _maybe_global_topk_items(items, k_norm):
             return items if k_norm is None else nlargest(k_norm, items, key=lambda kv: kv[1])
 
-        def _add_beam_to_pending(beam, qi, pending_by_leaf):
-            """Avoid W8402 by doing the grouping inside a helper."""
-            by_leaf = defaultdict(list)
-            # Build (leaf_idx -> list[(qi, x_row, trail)])
-            for child_idx, x_row, trail in ((b[0], b[1], b[3]) for b in beam):
-                by_leaf[int(child_idx)].append((qi, x_row, trail))
-            for k_leaf, v_list in by_leaf.items():
-                pending_by_leaf[k_leaf].extend(v_list)
-
         def _predict_one_leaf(leaf_idx, items, per_leaf_topk, topk_norm, fusion, alpha,
                             paths_per_query, per_query_scores):
             """Encapsulate leaf loop body to avoid W8201 on helper calls/branches."""
-            q_indices, xs, trails = zip(*items)
-            X_batch = _stack_batch(list(xs))  # not loop-invariant anymore from perflint’s PoV
+            q_indices, rows, trails = zip(*items)
+            X_batch = X_beam[list(rows)]
 
             leaf_ml = leaf_layer_models[leaf_idx]
             scores_list, labels_list = leaf_ml.predict(
@@ -497,7 +481,7 @@ class HierarchicalMLModel():
 
         paths_per_query = [[] for _ in range(n_queries)]
         per_query_scores = [defaultdict(float) for _ in range(n_queries)]
-        pending_by_leaf: dict[int, list[tuple[int, csr_matrix, list]]] = defaultdict(list)
+        pending_by_leaf: dict[int, list[tuple[int, int, list]]] = defaultdict(list)
 
         # precompute invariants that were flagged
         is_per_leaf_topk = (topk_mode == "per_leaf")
@@ -506,56 +490,64 @@ class HierarchicalMLModel():
         self.logger.info("Routing started: rows=%d beam=%d topk=%s topk_mode=%s scorer=%s alpha=%s path_score=%s",
                          n_queries, beam_size, topk, topk_mode, scorer or "auto", alpha, path_score)
 
-        for qi in range(X_query.shape[0]):
-            x0 = X_query[qi:qi+1]
-            beam = _init_beam_first_layer(len(self.hmodel[0]), x0)
+        # Beam entries of all queries, in query order then beam order; row i of X_beam belongs to entry i.
+        # One matcher call and one augment_features call per layer instead of per query and beam entry.
+        n_roots = len(self.hmodel[0])
+        beam = [(qi, mi, 0.0, []) for qi in range(n_queries) for mi in range(n_roots)]
+        X_beam = X_query[np.repeat(np.arange(n_queries), n_roots)]
 
-            # Traverse all non-final layers
-            for layer in range(n_layers - 1):
-                ml_list = self.hmodel[layer]
-                candidates = []
+        # Traverse all non-final layers
+        for layer in range(n_layers - 1):
+            ml_list = self.hmodel[layer]
+            parents = asarray([e[1] for e in beam])
+            cs_rows = [None] * len(beam)
+            for parent_model_idx in np.unique(parents):
+                rows = np.flatnonzero(parents == parent_model_idx)
+                cs_batch = asarray(ml_list[parent_model_idx].matcher_model.predict_proba(X_beam[rows]))
+                for r, cs in zip(rows, cs_batch):
+                    cs_rows[r] = cs
 
-                for parent_model_idx, x_row, logscore, trail in beam:
-                    ml = ml_list[parent_model_idx]
+            candidates_by_query = defaultdict(list)
+            for row, ((qi, parent_model_idx, logscore, trail), cs) in enumerate(zip(beam, cs_rows)):
+                if cs.size == 0 or np.all(cs <= 0):
+                    continue
 
-                    cs = asarray(ml.matcher_model.predict_proba(x_row)).ravel()
-                    if cs.size == 0 or np.all(cs <= 0):
+                idx_top, vals_top = _select_topk_indices(cs, min(beam_size, cs.size))
+                parent_to_child = _parent_to_child(layer, parent_model_idx)
+
+                sum_cs = float(cs.sum()); max_cs = float(cs.max())
+
+                for c, p_child in zip(idx_top, vals_top):
+                    child_idx = parent_to_child.get(int(c))
+                    if child_idx is None:
                         continue
 
-                    idx_top, vals_top = _select_topk_indices(cs, min(beam_size, cs.size))
-                    parent_to_child = _parent_to_child(layer, parent_model_idx)
+                    logscore_next = logscore + float(log(max(p_child, eps)))
 
-                    sum_cs = float(cs.sum()); max_cs = float(cs.max())
+                    trail_next = trail + [{
+                        "layer": layer,
+                        "parent_model_idx": int(parent_model_idx),
+                        "chosen_cluster": int(c),
+                        "matcher_prob": float(p_child),
+                        "child_model_idx": int(child_idx),
+                        "path_logscore": float(logscore_next)
+                    }]
 
-                    for c, p_child in zip(idx_top, vals_top):
-                        child_idx = parent_to_child.get(int(c))
-                        if child_idx is None:
-                            continue
+                    candidates_by_query[qi].append((int(child_idx), logscore_next, trail_next,
+                                                    row, float(p_child), sum_cs, max_cs))
 
-                        x_next = augment_features(x_row, [float(p_child)], [sum_cs], [max_cs])
+            beam, rows, selected, total, maximum = [], [], [], [], []
+            for qi, candidates in candidates_by_query.items():
+                candidates.sort(key=lambda t: -t[1])
+                for child_idx, logscore_next, trail_next, row, p_child, sum_cs, max_cs in candidates[:beam_size]:
+                    beam.append((qi, child_idx, logscore_next, trail_next))
+                    rows.append(row); selected.append(p_child); total.append(sum_cs); maximum.append(max_cs)
+            if not beam:
+                break
+            X_beam = augment_features(X_beam[rows], selected, total, maximum)
 
-                        logscore_next = logscore + float(log(max(p_child, eps)))
-
-                        trail_next = trail + [{
-                            "layer": layer,
-                            "parent_model_idx": int(parent_model_idx),
-                            "chosen_cluster": int(c),
-                            "matcher_prob": float(p_child),
-                            "child_model_idx": int(child_idx),
-                            "path_logscore": float(logscore_next)
-                        }]
-
-                        candidates.append((int(child_idx), x_next, logscore_next, trail_next))
-
-                if not candidates:
-                    beam = ()
-                    break
-
-                candidates.sort(key=lambda t: -t[2])
-                beam = tuple(candidates[:beam_size])
-
-            if beam:
-                _add_beam_to_pending(beam, qi, pending_by_leaf)
+        for row, (qi, leaf_idx, _, trail) in enumerate(beam):
+            pending_by_leaf[int(leaf_idx)].append((qi, row, trail))
 
         time_start_ranking = time.perf_counter()
         self.logger.info("Routing completed: visited_leaves=%d elapsed=%.1fs",

@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed, eval 42 -> 15 s; next = G1b routing batch, F5).
+Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; next = F5 leaf overhead).
 
-**Runs:** none in flight. Next: G1b (routing batch, 6.3 s of 15 s), then F5. Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. Next: F5 (leaf training overhead, below). Eval now 10 s (ranking 6.3 s is the rest). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -202,6 +202,18 @@ G1a. Done (uncommitted): `scoring.py` `_cos_fallback(q_idx, li)` computes `X_que
 G1a passed (`outputs/logs/g1a_eval.log`): output identical to `eval_profile.log`; ranking 35.5 -> 6.6 s, wall 15 s
    (was 42 s unprofiled). Without cProfile routing is 6.3 s (14.3 s was profiler overhead on many small calls),
    so G1b gains ~5 s at most. Committed.
+G1b. Done (uncommitted): `HierarchicalMLModel.predict` routes all queries layer by layer: beam entries of every
+   query in one list (query order, then beam order) with `X_beam` row i = entry i; one `predict_proba` per node over
+   its entries, one `augment_features` per layer over the kept candidates; same top-k, stable sort and cut per query,
+   same leaf batch order. Removed `_init_beam_first_layer`, `_stack_batch`, `_add_beam_to_pending`.
+   Synthetic old (HEAD) vs new, depth 2 and 3, 300 queries, 4 settings each: routes and score CSR identical except
+   depth 3 beam 1: 1 of 300 queries differs by 1 float32 ulp in a layer-1 matcher prob (batched vs single-row GEMM).
+   Random root-shaped GEMM (4305x2305x128) batched = single-row exactly, so the BC5CDR eval should be identical.
+   pytest 25 pass.
+   User: `python scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_11-45-47 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -beam_size 10 -topk 0 -alpha 0 -path_score -verbose 2>&1 | tee outputs/logs/g1b_eval.log`
+   Pass = output identical to `g1a_eval.log` (else within ~0.001: float32 ulp), `Routing completed` 6.3 s -> ~1 s.
+G1b passed (`outputs/logs/g1b_eval.log`): output identical to `g1a_eval.log`; routing 6.3 -> 1.6 s, wall 15 -> 10 s.
+   Committed.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned
