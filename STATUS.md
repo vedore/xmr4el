@@ -267,8 +267,8 @@ U2 passed: dev = U1 beta 10 row exactly (0.9041, MRR 0.9335, unseen 0.6800, hybr
    MRR 0.9402, seen 1 0.9845, seen >1 0.7299, unseen 0.7122, hybrid 0.9213 (was 0.873 / 0.653 / 0.909). Rows in
    `docs/results.md`. Committed. Literature test 93.2 / 93.5 (protocol not matched).
 U3 (candidates): seen >1-label strings are now the tree's weakest vs the dictionary (test 0.730 vs 0.856); unseen
-   0.712 still the largest error mass (938 rows). Read the new unseen errors (rerun diagnose_unseen with the fusion
-   as tree order is not wired; or add -knn_beta to it) before choosing; knn over CTD-only names vs all rows untested.
+   0.712 still the largest error mass (938 rows). First: give `diagnose_unseen.py` a `-knn_beta` so its rank buckets
+   and error TSV describe the fused ranking, then read the remaining errors before choosing a change.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned
