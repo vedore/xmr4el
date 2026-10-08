@@ -67,7 +67,7 @@
         "kwargs": {
             "C": 1.0,
             "class_weight": "balanced",
-            "tol": 0.0001
+            "tol": 0.001
         }
     },
     "ranker_config": {

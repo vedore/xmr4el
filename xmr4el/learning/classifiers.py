@@ -299,7 +299,7 @@ class JointOvRLogistic:
     OneVsRestClassifier (what the matcher trains on its 0/1 indicator matrix).
     """
 
-    def __init__(self, C=1.0, class_weight="balanced", tol=1e-4, max_iter=500):
+    def __init__(self, C=1.0, class_weight="balanced", tol=1e-3, max_iter=500):
         self.C, self.class_weight, self.tol, self.max_iter = C, class_weight, tol, max_iter
 
     @staticmethod
@@ -334,7 +334,8 @@ class JointOvRLogistic:
 
         # torch L-BFGS on CPU: scipy's L-BFGS-B step and numpy's single-threaded logaddexp/expit were ~95% of a
         # 6000x2304x734 leaf fit; torch runs both multithreaded (4x faster, 0.999 top-1 agreement). Stops when the
-        # max |gradient| <= tol, scipy's gtol rule.
+        # max |gradient| <= tol, scipy's gtol rule. The objective is divided by n (sklearn's lbfgs scaling, same
+        # minimizer): unscaled, the gradient never reached tol and every fit ran to the float32 loss stall.
         Xt, St, cwt = (torch.from_numpy(a) for a in (Xb, S, cw))
         W = torch.zeros(Xb.shape[1], L)
         opt = torch.optim.LBFGS([W], lr=1, max_iter=self.max_iter, tolerance_grad=self.tol, tolerance_change=1e-9,
@@ -342,8 +343,8 @@ class JointOvRLogistic:
 
         def closure():
             M = St * (Xt @ W)
-            W.grad = W + Xt.T @ (-cwt * St * torch.sigmoid(-M))
-            return 0.5 * (W * W).sum() + (cwt * torch.nn.functional.softplus(-M)).sum()
+            W.grad = (W + Xt.T @ (-cwt * St * torch.sigmoid(-M))) / n
+            return (0.5 * (W * W).sum() + (cwt * torch.nn.functional.softplus(-M)).sum()) / n
 
         with torch.no_grad():
             opt.step(closure)
@@ -380,7 +381,7 @@ class JointLogisticRegression(ClassifierModel):
 
     @classmethod
     def init_model(cls, config, onevsrest=False):
-        cfg = {"C": 1.0, "class_weight": "balanced", "tol": 1e-4, "max_iter": 500, **(config or {})}
+        cfg = {"C": 1.0, "class_weight": "balanced", "tol": 1e-3, "max_iter": 500, **(config or {})}
         return cls(cfg, JointOvRLogistic(**cfg))
 
     @classmethod
