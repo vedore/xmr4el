@@ -202,7 +202,7 @@ Then check these known error origins, in pipeline order (state in `STATUS.md`, e
   must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
 - `-ds_len` selects the first N label groups (first-seen order for PubTator, sorted group ID for
   grouped TSV), not a random sample
-- feature block balance (`emb_flag` 6 normalises each block before the concat)
+- feature block balance (`"sapbert_char_context"` normalises each block before the concat)
 - PIFA label embeddings built from mention + context
 - child matchers trained without out-of-cluster negatives
 - leaf scores are only comparable across leaves through the routing path probability

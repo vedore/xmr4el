@@ -19,8 +19,9 @@ uv sync --locked
 Local machine: `.venv/bin/python`. Inside the Docker containers (`xmr4el.dockerfile`, `pecos.dockerfile`): `python3`.
 
 Training accepts PubTator by default, or grouped TSV with `-labels_path`.
-Plain TSV requires `emb_flag` 1 (`configs/xmr4el_flag1_config.json`); PubTator uses 6 (base config).
-The base configuration is `configs/xmr4el_base_config.json`.
+Plain TSV requires `"features": "tfidf"` (copy of the base config); PubTator uses `"sapbert_char_context"`.
+Configs: `configs/xmr4el_base_config.json` (MedMentions), `configs/xmr4el_bc5cdr_config.json`.
+Search defaults are the config's `predict_config`, saved with the tree; bare `evaluate.py` uses them.
 Saved trees are under `outputs/saved_trees/`.
 
 ## Working rules

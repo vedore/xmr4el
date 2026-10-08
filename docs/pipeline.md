@@ -10,7 +10,7 @@ Moved out of `STATUS.md` (2026-10-06).
 | Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicalMLModel.load`, `xmr4el/hierarchy/tree.py` |
 | Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load asserts label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmodel.py` |
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `scripts/evaluate.py` |
-| Features | Flag 1: TF-IDF (-> dimension model) of the whole text (TSV). Flag 6: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Flags 2-5 raise | `TextEncoder._encode`, base / flag1 config |
+| Features | `"tfidf"`: TF-IDF (-> dimension model) of the whole text (TSV). `"sapbert_char_context"`: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Other names raise | `TextEncoder._encode`, `features` in the config |
 | Clustering | Seeded balanced spherical k-means (numpy): recursive balanced 2-means, then joint balanced refinement over all k clusters; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
 | Leaf scoring | Each visited leaf contributes its 100 best labels by leaf matcher probability (`LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear) | `HierarchicalMLModel.predict` |
@@ -40,7 +40,7 @@ Observations and hypotheses, not a mandatory sequence of fixes.
 | Pipeline stage | Confirmed behavior | Follow-up if implicated |
 |---|---|---|
 | Data | `-ds_len` keeps the first N label groups; the historical 500-label vocabulary covered about 18.4% of dev mentions | Keep vocabulary fixed for debugging; use a seeded, recorded sample or full vocabulary for broader claims |
-| Features | Flag 6 L2-normalises each block before the concat, so the three blocks carry equal, untuned weight | If block diagnostics suggest a problem, compare one weighting change with a retrained control |
+| Features | `"sapbert_char_context"` L2-normalises each block before the concat, so the three blocks carry equal, untuned weight | If block diagnostics suggest a problem, compare one weighting change with a retrained control |
 | Label embeddings / hierarchy | PIFA uses full mention+context features | If flat retrieval works but centroid routing fails, isolate a label-representation or clustering change; PIFA itself is not a bug |
 | Matcher | Child models train on in-cluster rows but receive beam-routed queries | If root routing works and child rejection fails, measure out-of-cluster errors before adding routed negatives |
 | Traversal / scoring | Ancestor `path_logscore` prunes the beam and multiplies every leaf score (exp(path_logscore)) | Leaf matcher probabilities alone are not comparable across leaves |

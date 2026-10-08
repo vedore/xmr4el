@@ -38,8 +38,8 @@ def main():
                 args.train_path, args.labels_path, args.model_config, args.ds_len)
     logger.info("Loading training data")
     if args.labels_path:
-        if xmodel.emb_flag != 1:
-            parser.error("Grouped TSV input has no [SEP]: it requires emb_flag 1 in the model config")
+        if xmodel.features != "tfidf":
+            parser.error('Grouped TSV input has no [SEP]: it requires "features": "tfidf" in the model config')
         train_data = Preprocessor.load_data_labels_from_file(args.train_path, args.labels_path)
         X_train, Y_train = train_data["corpus"], train_data["labels"]
     else:

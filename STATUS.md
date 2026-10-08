@@ -6,10 +6,14 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1, N2 committed; N3 in progress: features name + predict_config in the config).
+Last updated 2026-10-08 (N1-N5 committed; N6 = user retrain + bare dev eval below; code frozen until pasted).
 
-**Runs:** none in flight. N1 passed (`outputs/logs/n1_dev_eval.log` = `knn10_dev_eval.log` exactly, eval 12 -> 6 s).
-Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (with knn: dev 0.680, test 0.712).
+**Runs:** N6 (user; code frozen until pasted). Old trees no longer load (`features` replaced `emb_flag`).
+`python scripts/train.py -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -model_config configs/xmr4el_bc5cdr_config.json 2>&1 | tee outputs/logs/n6_train.log && python scripts/evaluate.py -xmodel_path outputs/saved_trees/$(ls -t outputs/saved_trees | head -1) -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator 2>&1 | tee outputs/logs/n6_dev_eval.log`
+Pass = eval line `search beam 10, topk 0, knn beta 10` with no flags given; dev within MPS root noise (~0.002) of
+`knn10_dev_eval.log` (acc@1 0.9041, unseen 0.6800, hybrid 0.9062); train ~62 s (cache hit). Then test once (same
+eval, `test.pubtator`, log `n6_test_eval.log`; reference 0.9163 / hybrid 0.9213), results.md row if numbers move,
+user deletes trees `11-31-05`, `11-45-47`, `12-21-30`. Then U3 diagnosis.
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -300,6 +304,13 @@ N. Normalize how the model runs (plan 2026-10-08, user decisions: remove rankers
       Tests: `test_no_rankers.py` -> `test_tree.py`; `test_ranker.py`, `test_matcher.py` (SGD override) deleted;
       reassignment test now balanced (62 labels, 4 clusters, min_leaf 16). pytest 23 + 5 selfchecks pass.
       Depth-2 training is unchanged (rankers were off, leaves never cluster), so no run for N2 alone.
+   N3-N5 done, committed together: `XModel(features="tfidf"|"sapbert_char_context", predict_config={...})`,
+      `TextEncoder(features=...)` (other names raise; no old-flag message). `predict_config` defaults beam 10,
+      topk 0, knn 0, merged with the config's; base config beam 2 / knn 0, bc5cdr beam 10 / knn 10.
+      `XModel.predict` and `evaluate.py` args default None -> `resolve_predict_config`. Plain TSV: copy the base
+      config with `"features": "tfidf"` (README § Grouped TSV). N4: diagnose scripts use `features`; others needed
+      no change (`screen_leaf_scorer.py` kept: it screens sklearn scorers, not removed code). N5: README,
+      scripts/README, pipeline.md, AGENTS.md, CLAUDE.md, full_cuda note. pytest 23 + 5 selfchecks pass.
    N3 config: `emb_flag` 1/6 -> `"features": "tfidf"` (TF-IDF->SVD of the text; plain TSV) | `"sapbert_char_context"`
       (today's flag 6); joint matcher for both; `"predict_config": {"beam_size": 10, "topk": 0, "knn_beta": 10}` (bc5cdr;
       base keeps knn_beta 0 until measured on MedMentions, U3 D5). Delete configs bc5cdr_dict, flag6_sapbert, full_cuda,

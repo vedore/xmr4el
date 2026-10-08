@@ -37,7 +37,8 @@ class XModel:
                  max_leaf_size: int = None,
                  cut_half_cluster: bool = False,
                  depth: int = 1,
-                 emb_flag: int = 6,
+                 features: str = "sapbert_char_context",
+                 predict_config: Optional[dict] = None,
                  verbose: Optional[int] = None,
                  logger: Optional[logging.Logger] = None
                  ):
@@ -53,7 +54,7 @@ class XModel:
         self.vectorizer_config = vectorizer_config
         self.transformer_config = transformer_config
         self.dimension_config = dimension_config
-        # emb_flag 6 (1 = TF-IDF only): context block configs; PubTator loaders build the context from
+        # features "sapbert_char_context" ("tfidf" = TF-IDF only): context block configs; PubTator loaders build the context from
         # `context_window` words around each mention (None = whole document)
         self.context_vectorizer_config = context_vectorizer_config
         self.context_dimension_config = context_dimension_config
@@ -67,7 +68,9 @@ class XModel:
         self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
         self.depth = depth
-        self.emb_flag =emb_flag
+        self.features = features
+        # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
+        self.predict_config = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, **(predict_config or {})}
         
         self._text_encoder = None
         self._hml = None
@@ -124,7 +127,7 @@ class XModel:
         parts = [
             f"XModel summary:",
             f"  logger: {logger_info}",
-            f"  depth={self.depth}, emb_flag={self.emb_flag}",
+            f"  depth={self.depth}, features={self.features}, predict={self.predict_config}",
             f"  cluster: min_leaf_size={self.min_leaf_size}, max_leaf_size={self.max_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
@@ -144,7 +147,7 @@ class XModel:
     def __repr__(self) -> str:
         # concise repr that can be used in containers / REPL
         try:
-            return f"XModel(depth={self.depth}, emb_flag={self.emb_flag})"
+            return f"XModel(depth={self.depth}, features={self.features})"
         except Exception:
             return "<XModel (repr error)>"
 
@@ -292,14 +295,14 @@ class XModel:
         X_processed, Y_label_to_indices = Preprocessor.prepare_data(X_text, Y_text)
         
         start = time.perf_counter()
-        self.logger.info("Encoding started: rows=%d emb_flag=%d", len(X_processed), self.emb_flag)
+        self.logger.info("Encoding started: rows=%d features=%s", len(X_processed), self.features)
         
         # Encode X_processed
         text_encoder = TextEncoder(
             vectorizer_config=self.vectorizer_config,
             transformer_config=self.transformer_config,
             dimension_config=self.dimension_config, 
-            flag=self.emb_flag, # Needs to be a variable, could have a stop to check
+            features=self.features,
             context_vectorizer_config=self.context_vectorizer_config,
             context_dimension_config=self.context_dimension_config,
             )
@@ -359,18 +362,22 @@ class XModel:
         self.logger.info("Training completed: elapsed=%.1fs", time.perf_counter() - start)
         
         
-    def predict(self, X_text, beam_size: int = 5, topk: int = 0, knn_beta: float = 0.0):
+    def predict(self, X_text, beam_size: Optional[int] = None, topk: Optional[int] = None,
+                knn_beta: Optional[float] = None):
         """Score CSR (n_queries x n_labels) for raw text queries (`HierarchicalMLModel.predict`).
+        Arguments left None take the tree's `predict_config`.
 
         knn_beta > 0 multiplies each candidate's score by exp(knn_beta * knn), knn = max cosine of the query's
         mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). Only scores change:
         the candidates stay the tree's."""
+        cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+        knn_beta = cfg["knn_beta"]
         time_start_encoding = time.perf_counter()
         X_query = self.text_encoder.predict(X_text)
         self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
                          X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
 
-        scores = self.model.predict(X_query, beam_size=beam_size, topk=topk)
+        scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=cfg["topk"])
         if knn_beta:
             time_start_knn = time.perf_counter()
             Y = self.Y.tocsr()
@@ -383,9 +390,14 @@ class XModel:
                              time.perf_counter() - time_start_knn)
         return scores
 
+    def resolve_predict_config(self, **overrides):
+        """`predict_config` with the non-None overrides applied."""
+        return {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
+
     def mention_block(self):
-        """Columns of the mention encoder in X: emb_flag 6 is [transformer | char SVD | context SVD]; else all."""
-        if self.emb_flag != 6:
+        """Columns of the mention encoder in X: "sapbert_char_context" is [transformer | char SVD | context SVD];
+        else all."""
+        if self.features != "sapbert_char_context":
             return slice(None)
         d = self.X.shape[1] - self.dimension_config["kwargs"]["n_components"] \
             - self.context_dimension_config["kwargs"]["n_components"]

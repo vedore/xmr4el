@@ -2,7 +2,7 @@
 
 For one saved tree, on in-vocabulary test rows:
   - unseen-string rows: tree acc@1 and gold-rank buckets (1, 2-5, 6-20, >20 in the candidates, not in the candidates =
-    routing loss); flat baselines per feature block (emb_flag 6: mention, char, context): 1-NN over the tree's own
+    routing loss); flat baselines per feature block ("sapbert_char_context": mention, char, context): 1-NN over the tree's own
     train rows (`XModel.X`, labels from `XModel.Y`) and nearest label embedding (root Z)
   - fusion screen, all rows: each tree candidate re-scored by log(tree score) + beta * knn, knn = max cosine of the
     query's mention block to that label's train rows (SapBERT's nearest-synonym score); beta inf = knn only within the
@@ -93,7 +93,7 @@ def main():
     Z = _dense(xm.model.hmodel[0][0].label_embeddings)
     X = _dense(xm.text_encoder.predict(texts))
     blocks = {"all": slice(None)}
-    if xm.emb_flag == 6:
+    if xm.features == "sapbert_char_context":
         n_c = xm.dimension_config["kwargs"]["n_components"]
         n_x = xm.context_dimension_config["kwargs"]["n_components"]
         d_t = X.shape[1] - n_c - n_x

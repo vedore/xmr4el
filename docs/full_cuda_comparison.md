@@ -1,5 +1,8 @@
 # Full-vocabulary XMR4EL / PECOS XR-Linear comparison
 
+> Note (2026-10-08): `configs/xmr4el_full_cuda_config.json` was deleted (plan N); the commands below
+> need a copy of `configs/xmr4el_base_config.json` instead. Results stay in `docs/results.md`.
+
 Starting configuration, not a full-scale validated result. Train on every label observed in
 MedMentions **st21pv/train**; neither model learns labels absent from that training split.
 Assumes Linux x86-64, NVIDIA CUDA access through Docker, and the dataset in this checkout.

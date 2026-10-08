@@ -74,6 +74,11 @@
     "max_leaf_size": 200,
     "cut_half_cluster": true,
     "depth": 2,
-    "emb_flag": 6,
-    "verbose": 1
+    "verbose": 1,
+    "features": "sapbert_char_context",
+    "predict_config": {
+        "beam_size": 2,
+        "topk": 0,
+        "knn_beta": 0.0
+    }
 }

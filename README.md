@@ -40,9 +40,8 @@ The Linux x86-64 lock includes large CUDA packages, so the first build can take 
 space even when running on CPU.
 
 Copy your datasets into the checkout's `datasets/` or `data/` directory on the server;
-Git does not include them. Git tracks only `configs/xmr4el_base_config.json`,
-`xmr4el_flag1_config.json`, `xmr4el_flag6_sapbert_config.json` and `xmr4el_full_cuda_config.json`;
-copy any other local experiment config separately. First check the mounted code:
+Git does not include them. Git tracks only `configs/xmr4el_base_config.json` (MedMentions) and
+`configs/xmr4el_bc5cdr_config.json`; copy any other local experiment config separately. First check the mounted code:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \
@@ -121,7 +120,7 @@ Keep input corpora and label files under `data/` or `datasets/`.
 The loader reads title, abstract, and annotation lines. Each annotation becomes
 `mention [SEP] context` paired with the label ID in column six. The context is
 title + abstract, or the `context_window` words on each side of the mention when the
-config sets it (10 in the flag-6 configs). Label ID `-1` is skipped; a composite ID
+config sets it (10 in both tracked configs). Label ID `-1` is skipped; a composite ID
 `D1|D2` is split into one example per ID using column seven, and composites without
 column seven are skipped (BC5CDR). Training groups these examples by label.
 Prediction uses supplied mentions; mention detection is not implemented.
@@ -140,13 +139,15 @@ Saved models go to `outputs/saved_trees/xmodel_<timestamp>/`.
 
 Training rows are `group_id<TAB>text`. A separate file lists one label ID per
 line, aligned with the sorted group IDs. Plain text has no `[SEP]`, so training
-requires `emb_flag` `1` (`configs/xmr4el_flag1_config.json`); `train.py` rejects other flags.
+requires `"features": "tfidf"`; `train.py` rejects other features. Copy the base config and
+set it (the context and transformer configs are then unused):
 
 ```bash
+.venv/bin/python -c "import json; c = json.load(open('configs/xmr4el_base_config.json')); c['features'] = 'tfidf'; json.dump(c, open('configs/local_tfidf_config.json', 'w'), indent=4)" && \
 .venv/bin/python scripts/train.py \
   -train_path data/train/chemical/train_Chemical.txt \
   -labels_path data/train/chemical/labels.txt \
-  -model_config configs/xmr4el_flag1_config.json \
+  -model_config configs/local_tfidf_config.json \
   -ds_len 500
 ```
 
@@ -158,15 +159,15 @@ groups; check that the files are aligned before training.
 ```bash
 .venv/bin/python scripts/evaluate.py \
   -xmodel_path outputs/saved_trees/<run> \
-  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt \
-  -beam_size 2 -topk 0 -alpha 0 -path_score
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt
 ```
 
-These are the flags for trees trained with the base config (see Configuration).
+Search settings come from the tree's `predict_config` (saved from the training config);
+`-beam_size`, `-topk` and `-knn_beta` override them.
 Evaluation reports acc@1, MRR, recall@k, candidate recall, and vocabulary coverage.
 It excludes mentions whose gold labels are absent from training, so metrics are
-conditional on vocabulary coverage. `topk` is per leaf; `0` removes that final
-cut but the leaf matcher still has an internal 100-candidate limit.
+conditional on vocabulary coverage. `topk` cuts each query's final list; `0` keeps all
+candidates (each visited leaf contributes at most 100).
 
 For prediction from Python:
 
@@ -174,7 +175,7 @@ For prediction from Python:
 from xmr4el.xmodel import XModel
 
 model = XModel.load("outputs/saved_trees/<run>")
-scores = model.predict(["mention [SEP] context"], beam_size=10, topk=0, knn_beta=10)
+scores = model.predict(["mention [SEP] context"])  # predict_config; keyword arguments override it
 ```
 
 `scores` is a CSR matrix (queries x labels); column `j` is `model.initial_labels[j]`. Each visited
@@ -185,21 +186,22 @@ leaf contributes its 100 best labels, scored leaf matcher probability x routing 
 ## Configuration
 
 `configs/xmr4el_base_config.json` selects component types and parameters.
-`emb_flag` controls features:
+`features` selects the input encoding:
 
-- `1`: TF-IDF (-> dimension model) of the whole input (`configs/xmr4el_flag1_config.json`).
-- `6`: input `mention [SEP] context`; three blocks, each L2-normalised before the concat:
-  transformer(mention), char TF-IDF -> SVD(mention), TF-IDF -> SVD(context window).
+- `"tfidf"`: TF-IDF (-> dimension model) of the whole input (plain TSV).
+- `"sapbert_char_context"`: input `mention [SEP] context`; three blocks, each L2-normalised before the
+  concat: transformer(mention), char TF-IDF -> SVD(mention), TF-IDF -> SVD(context window).
+
+`predict_config` (`beam_size`, `topk`, `knn_beta`) is stored with the tree and is the default search
+for `XModel.predict` and `evaluate.py`: base config beam 2, knn off; BC5CDR config beam 10, `knn_beta` 10.
 
 Transformer: `transformer_config.type` `sapbert`, `sentencetbiobert` or `biobert`, or any
 checkpoint with `"kwargs": {"model_name": "<HF id>"}` (optional `pooling`, e.g. `"cls"`, and
 `max_seq_length`). `abbrev_expansion` `"append"` expands in-document abbreviations in PubTator input.
 
-The default uses flag 6 with SapBERT, abbreviation expansion, balanced k-means, and one-vs-rest
-L2 logistic-regression matchers (`jointlogisticregression`: liblinear's objective, all labels of a node solved at once). Evaluate such trees with `-alpha 0 -path_score`
-(leaf matcher probability x routing path probability).
-Use the available sklearn and PyTorch clustering/classifier wrappers
-through the existing configuration registries.
+The default uses `"sapbert_char_context"` with SapBERT, abbreviation expansion, balanced k-means
+(`balancedkmeans`), and one-vs-rest L2 logistic-regression matchers (`jointlogisticregression`:
+liblinear's objective, all labels of a node solved at once).
 
 ## Layout
 

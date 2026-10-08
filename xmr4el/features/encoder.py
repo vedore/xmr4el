@@ -11,6 +11,9 @@ from xmr4el.features.reduction import DimensionModel
 from xmr4el.features.transformers import Transformer
 
 
+FEATURES = ("tfidf", "sapbert_char_context")
+
+
 class TextEncoder():
     
     def __init__(
@@ -18,7 +21,7 @@ class TextEncoder():
         vectorizer_config: Optional[Dict[str, Any]] = None,
         transformer_config: Optional[Dict[str, Any]] = None,
         dimension_config: Optional[Dict[str, Any]] = None,
-        flag: int = 6,
+        features: str = "sapbert_char_context",
         context_vectorizer_config: Optional[Dict[str, Any]] = None,
         context_dimension_config: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -32,8 +35,7 @@ class TextEncoder():
         
         self._vectorizer_model: Optional[Vectorizer] = None
         self._dimension_model: Optional[DimensionModel] = None
-        self.flag = flag
-        # emb_flag 1 = TF-IDF; 6 = transformer + char TF-IDF (mention) + context TF-IDF (see `_encode`)
+        self.features = features  # see `_encode`
         self.context_vectorizer_config = context_vectorizer_config
         self.context_dimension_config = context_dimension_config
         self.context_vectorizer_model = None
@@ -95,7 +97,7 @@ class TextEncoder():
 
         model = cls()
         model.__dict__.update(model_data)
-        model._validate_flag()
+        model._validate_features()
         
         # Load models
         model_files = {
@@ -110,7 +112,7 @@ class TextEncoder():
             if os.path.exists(model_path) and model_class is not None:
                 setattr(model, model_name, model_class.load(model_path))
             else:
-                if model_name.startswith("context_") and model.flag != 6:
+                if model_name.startswith("context_") and model.features != "sapbert_char_context":
                     setattr(model, model_name, None)
                 else:
                     raise Exception("Something with the loading the models is not right")
@@ -167,7 +169,7 @@ class TextEncoder():
     ) -> Any:
         """Embed texts with the configured transformer (no fitting: same call for train and query)."""
         if transformer_config is None:
-            raise AttributeError("emb_flag 6 needs a transformer_config")
+            raise AttributeError("features 'sapbert_char_context' needs a transformer_config")
         _, transformer_embeddings = Transformer.transform(X_test, transformer_config)
         return transformer_embeddings
 
@@ -184,24 +186,22 @@ class TextEncoder():
         dim = getattr(self, f"{prefix}dimension_model")
         return csr_matrix(X if dim is None else self._predict_dimension(X, dim))
 
-    def _validate_flag(self):
-        if self.flag in (2, 3, 4, 5):
-            raise ValueError(f"emb_flag {self.flag} was removed in session 11; retrain with emb_flag 1 or 6")
-        if self.flag not in (1, 6):
-            raise ValueError(f"emb_flag must be 1 or 6, got {self.flag}")
+    def _validate_features(self):
+        if self.features not in FEATURES:
+            raise ValueError(f"features must be one of {FEATURES}, got {self.features!r}")
 
     def _encode(self, X_text: Sequence[str], fit: bool) -> csr_matrix:
         """
-        flag 1 → TF-IDF (-> dimension model) of the whole text
-        flag 6 → [transformer(mention) | TF-IDF -> SVD(mention) | TF-IDF -> SVD(context)], text split at
+        "tfidf" → TF-IDF (-> dimension model) of the whole text (plain TSV input)
+        "sapbert_char_context" → [transformer(mention) | TF-IDF -> SVD(mention) | TF-IDF -> SVD(context)], text split at
                  [SEP] (mention [SEP] context); each block L2-normalised before the concat, so each
                  carries an equal share of the row norm. Any transformer (`transformer_config`).
         """
-        self._validate_flag()
-        if self.flag == 1:
+        self._validate_features()
+        if self.features == "tfidf":
             return normalize(self._tfidf_block(X_text, "", fit))
         if any("[SEP]" not in t for t in X_text):
-            raise ValueError("emb_flag 6 needs 'mention [SEP] context' input")
+            raise ValueError("features 'sapbert_char_context' needs 'mention [SEP] context' input")
         mentions, contexts = zip(*(t.split("[SEP]", 1) for t in X_text)) if X_text else ((), ())
         blocks = [csr_matrix(self._encode_text_using_transformer(list(mentions), self.transformer_config)),
                   self._tfidf_block(list(mentions), "", fit),

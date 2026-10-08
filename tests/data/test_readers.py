@@ -45,10 +45,10 @@ def test_local_inputs():
         assert mapping == {"L1": [0, 1], "L2": [2]}
 
         for path, extra, flag, expected in (
-            (tsv, ["-labels_path", str(labels)], 1, tsv_expected),
-            (pubtator, [], 6, pub_expected),
+            (tsv, ["-labels_path", str(labels)], "tfidf", tsv_expected),
+            (pubtator, [], "sapbert_char_context", pub_expected),
         ):
-            model = Mock(emb_flag=flag, context_window=None, abbrev_expansion=None)
+            model = Mock(features=flag, context_window=None, abbrev_expansion=None)
             argv = [str(script), "-train_path", str(path), "-ds_len", "1", *extra]
             with patch("sys.argv", argv), patch.object(
                 XModel, "load_config", return_value=model
@@ -57,7 +57,7 @@ def test_local_inputs():
             model.train.assert_called_once_with(expected[:1], ["L1"])
             model.save.assert_called_once()
 
-        model = Mock(emb_flag=6, context_window=None)
+        model = Mock(features="sapbert_char_context", context_window=None)
         argv = [str(script), "-train_path", str(tsv), "-labels_path", str(labels)]
         with patch("sys.argv", argv), patch.object(
             XModel, "load_config", return_value=model

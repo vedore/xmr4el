@@ -25,13 +25,14 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("-xmodel_path", type=str, required=True)
     parser.add_argument("-test_path", type=str, required=True)
-    parser.add_argument("-beam_size", type=int, default=5)
-    parser.add_argument("-topk", type=int, default=0, help="keep each query's topk best labels; 0 = all candidates")
+    parser.add_argument("-beam_size", type=int, default=None, help="default: the tree's predict_config")
+    parser.add_argument("-topk", type=int, default=None,
+                        help="keep each query's topk best labels; 0 = all candidates (default: predict_config)")
     parser.add_argument("-train_path", type=str, default=None,
                         help="train PubTator file; adds the seen/unseen mention-string breakdown")
-    parser.add_argument("-knn_beta", type=float, default=0.0,
+    parser.add_argument("-knn_beta", type=float, default=None,
                         help="multiply each candidate's score by exp(beta * max cosine of the mention block to the "
-                             "label's training rows); 0 = off (docs/results.md 2026-10-08 knn fusion)")
+                             "label's training rows); 0 = off (default: predict_config; docs/results.md 2026-10-08)")
     parser.add_argument("-verbose", action="store_true",
                         help="show DEBUG diagnostics and progress bars; warnings are always visible")
     args = parser.parse_args()
@@ -49,8 +50,8 @@ def main():
     golden_labels, input_texts = filter_labels_and_inputs(test_set["corpus"], labels, trained_xtree.initial_labels)
     n_total, n = len(labels), len(golden_labels)
 
-    score_csr = trained_xtree.predict(input_texts, beam_size=args.beam_size, topk=args.topk,
-                                      knn_beta=args.knn_beta)
+    search = trained_xtree.resolve_predict_config(beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta)
+    score_csr = trained_xtree.predict(input_texts, **search)
 
     trained_labels = np.array(trained_xtree.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(trained_labels)}
@@ -67,10 +68,10 @@ def main():
 
     print("-" * 72)
     print(f"tree     {os.path.basename(os.path.normpath(args.xmodel_path))}  "
-          f"({len(trained_labels)} labels, emb_flag {trained_xtree.emb_flag})")
+          f"({len(trained_labels)} labels, features {trained_xtree.features})")
     print(f"rows     {n}/{n_total} gold label in vocabulary ({n / max(n_total, 1):.1%}); "
           f"{len(set(golden_labels))} distinct gold labels")
-    print(f"search   beam {args.beam_size}, topk {args.topk}, knn beta {args.knn_beta:g}, "
+    print(f"search   beam {search['beam_size']}, topk {search['topk']}, knn beta {search['knn_beta']:g}, "
           f"{nnz:.0f} candidates/query")
     print()
     print(f"acc@1    {metrics['acc@1']:.4f}")

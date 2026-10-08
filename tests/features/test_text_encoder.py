@@ -1,4 +1,4 @@
-"""emb_flag 1 (TF-IDF) and 6 (transformer | char TF-IDF on the mention | context TF-IDF): three equal
+"""features "tfidf" and "sapbert_char_context" (transformer | char TF-IDF on the mention | context TF-IDF): three equal
 blocks, encode (train) and predict (query) agree, save/load round-trips. Transformer stubbed; runs offline."""
 import tempfile
 
@@ -20,17 +20,18 @@ def test_text_encoder():
                                         "sublinear_tf": True, "max_df": 1.0}}
     svd3 = {"type": "sklearntruncatedsvd", "kwargs": {"n_components": 3, "random_state": 0}}
 
-    enc1 = TextEncoder(vectorizer_config=char, dimension_config=svd3, flag=1)
+    enc1 = TextEncoder(vectorizer_config=char, dimension_config=svd3, features="tfidf")
     plain = ["aspirin tablets", "aspirin", "tumour growth", "tumours"]
     X1 = enc1.encode(plain).toarray()
     with tempfile.TemporaryDirectory() as d:
         enc1.save(d)
         X1q = TextEncoder.load(d).predict(plain).toarray()
     assert X1.shape == (4, 3) and np.allclose((X1 ** 2).sum(axis=1), 1)
-    assert np.allclose(X1, X1q, atol=1e-6), "flag 1: saved/loaded predict must reproduce encode"
+    assert np.allclose(X1, X1q, atol=1e-6), "tfidf: saved/loaded predict must reproduce encode"
 
     enc6 = TextEncoder(
-        vectorizer_config=char, dimension_config=svd3, transformer_config={"type": "stub", "kwargs": {}}, flag=6,
+        vectorizer_config=char, dimension_config=svd3, transformer_config={"type": "stub", "kwargs": {}},
+        features="sapbert_char_context",
         context_vectorizer_config={"type": "tfidf", "kwargs": {"ngram_range": [1, 1], "max_df": 1.0}},
         context_dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2, "random_state": 0}},
     )
@@ -47,18 +48,17 @@ def test_text_encoder():
     assert not np.allclose(X6[0, 3:6], X6[2, 3:6]), "char block must depend on the mention"
     assert np.allclose(X6[4, 6:], 0) and np.isclose((X6[4, :3] ** 2).sum(), 1 / 2), "empty context = zero block"
     assert not np.allclose(X6[0, 6:], X6[1, 6:]), "context block must depend on the context"
-    assert np.allclose(X6, X6q, atol=1e-6), "saved/loaded flag-6 encoder must reproduce encode"
-    for flag in (2, 3, 4, 5):
-        enc = TextEncoder(flag=flag)
-        with tempfile.TemporaryDirectory() as d:
-            enc.save(d)
-            for action in (lambda: enc.encode(texts6), lambda: enc.predict(texts6), lambda: TextEncoder.load(d)):
-                try:
-                    action()
-                except ValueError as e:
-                    assert f"emb_flag {flag} was removed in session 11" in str(e)
-                else:
-                    raise AssertionError("removed emb_flag accepted")
+    assert np.allclose(X6, X6q, atol=1e-6), "saved/loaded sapbert_char_context encoder must reproduce encode"
+    enc = TextEncoder(features="flag6")
+    with tempfile.TemporaryDirectory() as d:
+        enc.save(d)
+        for action in (lambda: enc.encode(texts6), lambda: enc.predict(texts6), lambda: TextEncoder.load(d)):
+            try:
+                action()
+            except ValueError as e:
+                assert "features must be one of" in str(e)
+            else:
+                raise AssertionError("unknown features accepted")
 
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
         f.write("1|t|Aspirin works\n1|a|It lowers fever.\n1\t17\t23\tlowers\tT\tC2\n")

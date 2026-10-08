@@ -2,7 +2,7 @@
 
 For one saved tree, on train rows and on in-vocabulary dev mentions:
   - root top-1 cluster accuracy: trained matcher vs cosine-to-cluster-centroid over Z
-  - the same cosine router restricted to each feature block (emb_flag 6: mention, char, context)
+  - the same cosine router restricted to each feature block ("sapbert_char_context": mention, char, context)
   - flat nearest-label acc@1: argmax cosine(x, Z) over every label, no hierarchy
   - dictionary baseline: normalised mention string -> most frequent train label
 """
@@ -89,7 +89,7 @@ def main():
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
 
     blocks = {"all": slice(None)}
-    if xm.emb_flag == 6:
+    if xm.features == "sapbert_char_context":
         n_c = xm.dimension_config["kwargs"]["n_components"]
         n_x = xm.context_dimension_config["kwargs"]["n_components"]
         d_t = Z.shape[1] - n_c - n_x

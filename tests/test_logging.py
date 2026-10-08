@@ -50,7 +50,7 @@ def test_train_log_levels(caplog, capsys):
     def load_config(path):
         # CLI flags must override the verbosity stored in a model config.
         set_verbosity(2)
-        return Mock(emb_flag=1)
+        return Mock(features="tfidf")
 
     with caplog.at_level(logging.DEBUG, logger="xmr4el"):
         for flag, expected in (([], logging.INFO), (["-quiet"], logging.WARNING), (["-verbose"], logging.DEBUG)):

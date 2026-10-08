@@ -18,7 +18,7 @@ def test_pipeline_persistence(caplog, capsys):
         dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 6, "random_state": 42}},
         clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": 2}},
         matcher_config={"type": "jointlogisticregression", "kwargs": {"max_iter": 100}},
-        emb_flag=1, depth=2, min_leaf_size=2,
+        features="tfidf", depth=2, min_leaf_size=2,
     )
     texts = [[f"concept{j} synonym{i} group{j // 4}" for i in range(8)] for j in range(8)]
     labels = [f"L{j}" for j in range(8)][::-1]
@@ -33,6 +33,9 @@ def test_pipeline_persistence(caplog, capsys):
     rescored = first.predict(queries, beam_size=2, knn_beta=2).toarray()
     knn = label_max_cos(first.text_encoder.predict(queries), first.X, first.Y.tocsr().indices, len(labels))
     assert ((rescored > 0) == (expected > 0)).all() and np.allclose(rescored, expected * np.exp(2 * knn))
+    # predict arguments left None come from predict_config (stored with the tree)
+    assert XModel(predict_config={"knn_beta": 2}).resolve_predict_config(beam_size=3, topk=None) == \
+        {"beam_size": 3, "topk": 0, "knn_beta": 2}
     with TemporaryDirectory() as tmp:
         first.save(tmp)
         saved = next(Path(tmp).iterdir())
@@ -44,6 +47,7 @@ def test_pipeline_persistence(caplog, capsys):
         assert "_vectorizer_model" not in state and "_dimension_model" not in state
         restored = XModel.load(saved)
         assert restored.initial_labels == sorted(labels)
+        assert restored.predict_config == first.predict_config == {"beam_size": 10, "topk": 0, "knn_beta": 0.0}
         assert restored.training_set == first.training_set
         assert np.allclose(restored.predict(queries, beam_size=2).toarray(), expected)
     assert capsys.readouterr().out == "", "library code must use logging, not stdout"

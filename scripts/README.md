@@ -92,12 +92,12 @@ and the experiment record of [parameters, metrics, and artifacts](https://mlflow
 using the existing logs, evaluation report, and saved tree without an extra tracking dependency.
 
 For grouped TSV input (`group_id<TAB>text`), supply one label per line aligned
-with sorted group IDs and use `emb_flag` 1:
+with sorted group IDs and a config with `"features": "tfidf"` (README § Grouped TSV):
 
 ```bash
 .venv/bin/python scripts/train.py \
   -train_path data/train.tsv -labels_path data/labels.txt \
-  -model_config configs/xmr4el_flag1_config.json
+  -model_config configs/local_tfidf_config.json
 ```
 
 ## Evaluate and diagnose a saved tree
@@ -110,12 +110,12 @@ TRAIN=datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
 DEV=datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt
 ```
 
-Leaf score = leaf matcher probability x routing path probability (`HierarchicalMLModel.predict`):
+Leaf score = leaf matcher probability x routing path probability (`HierarchicalMLModel.predict`);
+search settings default to the tree's `predict_config` (`-beam_size`, `-topk`, `-knn_beta` override):
 
 ```bash
 .venv/bin/python scripts/evaluate.py \
   -xmodel_path "$MODEL" -test_path "$DEV" \
-  -beam_size 10 -knn_beta 10 \
   -train_path "$TRAIN"
 ```
 
@@ -162,7 +162,7 @@ Sweep beams 5, 10, 15, 20, and 25 with the 20 best labels per query:
 .venv/bin/python scripts/experiments/beam_sweep.py "$MODEL" "$DEV" 5 25 20
 ```
 
-The sweep uses the other `evaluate.py` defaults (no `-knn_beta`).
+The sweep uses the tree's `predict_config` for `-knn_beta`.
 
 ## PECOS baseline
 
