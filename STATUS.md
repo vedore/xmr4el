@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-08 (training speed F done through F3 (`11-45-47`, hierarchy 54.6 s); eval speed G0 profiled; G1a cosine batching passed and committed (`194e5db`), eval 42 -> 15 s; G1b routing batch passed and committed, eval 15 -> 10 s; F5 gc fix passed and committed: tree `12-21-30`, hierarchy 31.1 s, run 61.6 s, eval 9 s, metrics unchanged).
 
-**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next: U3 (below). Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
+**Runs:** none in flight. U2 (`-knn_beta 10`) passed and committed: dev 0.904 / hybrid 0.906, test 0.916 / hybrid 0.921. Next session: U3 plan (below) — Claude extends `diagnose_unseen.py` first, then one user run. Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (dev 0.595, test 0.653). Saved trees on disk: `11-45-47` (current), `11-31-05` (superseded).
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -266,9 +266,24 @@ U2. Done (uncommitted): `XModel.predict(knn_beta=0.0)`: candidates' scores x exp
 U2 passed: dev = U1 beta 10 row exactly (0.9041, MRR 0.9335, unseen 0.6800, hybrid 0.9062); test (run once) 0.9163,
    MRR 0.9402, seen 1 0.9845, seen >1 0.7299, unseen 0.7122, hybrid 0.9213 (was 0.873 / 0.653 / 0.909). Rows in
    `docs/results.md`. Committed. Literature test 93.2 / 93.5 (protocol not matched).
-U3 (candidates): seen >1-label strings are now the tree's weakest vs the dictionary (test 0.730 vs 0.856); unseen
-   0.712 still the largest error mass (938 rows). First: give `diagnose_unseen.py` a `-knn_beta` so its rank buckets
-   and error TSV describe the fused ranking, then read the remaining errors before choosing a change.
+U3. Next-session diagnosis plan (2026-10-08). Dev only; test once per retained change. Tree `12-21-30`, base eval
+   `-beam_size 10 -topk 0 -alpha 0 -path_score -knn_beta 10` (dev 0.9041; unseen 0.6800 n=953, seen >1 0.8113 n=212,
+   seen 1 0.9783 n=3140 = dict). Remaining dev errors ~413: unseen ~305, seen >1 ~40, seen 1 ~68.
+   Code first (Claude, then selfcheck): `diagnose_unseen.py -knn_beta b` so rank buckets, groups and the TSV describe
+   the fused ranking; add TSV columns `abbrev` (mention carries an appended expansion), `group` (seen 1 / seen >1 /
+   unseen), `gold_in_string_set` (gold among the labels train gives this exact string). One user run answers D1-D4.
+   D1 unseen, where is gold: rank buckets after fusion. Mostly 2-5 -> scoring (D2/D3); `not cand` (cap 0.038) -> routing.
+   D2 unseen, error types from the TSV (Claude reads ~60): pred more specific than gold (CTD child vs MeSH parent),
+      abbreviation-appended key ("ob obese"), composite/partial mention, annotation-level (unfixable). Shares decide U4.
+   D3 unseen, knn variants (screen, no training): label score = max (now) vs mean of top-2/3 rows; knn over train rows
+      vs CTD-name rows only (row source in `train_plus_ctd.pubtator` doc ids); SapBERT on the raw mention vs the
+      abbreviation-appended text (needs a SapBERT encode of ~1k dev strings: cache miss, ~10 s). Beta re-swept per variant.
+   D4 seen >1 (dict 0.854 > tree 0.811): is the tree's pick inside the string's train label set? Inside -> screen a
+      string prior: score x share(label | exact string)^gamma, gamma 0/0.5/1/2. Outside -> knn ties at cos 1.0 for every
+      label with that string; check whether context separates them (context block alone is 0.025: likely not).
+   D5 (optional, generality): knn fusion on MedMentions (no saved tree; one train + eval with the base config, user
+      decides). A dataset-specific beta would weaken the claim.
+   Decision rule: implement the largest measured gain first, one change per run, keep beta 10 unless D3 re-sweeps.
 F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
    becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned
