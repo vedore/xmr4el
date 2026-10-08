@@ -17,7 +17,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | --- | --- |
 | `split_pubtator.py` | Preprocessing: split a PubTator corpus by PMID. |
 | `dict_to_pubtator.py` | Preprocessing: CTD vocabulary (MEDIC/chemicals) -> PubTator pseudo-documents. |
-| `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers/rankers and save the model. |
+| `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers and save the model. |
 | `evaluate.py` | Traverse a saved tree and report ranking metrics and candidate recall. |
 | `diagnose_routing.py` | Compare root matcher, cosine routing, flat retrieval, and a mention dictionary on train/dev inputs. |
 | `diagnose_unseen.py` | Unseen-string rows: gold-rank buckets, flat 1-NN per feature block, knn fusion screen over beta, error TSV. |

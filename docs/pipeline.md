@@ -12,9 +12,8 @@ Moved out of `STATUS.md` (2026-10-06).
 | Evaluation | Hierarchy scores via `per_leaf`; acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `scripts/evaluate.py` |
 | Features | Flag 1: TF-IDF (-> dimension model) of the whole text (TSV). Flag 6: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Flags 2-5 raise | `TextEncoder._encode`, base / flag1 config |
 | Clustering | Seeded balanced spherical k-means (numpy): recursive balanced 2-means, then joint balanced refinement over all k clusters; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
-| Ranker training | Off by default (`train_rankers: false`). When on: epochs reuse models and vary sampling seeds; `E_warm=1`, `log_loss`, `neg_mult=5` | `xmr4el/learning/ranker.py`, `configs/xmr4el_base_config.json` |
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`); leaf `early_stopping` override is SGD-only | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
-| Leaf scoring | Each visited leaf contributes its 100 best labels by leaf matcher probability (`LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear); rankers are not used at predict time | `HierarchicalMLModel.predict` |
+| Leaf scoring | Each visited leaf contributes its 100 best labels by leaf matcher probability (`LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear) | `HierarchicalMLModel.predict` |
 | Knn fusion | `-knn_beta b`: each candidate x exp(b * max cosine of the query's mention block to the label's training rows); BC5CDR uses 10, off by default | `XModel.predict`, `scoring.label_max_cos` |
 
 Implemented does not mean validated on dev. Saved trees retain their trained classifiers and leaf
@@ -44,16 +43,14 @@ Observations and hypotheses, not a mandatory sequence of fixes.
 | Features | Flag 6 L2-normalises each block before the concat, so the three blocks carry equal, untuned weight | If block diagnostics suggest a problem, compare one weighting change with a retrained control |
 | Label embeddings / hierarchy | PIFA uses full mention+context features | If flat retrieval works but centroid routing fails, isolate a label-representation or clustering change; PIFA itself is not a bug |
 | Matcher | Child models train on in-cluster rows but receive beam-routed queries | If root routing works and child rejection fails, measure out-of-cluster errors before adding routed negatives |
-| Ranker | Each per-label linear model sees a constant `Z_label` block, contributing an intercept-like term | Measure scoring contribution before redesigning; constant features are not evidence of failure |
 | Traversal / scoring | Ancestor `path_logscore` prunes the beam and multiplies every leaf score (exp(path_logscore)) | Leaf matcher probabilities alone are not comparable across leaves |
-| Training computation | Internal nodes set `fused_scores` from matcher cluster scores in `MLModel.train`, consumed by `prepare_layer`; leaves prepare no children (`tests/hierarchy/test_no_rankers.py`) | Matcher/ranker fusion of these scores is future work (`STATUS.md`) |
+| Training computation | Internal nodes set `fused_scores` from matcher cluster scores in `MLModel.train`, consumed by `prepare_layer`; leaves prepare no children (`tests/hierarchy/test_tree.py`) | Fusing other scores into these is future work (`STATUS.md`) |
 
 The path score is a fixed route-score rule. A learned weight needs separate justification and dev
 tuning. Neither route weighting nor `log_loss` alone establishes calibration across leaves.
 
 ## Scale and external baseline
 
-- Keep the per-label ranker as a research hypothesis and measure its contribution within XMR4EL.
 - Then run a PECOS baseline on the same split, label mapping and instance features. Record hierarchy,
   negative sampling, scoring, search budget, runtime and memory differences. Similar parameter names
   do not establish equivalent algorithms.

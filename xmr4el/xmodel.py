@@ -33,14 +33,9 @@ class XModel:
                  abbrev_expansion: Optional[str] = None,
                  clustering_config: dict = None,
                  matcher_config: dict = None,
-                 ranker_config: dict = None,
-                 cur_config: dict = None,
                  min_leaf_size: int = 20,
                  max_leaf_size: int = None,
                  cut_half_cluster: bool = False,
-                 ranker_every_layer: bool = True,
-                 train_rankers: bool = True,
-                 n_workers: int = 8,
                  depth: int = 1,
                  emb_flag: int = 6,
                  verbose: Optional[int] = None,
@@ -67,17 +62,10 @@ class XModel:
         self.abbrev_expansion = abbrev_expansion
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
-        self.ranker_config = ranker_config
-        self.cur_config = cur_config
         
         self.min_leaf_size = min_leaf_size
         self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
-        self.ranker_every_layer = ranker_every_layer
-        self.train_rankers = train_rankers
-        
-        self.n_workers = n_workers
-        
         self.depth = depth
         self.emb_flag =emb_flag
         
@@ -88,9 +76,6 @@ class XModel:
         self._X = None
         self._Y = None
         self._Z = None
-    
-        self.EPS = 1e-12
-        self.TOPK_DBG = 50
         
     
     def __str__(self) -> str:
@@ -139,18 +124,14 @@ class XModel:
         parts = [
             f"XModel summary:",
             f"  logger: {logger_info}",
-            f"  workers: n_workers={self.n_workers}",
             f"  depth={self.depth}, emb_flag={self.emb_flag}",
             f"  cluster: min_leaf_size={self.min_leaf_size}, max_leaf_size={self.max_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
-            f"  ranker_every_layer={self.ranker_every_layer}, train_rankers={self.train_rankers}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
             f"    dimension: {_short(self.dimension_config)}",
             f"    clustering: {_short(self.clustering_config)}",
             f"    matcher: {_short(self.matcher_config)}",
-            f"    ranker: {_short(self.ranker_config)}",
-            f"    cur: {_short(self.cur_config)}",
             f"  internal state:",
             f"    text_encoder: {_short(self._text_encoder)}",
             f"    hml: {_short(self._hml)}",
@@ -163,7 +144,7 @@ class XModel:
     def __repr__(self) -> str:
         # concise repr that can be used in containers / REPL
         try:
-            return f"XModel(depth={self.depth}, n_workers={self.n_workers}, emb_flag={self.emb_flag})"
+            return f"XModel(depth={self.depth}, emb_flag={self.emb_flag})"
         except Exception:
             return "<XModel (repr error)>"
 
@@ -354,21 +335,15 @@ class XModel:
         global_to_local = {g: i for i, g in enumerate(local_to_global)}
 
         hierarchy_start = time.perf_counter()
-        self.logger.info("Hierarchy started: depth=%d labels=%d rankers=%s",
-                         self.depth, n_labels, self.train_rankers)
+        self.logger.info("Hierarchy started: depth=%d labels=%d", self.depth, n_labels)
 
         hml = HierarchicalMLModel(
             clustering_config=self.clustering_config,
             matcher_config=self.matcher_config,
-            ranker_config=self.ranker_config,
-            cur_config=self.cur_config,
             min_leaf_size=self.min_leaf_size,
             max_leaf_size=self.max_leaf_size,
-            n_workers=self.n_workers,
             cut_half_cluster=self.cut_half_cluster,
-            ranker_every_layer=self.ranker_every_layer,
             layer=self.depth,
-            train_rankers=self.train_rankers,
         )
 
         hml.train(

@@ -16,9 +16,9 @@ def test_pipeline_persistence(caplog, capsys):
     config = dict(
         vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char", "ngram_range": [2, 4]}},
         dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 6, "random_state": 42}},
-        clustering_config={"type": "sklearnkmeans", "kwargs": {"n_clusters": 2, "random_state": 42}},
+        clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": 2}},
         matcher_config={"type": "jointlogisticregression", "kwargs": {"max_iter": 100}},
-        emb_flag=1, depth=2, min_leaf_size=2, train_rankers=False, n_workers=1,
+        emb_flag=1, depth=2, min_leaf_size=2,
     )
     texts = [[f"concept{j} synonym{i} group{j // 4}" for i in range(8)] for j in range(8)]
     labels = [f"L{j}" for j in range(8)][::-1]

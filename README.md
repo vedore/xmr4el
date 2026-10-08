@@ -9,7 +9,7 @@ The model trains on texts grouped by label and predicts ranked label IDs.
 2. Encode texts with TF-IDF, transformer embeddings, or both.
 3. Build PIFA label embeddings from training features.
 4. Cluster labels into a hierarchy.
-5. Train cluster matchers and label-level leaf matchers with per-label rankers.
+5. Train cluster matchers and label-level leaf matchers.
 6. Traverse the hierarchy and return ranked label scores.
 
 ## Setup
@@ -205,7 +205,7 @@ through the existing configuration registries.
 
 - `xmr4el/data/`: local readers/grouping (`readers.py`) and PubTator splitting/export (`splits.py`).
 - `xmr4el/features/`: text composition (`encoder.py`), TF-IDF (`vectorizers.py`), SVD (`reduction.py`), transformers, and PIFA/label matrices (`label_embeddings.py`).
-- `xmr4el/learning/`: classifier backends, matcher, per-label ranker training, and scoring/fusion.
+- `xmr4el/learning/`: classifier backend (`jointlogisticregression`), matcher, and mention-kNN scoring.
 - `xmr4el/hierarchy/`: clustering, node training (`node.py`), tree construction/traversal/persistence (`tree.py`).
 - `xmr4el/xmodel.py`: public pipeline API. `xmr4el/eval.py`: shared evaluation metrics.
 - `scripts/`: train/evaluate, split CLI (`split_pubtator.py`), CTD dictionary conversion (`dict_to_pubtator.py`), routing diagnostics; `experiments/` for screens/sweeps and `baselines/` for PECOS.

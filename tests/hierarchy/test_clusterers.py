@@ -3,21 +3,19 @@ from xmr4el.hierarchy.clusterers import ClusteringModel, ClusteringTrainer, _bal
 
 
 def test_small_cluster_reassignment():
-    """No label may be dropped: every C_node row must have exactly one cluster."""
+    """No label may be dropped: labels of undersized clusters move to the nearest valid centroid."""
     rs = np.random.RandomState(0)
-    # 3 tight blobs of 20 + a stray pair far away: unbalanced kmeans gives the pair its own
-    # cluster, which is below min_leaf_size and would otherwise be dropped.
-    Z = np.vstack([rs.normal(c, 0.01, size=(20, 4)) for c in (0.0, 5.0, 10.0)]
-                  + [rs.normal(40.0, 0.01, size=(2, 4))]).astype(np.float32)
-    cfg = {"type": "sklearnkmeans", "kwargs": {"n_clusters": 4, "random_state": 0}}
-    C, _ = ClusteringTrainer.train(Z, cfg, min_leaf_size=5)
-    assert C is not None, "clustering returned nothing"
-    assert C.shape == (Z.shape[0], 3), f"expected 3 valid clusters, got {C.shape}"
-    per_row = np.asarray(C.sum(axis=1)).ravel()
-    assert (per_row == 1).all(), f"{int((per_row == 0).sum())} labels dropped from C_node"
-    # the strays must land in the blob they are actually nearest to
-    assert C[60].indices[0] == C[61].indices[0] == C[40].indices[0]
-    print("clustering selfcheck ok")
+    e = np.eye(8)
+    # Balanced 4-way split of 62 labels gives clusters of 16/15/16/15 = these blobs. With min_leaf_size 16 the
+    # 15-blobs are reassigned; each leans towards one 16-blob.
+    dirs = [e[0], e[1] + 0.6 * e[0], e[2], e[3] + 0.6 * e[2]]
+    Z = np.vstack([d + rs.normal(0, 0.01, size=(m, 8)) for d, m in zip(dirs, (16, 15, 16, 15))]).astype(np.float32)
+    cfg = {"type": "balancedkmeans", "kwargs": {"n_clusters": 4}}
+    C, _ = ClusteringTrainer.train(Z, cfg, min_leaf_size=16)
+    assert C is not None and C.shape == (62, 2), C
+    assert (np.asarray(C.sum(axis=1)).ravel() == 1).all(), "labels dropped from C_node"
+    col = C.indices
+    assert (col[:31] == col[0]).all() and (col[31:] == col[31]).all() and col[0] != col[31], col
 
 
 def test_balanced_kmeans():

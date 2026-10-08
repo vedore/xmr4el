@@ -21,7 +21,7 @@ assert hf_logging.get_verbosity() == logging.WARNING
 assert logging.getLogger('xmr4el.learning.scoring').isEnabledFor(logging.WARNING)
 assert logging.getLogger('unrelated').isEnabledFor(logging.WARNING)
 assert logging.getLogger('xmr4el').isEnabledFor(logging.DEBUG) != quiet
-logging.getLogger('xmr4el.learning.scoring').warning('ranker fallback preserved')
+logging.getLogger('xmr4el.learning.scoring').warning('library warning preserved')
 logging.getLogger('unrelated').warning('unrelated warning preserved')
 with tqdm(total=1, file=io.StringIO()) as bar:
     assert bool(bar.disable) == quiet
@@ -30,6 +30,6 @@ with tqdm(total=1, file=io.StringIO()) as bar:
         result = subprocess.run([sys.executable, "-c", code, "-selfcheck", *args], env=env,
                                 cwd=Path(__file__).resolve().parents[1], check=True,
                                 capture_output=True, text=True)
-        assert "ranker fallback preserved" in result.stderr
+        assert "library warning preserved" in result.stderr
         assert "unrelated warning preserved" in result.stderr
     print("quiet/verbose imports ok")

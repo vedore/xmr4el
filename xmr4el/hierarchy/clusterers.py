@@ -7,8 +7,6 @@ import joblib
 import torch
 from abc import ABCMeta
 from copy import deepcopy
-from joblib import parallel_backend
-from sklearn.cluster import KMeans
 from typing import Any, Dict, Optional, Tuple, Counter, List
 from numpy import ones, ndarray, asarray, argmax
 from scipy.sparse import csr_matrix
@@ -65,13 +63,8 @@ class ClusteringModel(metaclass=ClusterMeta):
             ClusteringModel: The loaded object.
         """
 
-        config_path = os.path.join(clustering_folder, "cluster_config.json")
-
-        if not os.path.exists(config_path):
-            config = {"type": "sklearnkmeans", "kwargs": {}}
-        else:
-            with open(config_path, "r", encoding="utf-8") as fin:
-                config = json.loads(fin.read())
+        with open(os.path.join(clustering_folder, "cluster_config.json"), "r", encoding="utf-8") as fin:
+            config = json.loads(fin.read())
 
         cluster_type = config.get("type", None)
         assert (
@@ -82,7 +75,7 @@ class ClusteringModel(metaclass=ClusterMeta):
         return cls(config, model)
 
     @classmethod
-    def train(cls, trn_corpus, config=None, dtype=np.float32):
+    def train(cls, trn_corpus, config, dtype=np.float32):
         """Train on a corpus.
 
         Args:
@@ -96,9 +89,7 @@ class ClusteringModel(metaclass=ClusterMeta):
             ClusteringModel: Trained cluster model.
         """
 
-        config = (
-            deepcopy(config) if config is not None else {"type": "sklearnkmeans", "kwargs": {}}
-        )
+        config = deepcopy(config)
         # LOGGER.debug(f"Train Clustering with config: {json.dumps(config, indent=True)}")
         cluster_type = config.get("type", None)
         assert (
@@ -113,103 +104,6 @@ class ClusteringModel(metaclass=ClusterMeta):
     def labels(self):
         return self.model.labels()
 
-
-
-class SklearnKMeans(ClusteringModel):
-    """Simple KMeans"""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        """Save trained sklearn KMeans model to disk.
-
-        Args:
-            save_dir (str): Folder to store serialized object in.
-        """
-
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "clustering.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        """Load a saved sklearn KMeans model from disk.
-
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            SklearnKMeans: The loaded object.
-        """
-
-        # LOGGER.info(f"Loading Sklearn Kmeans Clustering Model from {load_dir}")
-        clustering_path = os.path.join(load_dir, "clustering.pkl")
-        assert os.path.exists(
-            clustering_path
-        ), f"clustering path {clustering_path} does not exist"
-
-        with open(clustering_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls(config, model_data)
-        return model
-
-    @classmethod
-    def train(cls, trn_corpus, config={}, dtype=np.float32):
-        """Train on a corpus.
-
-        Args:
-            trn_corpus (list): Training corpus in the form of a list of strings.
-            config (dict): Dict with keyword arguments to pass to sklearn's KMeans Clustering.
-
-        Returns:
-            KMeans: Trained clustering.
-
-        Raises:
-            Exception: If `config` contains keyword arguments that the SklearnKMeans does not accept.
-        """
-
-        defaults = {
-            "n_clusters": 8,
-            "init": "k-means++",
-            "n_init": "auto",
-            "max_iter": 300,
-            "tol": 0.0001,
-            "verbose": 0,
-            "random_state": None,
-            "copy_x": True,
-            "algorithm": "lloyd",
-        }
-
-        try:
-            config = {**defaults, **config}
-            model = KMeans(**config)
-        except TypeError:
-            raise Exception(
-                f"clustering config {config} contains unexpected keyword arguments for SklearnKMeans Clustering"
-            )
-        with parallel_backend("threading", n_jobs=-1):
-            model.fit(trn_corpus)
-        return cls(config, model)
-
-    def predict(self, predict_input):
-        """Predict an input.
-
-        Args:
-            corpus (str, list): List of strings to predict.
-
-        Returns:
-            numpy.ndarray: Matrix of features.
-        """
-
-        return self.model.predict(predict_input)
-
-    def get_params(self):
-        return self.model.get_params()
-
-    def labels(self):
-        return self.model.labels_
 
 
 class BalancedKMeans(ClusteringModel):

@@ -1,4 +1,4 @@
-"""prepare_layer must keep the parent's label embedding in the child Z (no node-size-scaled pad)."""
+"""prepare_layer hands each child its labels' parent Z rows (normalized) and routing-augmented X."""
 import numpy as np
 from scipy.sparse import csr_matrix
 from sklearn.preprocessing import normalize
@@ -16,6 +16,5 @@ def test_prepare_layer():
     fused = rs.rand(n, K)
     children = HierarchicalMLModel.prepare_layer(None, X, Y, Z, C, fused, np.arange(L))
     for X_aug, _, Z_aug, l2g, _, _ in children:
-        assert X_aug.shape[1] == Z_aug.shape[1] == D + 3
-        cos = (Z_aug[:, :D] * Z[l2g]).sum(1) / np.linalg.norm(Z_aug, axis=1)
-        assert np.allclose(cos, 1.0), f"child Z lost the label embedding: cos {cos}"
+        assert X_aug.shape[1] == D + 3
+        assert np.allclose(Z_aug, Z[l2g]), "child Z must be the parent's rows of its labels"

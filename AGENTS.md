@@ -21,7 +21,7 @@ When analyzing this repo, assume the main logic is organized around these areas:
 - `xmr4el/features/`: encoder, vectorizers, reduction, transformers, label embeddings
 - `xmr4el/hierarchy/clusterers.py`: clustering backends and hierarchy construction
 - `xmr4el/learning/classifiers.py`, `learning/matcher.py`: classifier backends and the matcher
-- `xmr4el/learning/ranker.py`, `learning/scoring.py`: ranker training and leaf scoring
+- `xmr4el/learning/scoring.py`: mention-kNN label scores (`label_max_cos`)
 - `xmr4el/hierarchy/node.py`, `hierarchy/tree.py`: tree node and hierarchical model (training, traversal, persistence)
 - `xmr4el/xmodel.py`: the `XModel` API; `xmr4el/eval.py`: evaluation metrics
 
@@ -50,12 +50,12 @@ Unless the code clearly shows otherwise, interpret the pipeline in this order:
    - labels are clustered into a tree for efficient large-scale prediction
 
 5. **Training**
-   - matcher and ranker stages are trained within the hierarchical framework
+   - one matcher per node is trained within the hierarchical framework (label-level at the leaves)
 
 6. **Inference**
    - the hierarchy is traversed top-down
    - promising branches are expanded
-   - final label scores are produced from matcher/ranker outputs
+   - final label scores = leaf matcher probability x routing path probability (optionally x mention-kNN)
 
 When documenting or modifying the repo, preserve this mental model unless the code contradicts it.
 
@@ -85,9 +85,8 @@ When asked to explain, debug, extend, or document this repository, inspect in th
 3. `xmr4el/xmodel.py`, `hierarchy/tree.py`, `hierarchy/node.py`
 4. `xmr4el/features/encoder.py`, `features/vectorizers.py`, `features/reduction.py`, `features/transformers.py`, `features/label_embeddings.py`
 5. `xmr4el/learning/classifiers.py`
-6. `xmr4el/learning/ranker.py`
-7. `xmr4el/hierarchy/clusterers.py`
-8. `scripts/`, `tests/`
+6. `xmr4el/hierarchy/clusterers.py`
+7. `scripts/`, `tests/`
 
 Before making claims, verify them against the implementation.
 
@@ -107,7 +106,7 @@ Before making claims, verify them against the implementation.
   - feature generation
   - label embeddings
   - hierarchy construction
-  - matcher/ranker behavior
+  - matcher behavior
 
 ---
 
@@ -116,7 +115,7 @@ Before making claims, verify them against the implementation.
 - Prefer the smallest change that preserves current abstractions
 - Do not rewrite the whole pipeline unless explicitly requested
 - Keep component boundaries modular
-- Avoid coupling featurization, clustering, matcher, and ranker logic unnecessarily
+- Avoid coupling featurization, clustering, and matcher logic unnecessarily
 - Do not add compatibility code for old saved trees or configs; they are retrained instead
 - Add or update tests when changing behavior
 
@@ -126,7 +125,6 @@ If editing model behavior, identify whether the change belongs in:
 - label embedding creation
 - clustering
 - matcher
-- ranker
 - hierarchical traversal / inference
 
 ---
@@ -169,7 +167,7 @@ When suggesting improvements, organize them into one of these buckets:
    - recall@k improvements
    - latency/throughput tradeoffs
 
-5. **Ranker improvements**
+5. **Leaf scoring improvements**
    - better leaf scoring
    - score fusion
    - calibration
@@ -193,7 +191,7 @@ If asked why a result is poor, check these first:
 - train/dev/test leakage
 - feature dimensionality
 - matcher recall bottlenecks
-- ranker score fusion
+- leaf score fusion (path probability, mention-kNN)
 - hierarchy quality
 - dependency/runtime environment issues
 
@@ -206,10 +204,9 @@ Then check these known error origins, in pipeline order (state in `STATUS.md`, e
   grouped TSV), not a random sample
 - feature block balance (`emb_flag` 6 normalises each block before the concat)
 - PIFA label embeddings built from mention + context
-- per-label rankers whose label-embedding input is constant
 - child matchers trained without out-of-cluster negatives
-- leaf scores not comparable across leaves unless `-path_score` (`predict(path_score=True)`)
-  multiplies them by the routing path probability
+- leaf scores are only comparable across leaves through the routing path probability
+  (`HierarchicalMLModel.predict` always multiplies it in)
 
 Measure before fixing: prefer eval-only runs on saved trees and `scripts/diagnose_routing.py`
 over retraining, and always report the chance line next to routing numbers.
@@ -248,7 +245,7 @@ Focus on:
 - label construction quality
 - synonym grouping quality
 - candidate recall
-- ranker supervision
+- leaf matcher supervision
 - fair train/dev/test design
 
 Keep the scope limited to training and evaluating the model on local files.

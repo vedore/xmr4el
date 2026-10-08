@@ -25,7 +25,7 @@ def test_config_and_imports():
     assert cfg == original
     for fit, data, cfg in (
         (DimensionModel.fit, X, {"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2}}),
-        (ClusteringModel.train, np.eye(4), {"type": "sklearnkmeans", "kwargs": {"n_clusters": 2, "random_state": 0}}),
+        (ClusteringModel.train, np.eye(4), {"type": "balancedkmeans", "kwargs": {"n_clusters": 2}}),
     ):
         original = deepcopy(cfg)
         fit(data, cfg)

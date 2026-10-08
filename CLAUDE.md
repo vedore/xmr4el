@@ -34,7 +34,7 @@ Saved trees are under `outputs/saved_trees/`.
 - Verify claims against code; old notes may be superseded.
 - No compatibility code for old saved trees or old configs; retrain instead.
 - Preserve the loader ordering guard, the sorted label order, leaf label-level matching,
-  ranker warm-starting, small-cluster reassignment, and local data formats.
+  small-cluster reassignment, and local data formats.
 
 ## Current context
 
@@ -52,5 +52,5 @@ Saved trees are under `outputs/saved_trees/`.
 `STATUS.md` owns the work order and the interpretation rules; `docs/pipeline.md` holds the
 implemented-behavior table, synthetic checks and pipeline observations. Do not
 duplicate them here. Internal nodes set `fused_scores` from the matcher's cluster scores in
-`MLModel.train`, and `prepare_layer` consumes them; matcher/ranker score fusion for that step
+`MLModel.train`, and `prepare_layer` consumes them; score fusion for that step
 (`fused_predict`) is future work (`STATUS.md` § Future work).

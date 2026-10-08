@@ -11,7 +11,6 @@ from scipy.sparse import csr_matrix, eye as sp_eye
 from sklearn.preprocessing import normalize
 from xmr4el.hierarchy.clusterers import Clustering
 from xmr4el.learning.matcher import Matcher
-from xmr4el.learning.ranker import Ranker
 
 
 
@@ -20,41 +19,28 @@ class MLModel():
     def __init__(self, 
                  clustering_config=None, 
                  matcher_config=None, 
-                 ranker_config=None,
-                 cur_config=None,
                  min_leaf_size=20,
                  max_leaf_size=None,
-                 ranker_every_layer=False,
                  is_last_layer=False,
                  layer=None,
-                 n_workers=8,
-                 train_rankers=True,
                  ):
         
         self.logger = logging.getLogger(__name__)
         
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
-        self.ranker_config = ranker_config
-        self.cur_config = cur_config
         self.min_leaf_size = min_leaf_size
         self.max_leaf_size = max_leaf_size
-        self.ranker_every_layer = ranker_every_layer
         self.is_last_layer = is_last_layer
         self.layer = layer
-        self.n_workers = n_workers
-        self.train_rankers = train_rankers
         
         self._local_to_global_idx = None
         self._global_to_local_idx = None
         
         self._cluster_model = None
         self._matcher_model = None
-        self._ranker_model = None
         self._fused_scores = None
-        self._alpha = None
         self._label_embeddings = None
-        self._ranker_score_fn_cache = None
     
     @property
     def local_to_global_idx(self):
@@ -94,28 +80,12 @@ class MLModel():
         self._matcher_model = value
 
     @property
-    def ranker_model(self):
-        return self._ranker_model
-    
-    @ranker_model.setter
-    def ranker_model(self, value):
-        self._ranker_model = value
-        
-    @property
     def fused_scores(self):
         return self._fused_scores
     
     @fused_scores.setter
     def fused_scores(self, value):
         self._fused_scores = value
-        
-    @property
-    def alpha(self):
-        return self._alpha
-    
-    @alpha.setter
-    def alpha(self, value):
-        self._alpha = value
         
     @property
     def label_embeddings(self):
@@ -140,7 +110,6 @@ class MLModel():
         model_attrs = {
             "cluster_model": "_cluster_model",
             "matcher_model": "_matcher_model",
-            "ranker_model": "_ranker_model"
         }
 
         for model_name, attr_key in model_attrs.items():
@@ -163,7 +132,6 @@ class MLModel():
         if fused_scores is not None:
             np.save(pjoin(save_dir, "fused_scores.npy"), fused_scores)
         state.pop("_fused_scores", None)
-        state.pop("_ranker_score_fn_cache", None)
 
         # Save label embeddings separately
         label_embeddings = self.label_embeddings
@@ -192,16 +160,10 @@ class MLModel():
         model = cls()
         model.__dict__.update(model_data)
 
-        # Load sub-models saved in subfolders: <base_dir>/cluster_model, matcher_model, ranker_model
-        model_dirs = {
-            "cluster_model": Clustering if hasattr(Clustering, "load") else None,
-            "matcher_model": Matcher if hasattr(Matcher, "load") else None,
-            "ranker_model": Ranker if hasattr(Ranker, "load") else None,
-        }
-
-        for name, cls_ in model_dirs.items():
+        # Load sub-models saved in subfolders: <base_dir>/cluster_model, matcher_model
+        for name, cls_ in (("cluster_model", Clustering), ("matcher_model", Matcher)):
             subdir = pjoin(base_dir, name)
-            if pexists(subdir) and cls_ is not None:
+            if pexists(subdir):
                 setattr(model, name, cls_.load(subdir))
 
         # Load fused scores / label embeddings
@@ -218,7 +180,6 @@ class MLModel():
         return (
             f"Cluster Model: {self.cluster_model or 'None'}\n"
             f"Matcher Model: {self.matcher_model or 'None'}\n"
-            f"Ranker Model: {self.ranker_model or 'None'}\n"
         )
     
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
@@ -228,9 +189,11 @@ class MLModel():
             Z, Pifa embeddings
         """
         
-        # --- Ensure Z is in fused space ---
-        Z_train = normalize(Z_train, norm="l2", axis=1) 
-        self.label_embeddings = Z_train
+        # Clustering input; a leaf only needs its label count (identity C)
+        Z_train = normalize(Z_train, norm="l2", axis=1)
+        n_labels = Z_train.shape[0]
+        if not self.is_last_layer:
+            self.label_embeddings = Z_train
         del Z_train
         
         self.global_to_local_idx = global_to_local
@@ -257,30 +220,14 @@ class MLModel():
         # Retrieve C
         C = self.cluster_model.c_node
 
-        # Defect #6: a cluster-level matcher makes every label in a cluster tie at predict time
-        # (`m = cluster_scores[q_idx, c]` below), so ordering inside a leaf is decided by CSR index
-        # order. Identity C at the leaf makes the matcher one-vs-rest over labels -- XR-Linear leaf
-        # semantics -- so `M = Y_node @ I = Y_node` and `label_cluster` becomes arange(L), which
-        # makes `m` per-label with no change at the scoring site.
+        # Identity C at the leaf makes the matcher one-vs-rest over labels (XR-Linear leaf, M = Y_node), so
+        # column j of the leaf's predict_proba scores local label j (HierarchicalMLModel.predict). A
+        # cluster-level leaf matcher tied every label of a cluster (defect #6).
         if self.is_last_layer:
-            C = sp_eye(self.label_embeddings.shape[0], format="csr", dtype=np.float32)
-            self.cluster_model.c_node = C   # predict() re-reads this and asserts K == C.shape[1]
+            C = sp_eye(n_labels, format="csr", dtype=np.float32)
+            self.cluster_model.c_node = C
 
-        cluster_labels = np.asarray(C.argmax(axis=1)).flatten()
-    
         self.logger.debug("Matcher started: layer_index=%s rows=%d targets=%d", self.layer, X_train.shape[0], C.shape[1])
-
-        # With identity C above, the leaf matcher is one-vs-rest over labels and a leaf label can
-        # have a single positive instance. SGDClassifier's `early_stopping` splits off a validation
-        # set *stratified* on y, which needs >= 2 members per class and raises otherwise. Disabled
-        # for the leaf only, so the non-leaf layers stay byte-identical and the #6 row stays
-        # attributable to #6.
-        matcher_config = self.matcher_config
-        if self.is_last_layer and matcher_config.get("type") == "sklearnsgdclassifier":
-            matcher_config = {
-                **matcher_config,
-                "kwargs": {**matcher_config.get("kwargs", {}), "early_stopping": False},
-            }
 
         # Make the Matcher
         matcher_model = Matcher()  
@@ -289,60 +236,12 @@ class MLModel():
                             local_to_global_idx=self.local_to_global_idx, 
                             global_to_local_idx=self.global_to_local_idx, 
                             C=C,
-                            matcher_config=matcher_config,
+                            matcher_config=self.matcher_config,
                             dtype=np.float32
                             )     
          
         self.matcher_model = matcher_model 
         del matcher_model
-        
-        # Rankers are only used for prediction with -scorer ranker; internal training scores
-        # are matcher-only. train_rankers=False skips them; predict then uses cosine.
-        train_ranker = self.train_rankers and (self.ranker_every_layer or self.is_last_layer)
-        
-        def _topb_sparse(P: np.ndarray, b: int) -> csr_matrix:
-            # P: (n x K_or_L) dense proba; returns (n x K_or_L) CSR 0/1 mask of top-b per row
-            n, K = P.shape
-            b = max(1, min(b, K))
-            idx_part = np.argpartition(P, K - b, axis=1)[:, -b:]
-            rows = np.repeat(np.arange(n, dtype=np.int32), b)
-            cols = idx_part.ravel()
-            data = np.ones(n * b, dtype=np.int8)
-            return csr_matrix((data, (rows, cols)), shape=(n, K))
-        
-        if train_ranker:
-        
-            M_TFN = self.matcher_model.m_node
-            M_MAN = None
-        
-            if self.is_last_layer:
-                P = self.matcher_model.predict_proba(X_train)
-                # With identity C above, M_TFN is Y_node, so this top-b mask is the ranker's whole
-                # negative pool (ranker.py) instead of a cluster's worth of instances.
-                # b=5 leaves too few negatives for neg_mult * n_pos; 20 keeps the pool fed.
-                M_MAN = _topb_sparse(P, b=20)
-            
-            self.logger.debug("Rankers started: layer_index=%s labels=%d workers=%d",
-                              self.layer, self.label_embeddings.shape[0], self.n_workers)
-            ranker_model = Ranker()
-            ranker_model.train(X_train, 
-                                Y_train, 
-                                self.label_embeddings, 
-                                M_TFN, 
-                                M_MAN, 
-                                cluster_labels,
-                                local_to_global_idx=self.local_to_global_idx,
-                                layer=self.layer,
-                                n_label_workers=self.n_workers,
-                                ranker_config=self.ranker_config,
-                                cur_config=self.cur_config
-                                )
-            
-            self.ranker_model = ranker_model
-            del ranker_model
-        else:
-            self.ranker_model = None
-            
         
         self.fused_scores = None
         if not self.is_last_layer:

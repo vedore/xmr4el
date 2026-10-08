@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1 passed and committed; N2 in progress: delete rankers and unused matcher/clusterer types).
+Last updated 2026-10-08 (N1, N2 committed; N3 in progress: features name + predict_config in the config).
 
 **Runs:** none in flight. N1 passed (`outputs/logs/n1_dev_eval.log` = `knn10_dev_eval.log` exactly, eval 12 -> 6 s).
 Saved trees: `12-21-30` (current), `11-45-47`, `11-31-05` (superseded; user may delete). User 2026-10-08: speed done (encoding stays); focus = unseen strings (with knn: dev 0.680, test 0.712).
@@ -293,6 +293,13 @@ N. Normalize how the model runs (plan 2026-10-08, user decisions: remove rankers
       label embeddings if only cosine/rankers read them, matcher types `sklearnsgdclassifier` and
       `sklearnlogisticregression` (+ the leaf SGD early-stopping override), clusterer `sklearnkmeans` (tests move to
       `balancedkmeans`; the liblinear parity test calls sklearn directly). Each deletion: grep every reader first.
+      N2 done, committed: deleted `ranker.py`, ranker/cur/train_rankers/ranker_every_layer/n_workers args (XModel,
+      tree, node, configs), `m_node`, sklearn LR/SGD classifiers, `sklearnkmeans`, the child-Z zero pad, leaf
+      label embeddings (internal nodes keep Z: clustering + diagnostics read the root's). Also deleted now (would
+      not load): configs flag1, flag6_sapbert, full_cuda, bc5cdr_dict (README/CLAUDE.md flag1 lines fixed in N3).
+      Tests: `test_no_rankers.py` -> `test_tree.py`; `test_ranker.py`, `test_matcher.py` (SGD override) deleted;
+      reassignment test now balanced (62 labels, 4 clusters, min_leaf 16). pytest 23 + 5 selfchecks pass.
+      Depth-2 training is unchanged (rankers were off, leaves never cluster), so no run for N2 alone.
    N3 config: `emb_flag` 1/6 -> `"features": "tfidf"` (TF-IDF->SVD of the text; plain TSV) | `"sapbert_char_context"`
       (today's flag 6); joint matcher for both; `"predict_config": {"beam_size": 10, "topk": 0, "knn_beta": 10}` (bc5cdr;
       base keeps knn_beta 0 until measured on MedMentions, U3 D5). Delete configs bc5cdr_dict, flag6_sapbert, full_cuda,

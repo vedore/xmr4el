@@ -79,18 +79,7 @@ class Matcher:
             Desired data type for internal numpy arrays.
         """
 
-        self._M_node: Optional[np.ndarray] = None
         self._model: Optional[ClassifierModel] = None
-        
-    @property
-    def m_node(self) -> Optional[np.ndarray]:
-        """Return the binarized matching matrix."""
-        return self._M_node
-    
-    @m_node.setter
-    def m_node(self, value: np.ndarray) -> None:
-        """Set the binarized matching matrix."""
-        self._M_node = value
         
     @property
     def model(self) -> Optional[ClassifierModel]:
@@ -186,7 +175,7 @@ class Matcher:
             Matrix used to construct the matching graph.
         """
 
-        _, _, M, model = MatcherTrainer.train(
+        _, _, _, model = MatcherTrainer.train(
             X=X,
             Y=Y,
             local_to_global_idx=local_to_global_idx,
@@ -196,7 +185,6 @@ class Matcher:
             dtype=dtype,
         )
         
-        self.m_node = M
         self.model = model
         
     def predict(self, X: np.ndarray) -> np.ndarray:

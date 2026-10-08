@@ -14,8 +14,7 @@ from pickle import dump as pkl_dump, load as pkl_load
 from joblib import dump as jdump, load as jload
 from scipy.sparse import hstack as sp_hstack, csr_matrix
 from numpy import (
-    asarray, int32, log, hstack as np_hstack,
-    vstack as np_vstack, zeros
+    asarray, int32, log, vstack as np_vstack
 )
 from sklearn.preprocessing import normalize
 from collections import defaultdict
@@ -36,28 +35,18 @@ class HierarchicalMLModel():
     def __init__(self, 
                  clustering_config=None, 
                  matcher_config=None, 
-                 ranker_config=None, 
-                 cur_config=None,
                  min_leaf_size=20,
                  max_leaf_size=None,
                  cut_half_cluster=False,
-                 ranker_every_layer=False,
-                 n_workers=8,
-                 layer=1,
-                 train_rankers=True):
+                 layer=1):
         
         self.logger = logging.getLogger(__name__)
         
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
-        self.ranker_config = ranker_config
-        self.cur_config = cur_config
         self.min_leaf_size = min_leaf_size
         self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
-        self.ranker_every_layer = ranker_every_layer
-        self.n_workers = n_workers
-        self.train_rankers = train_rankers
         
         self._hmodel = []
         self._layer = layer
@@ -204,7 +193,7 @@ class HierarchicalMLModel():
     def prepare_layer(self, X, Y, Z, C, fused_scores, local_to_global_idx):
         """
         Returns a list of tuples, one per (non-empty) cluster c:
-        (X_aug, Y_node, Z_node_aug, local_to_global_next, global_to_local_next, c)
+        (X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next, c)
         where `c` is the *cluster id* in the parent.
         """
         K_next = C.shape[1]
@@ -227,8 +216,6 @@ class HierarchicalMLModel():
             if X_node.shape[0] == 0:
                 continue
 
-            Z_node_base = Z[local_idxs, :]
-
             fused_c = fused_dense[mention_mask, :]
             feat_c = fused_c[:, c].ravel()
             feat_sum = fused_c.sum(axis=1).ravel()
@@ -236,14 +223,8 @@ class HierarchicalMLModel():
             
             X_aug = augment_features(X_node, feat_c, feat_sum, feat_max)
 
-            # Zero pad keeps Z width == X_aug width (ranker cosine/ip, cosine fallback). The old
-            # pad held mean/sum/max of X.Z over all node rows; the sum grew with node size and after
-            # L2 norm took 1.000 of every leaf z's squared norm, erasing the label embedding.
-            label_feats = zeros((Z_node_base.shape[0], 3), dtype=Z_node_base.dtype)
-            Z_node_aug = np_hstack([Z_node_base, label_feats])
-            Z_node_aug = normalize(Z_node_aug, norm="l2", axis=1)
-
-            inputs.append((X_aug, Y_node, Z_node_aug, local_to_global_next, global_to_local_next, c))
+            Z_node = normalize(Z[local_idxs, :], norm="l2", axis=1)
+            inputs.append((X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next, c))
 
         return inputs
             
@@ -255,7 +236,6 @@ class HierarchicalMLModel():
         inputs = ((X_train, Y_train, Z_train, local_to_global, global_to_local),)
         clustering_config = deepcopy(self.clustering_config)
         last_layer_index = self.layers - 1
-        ranker_flag_default = bool(self.ranker_every_layer)
 
         save_temp = self.save_ml_temp  # local bind
 
@@ -293,7 +273,6 @@ class HierarchicalMLModel():
                 layer_child_maps: list[dict[int, int]] = []   # <-- add this
                 
                 is_last_layer = (layer == last_layer_index)
-                ranker_flag = True if is_last_layer else ranker_flag_default
 
                 if self.cut_half_cluster and layer > 0:
                     # A new dict per layer: ClusteringModel.train replaces config["kwargs"], and the
@@ -310,15 +289,10 @@ class HierarchicalMLModel():
                     ml = MLModel(
                         clustering_config=clustering_config,
                         matcher_config=self.matcher_config,
-                        ranker_config=self.ranker_config,
-                        cur_config=self.cur_config,
                         min_leaf_size=self.min_leaf_size,
                         max_leaf_size=self.max_leaf_size,
-                        ranker_every_layer= ranker_flag,
                         is_last_layer=is_last_layer,
                         layer=layer,
-                        n_workers=self.n_workers,
-                        train_rankers=self.train_rankers,
                     )
 
                     ml.train(

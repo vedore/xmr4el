@@ -1,16 +1,11 @@
 import os
 import json
 import pickle
-import multiprocessing
 import numpy as np
-import joblib
 from abc import ABCMeta
-from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.multiclass import OneVsRestClassifier
 import torch
 from scipy.special import expit
 from threadpoolctl import threadpool_limits
-from typing import Any, Dict, List, Tuple, Optional
 from xmr4el import torch_device
 
 
@@ -51,13 +46,8 @@ class ClassifierModel(metaclass=ClassifierMeta):
     @classmethod
     def load(cls, classifier_folder):
         """Load a saved classifier model from disk."""
-        config_path = os.path.join(classifier_folder, "classifier_config.json")
-
-        if not os.path.exists(config_path):
-            config = {"type": "sklearnlogisticregression", "kwargs": {}}
-        else:
-            with open(config_path, "r", encoding="utf-8") as fin:
-                config = json.loads(fin.read())
+        with open(os.path.join(classifier_folder, "classifier_config.json"), "r", encoding="utf-8") as fin:
+            config = json.loads(fin.read())
 
         classifier_type = config.get("type", None)
         assert classifier_type is not None, f"{classifier_folder} is not a valid classifier folder"
@@ -66,11 +56,10 @@ class ClassifierModel(metaclass=ClassifierMeta):
         return cls(config, model)
 
     @classmethod
-    def init_model(cls, config=None, onevsrest=False):
+    def init_model(cls, config, onevsrest=False):
         """
         Initialize (but do not fit) a classifier, returning a ClassifierModel wrapper.
         """
-        config = config if config is not None else {"type": "sklearnlogisticregression", "kwargs": {}}
         classifier_type = config.get("type", None)
         assert classifier_type is not None, f"config {config} should contain a key 'type' for the classifier type"
 
@@ -82,12 +71,11 @@ class ClassifierModel(metaclass=ClassifierMeta):
         return cls(out_cfg, model)
 
     @classmethod
-    def train(cls, X_train, y_train=None, config=None, dtype=np.float32, onevsrest=False):
+    def train(cls, X_train, y_train, config, dtype=np.float32, onevsrest=False):
         """
         Train using the already-initialized model from init_model().
         Works regardless of whether you call ClassifierModel.train(...) or a subclass's train(...).
         """
-        config = config if config is not None else {"type": "sklearnlogisticregression", "kwargs": {}}
         classifier_type = config.get("type", None)
         assert classifier_type is not None, f"config {config} should contain a key 'type' for the classifier type"
 
@@ -99,9 +87,6 @@ class ClassifierModel(metaclass=ClassifierMeta):
         # sync any updated params back
         wrapper.config["kwargs"] = wrapper.model.config
         return wrapper
-
-    def partial_fit(self, X, Y, classes, dtype):
-        self.model.partial_fit(X, Y, classes, dtype)
 
     # Delegations to underlying model object
     def predict(self, predict_input):
@@ -116,176 +101,7 @@ class ClassifierModel(metaclass=ClassifierMeta):
     def classes(self):
         return self.model.classes()
 
-    def coef(self):
-        return self.model.coef()
-
-    def intercept(self):
-        return self.model.intercept()
-
-    def is_linear_model(self):
-        return self.model.is_linear_model()
     
-    def supports_partial_fit(self) -> bool:
-        """Whether this model can be updated incrementally via partial_fit."""
-        return self.model.supports_partial_fit
-
-    
-
-# ---------------------------
-# Sklearn Logistic Regression
-# ---------------------------
-class SklearnLogisticRegression(ClassifierModel):
-    """Sklearn Logistic Regression"""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "classifier_model.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        classifier_path = os.path.join(load_dir, "classifier_model.pkl")
-        assert os.path.exists(classifier_path), f"Classifier path {classifier_path} does not exist"
-        with open(classifier_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        return cls(config, model_data)
-
-    @classmethod
-    def init_model(cls, config, onevsrest=False):
-        defaults = {  # sklearn >= 1.8: L2 is the default via l1_ratio; penalty and n_jobs are deprecated
-            "dual": False,
-            "tol": 0.0001,
-            "C": 1.0,
-            "fit_intercept": True,
-            "intercept_scaling": 1,
-            "class_weight": None,
-            "random_state": None,
-            "solver": "lbfgs",
-            "max_iter": 100,
-            "verbose": 0,
-            "warm_start": False,
-        }
-        cfg = {**defaults, **(config or {})}
-        est = LogisticRegression(**cfg)
-        if onevsrest:
-            est = OneVsRestClassifier(est, n_jobs=multiprocessing.cpu_count())
-        return cls(cfg, est)
-
-    @classmethod
-    def train(cls, X_train, y_train, config=None, dtype=np.float32, onevsrest=False):
-        wrapper = cls.init_model(config or {}, onevsrest=onevsrest)
-        wrapper.model.fit(X_train, y_train)
-        return wrapper
-
-    def predict(self, X):
-        return self.model.predict(X)
-
-    def predict_proba(self, X):
-        return self.model.predict_proba(X)
-
-    def decision_function(self, X):
-        return self.model.decision_function(X)
-
-    def classes(self):
-        return self.model.classes_ if hasattr(self.model, "classes_") else self.model.classes
-
-    def coef(self):
-        return self.model.coef_ if hasattr(self.model, "coef_") else None
-
-    def intercept(self):
-        return self.model.intercept_ if hasattr(self.model, "intercept_") else None
-
-    def is_linear_model(self):
-        return True
-
-    def supports_partial_fit(self) -> bool:
-        return False
-
-# ---------------------------
-# Sklearn SGDClassifier
-# ---------------------------
-class SklearnSGDClassifier(ClassifierModel):
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "classifier_model.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        classifier_path = os.path.join(load_dir, "classifier_model.pkl")
-        assert os.path.exists(classifier_path), f"Classifier path {classifier_path} does not exist"
-        with open(classifier_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        return cls(config, model_data)
-
-    @classmethod
-    def init_model(cls, config, onevsrest=False):
-        defaults = {
-            "loss": 'hinge',
-            "penalty": 'l2',
-            "alpha": 0.0001,
-            "l1_ratio": 0.15,
-            "fit_intercept": True,
-            "max_iter": 1000,
-            "tol": 0.001,
-            "shuffle": True,
-            "verbose": 0,
-            "epsilon": 0.1,
-            "n_jobs": None,
-            "random_state": None,
-            "learning_rate": 'optimal',
-            "power_t": 0.5,
-            "early_stopping": False,
-            "validation_fraction": 0.1,
-            "n_iter_no_change": 5,
-            "class_weight": None,
-            "warm_start": False,
-            "average": False
-        }
-        cfg = {**defaults, **(config or {})}
-        est = SGDClassifier(**cfg)
-        if onevsrest:
-            est = OneVsRestClassifier(est, n_jobs=cfg.get("n_jobs", None))
-        return cls(cfg, est)
-
-    @classmethod
-    def train(cls, X_train, y_train, config=None, dtype=np.float32, onevsrest=False):
-        wrapper = cls.init_model(config or {}, onevsrest=onevsrest)
-        wrapper.model.fit(X_train, y_train)
-        return wrapper
-    
-    def partial_fit(self, X, Y, classes, dtype):
-        self.model.partial_fit(X, Y, classes)
-
-    def predict(self, X):
-        return self.model.predict(X)
-
-    def decision_function(self, X):
-        return self.model.decision_function(X)
-
-    def classes(self):
-        return self.model.classes_
-
-    def coef(self):
-        return self.model.coef_
-
-    def intercept(self):
-        return self.model.intercept_
-
-    def is_linear_model(self):
-        return True
-    
-    def supports_partial_fit(self) -> bool:
-        return True 
-
 
 # ---------------------------
 # Joint one-vs-rest L2 logistic regression
@@ -410,9 +226,3 @@ class JointLogisticRegression(ClassifierModel):
 
     def classes(self):
         return self.model.classes_
-
-    def is_linear_model(self):
-        return True
-
-    def supports_partial_fit(self) -> bool:
-        return False
