@@ -9,13 +9,17 @@ def main():
     parser.add_argument("--input", required=True, help="Full PubTator corpus file")
     parser.add_argument("--outdir", required=True, help="Output directory to write splits")
     parser.add_argument("--train_ratio", type=float, default=0.8)
-    parser.add_argument("--dev_ratio", type=float, default=0.1)
-    parser.add_argument("--test_ratio", type=float, default=0.1)
+    parser.add_argument("--dev_ratio", type=float, default=0.1, help="test gets 1 - train_ratio - dev_ratio")
     parser.add_argument("--train_pmids", help="Optional file with official train PMIDs")
     parser.add_argument("--dev_pmids", help="Optional file with official dev PMIDs")
     parser.add_argument("--test_pmids", help="Optional file with official test PMIDs")
     parser.add_argument("--emit_jsonl", action="store_true", help="Also emit JSONL for each split")
     args = parser.parse_args()
+    official = [args.train_pmids, args.dev_pmids, args.test_pmids]
+    if any(official) and not all(official):
+        parser.error("give all three of --train_pmids/--dev_pmids/--test_pmids or none")
+    if min(args.train_ratio, args.dev_ratio) < 0 or args.train_ratio + args.dev_ratio > 1:
+        parser.error("need train_ratio, dev_ratio >= 0 with train_ratio + dev_ratio <= 1")
 
     names = ["corpus_pubtator_%s.txt" % s for s in ("train", "dev", "test")]
     if args.emit_jsonl:
@@ -30,7 +34,7 @@ def main():
 
     splits = {"train": [], "dev": [], "test": []}
 
-    if args.train_pmids and args.dev_pmids and args.test_pmids:
+    if all(official):
         # Use official PMID splits
         splits["train"] = load_pmids(args.train_pmids)
         splits["dev"] = load_pmids(args.dev_pmids)
@@ -44,7 +48,7 @@ def main():
     else:
         # Deterministic split
         for pmid in pmids:
-            s = deterministic_split(pmid, args.train_ratio, args.dev_ratio, args.test_ratio)
+            s = deterministic_split(pmid, args.train_ratio, args.dev_ratio)
             splits[s].append(pmid)
 
     # Write PubTator files

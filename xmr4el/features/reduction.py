@@ -64,27 +64,23 @@ class DimensionModel(metaclass=DimensionModelMeta):
                 config = json.loads(fin.read())
 
         dimension_type = config.get("type", None)
-        assert (
-            dimension_type is not None
-        ), f"{dimension_folder} is not a valid vectorizer folder"
-        assert (
-            dimension_type in dimension_dict
-        ), f"invalid vectorizer type {config['type']}"
+        if dimension_type not in dimension_dict:
+            raise ValueError(f"{dimension_folder}: invalid dimension type {dimension_type}")
         model = dimension_dict[dimension_type].load(dimension_folder)
         return cls(config, model)
     
     @classmethod
     def fit(cls, X_emb, config=None, dtype=np.float32):
-        """Train on a corpus.
+        """Fit a dimension model on X_emb (n x d, sparse or dense).
 
         Args:
-            trn_corpus (list or str): Training corpus in the form of a list of strings or path to text file.
-            config (dict, optional): Dict with key `"type"` and value being the lower-cased name of the specific vectorizer class to use.
-                Also contains keyword arguments to pass to the specified vectorizer. Default behavior is to use tfidf vectorizer with default arguments.
+            X_emb: Features to reduce.
+            config (dict, optional): `"type"` (lower-cased class name) and `"kwargs"` for it. Default: truncated SVD
+                with default arguments.
             dtype (type, optional): Data type. Default is `numpy.float32`.
 
         Returns:
-            Vectorizer: Trained vectorizer.
+            DimensionModel: Fitted model.
         """
 
         config = deepcopy(config) if config is not None else {"type": "sklearntruncatedsvd", "kwargs": {}}
@@ -99,14 +95,10 @@ class DimensionModel(metaclass=DimensionModelMeta):
         return cls(config, model)
     
     def transform(self, x_emb, **kwargs):
-        """Reduce an corpus.
-
-        Args:
-            corpus (list or str): List of strings to vectorize or path to text file.
-            **kwargs: Keyword arguments to pass to the trained vectorizer.
+        """Reduce x_emb (n x d) to (n x n_components); unchanged when the fit skipped SVD.
 
         Returns:
-            numpy.ndarray or scipy.sparse.csr.csr_matrix: Matrix of features.
+            numpy.ndarray, or x_emb itself when there is no model.
         """
 
         if isinstance(x_emb, str) and self.config["type"] != "tfidf":
@@ -125,9 +117,8 @@ class SklearnTruncatedSVD(DimensionModel):
         """Initialization
 
         Args:
-            config (dict): Dict with key `"type"` and value being the lower-cased name of the specific vectorizer class to use.
-                Also contains keyword arguments to pass to the specified vectorizer.
-            model (sklearn.feature_extraction.text.TfidfVectorizer, optional): The trained tfidf vectorizer. Default is `None`.
+            config (dict): TruncatedSVD keyword arguments.
+            model (sklearn.decomposition.TruncatedSVD, optional): The fitted SVD; None = features kept unreduced.
         """
 
         self.config = config
@@ -138,7 +129,7 @@ class SklearnTruncatedSVD(DimensionModel):
         self.model = None
 
     def save(self, save_dir):
-        """Save trained sklearn Tfidf vectorizer to disk.
+        """Save the fitted SVD to disk.
 
         Args:
             save_dir (str): Folder to store serialized object in.
@@ -149,19 +140,18 @@ class SklearnTruncatedSVD(DimensionModel):
 
     @classmethod
     def load(cls, load_dir):
-        """Load a saved sklearn Tfidf vectorizer from disk.
+        """Load a saved SVD from disk.
 
         Args:
             load_dir (str): Folder inside which the model is loaded.
 
         Returns:
-            Tfidf: The loaded object.
+            SklearnTruncatedSVD: The loaded object.
         """
 
         dimension_path = os.path.join(load_dir, "dimension_model.pkl")
-        assert os.path.exists(
-            dimension_path
-        ), f"vectorizer path {dimension_path} does not exist"
+        if not os.path.exists(dimension_path):
+            raise FileNotFoundError(f"dimension model path {dimension_path} does not exist")
 
         with open(dimension_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -171,18 +161,18 @@ class SklearnTruncatedSVD(DimensionModel):
 
     @classmethod
     def fit(cls, X_emb, config={}, dtype=np.float32):
-        """Train on a corpus.
+        """Fit TruncatedSVD on X_emb (n x d, sparse or dense).
 
         Args:
-            trn_corpus (list): Training corpus in the form of a list of strings.
-            config (dict): Dict with keyword arguments to pass to sklearn's TfidfVectorizer.
+            X_emb: Features to reduce.
+            config (dict): Keyword arguments for sklearn's TruncatedSVD (defaults below).
             dtype (type, optional): Data type. Default is `numpy.float32`.
 
         Returns:
-            Tfidf: Trained vectorizer.
+            SklearnTruncatedSVD: Fitted model; model None (no reduction) when n_components > d.
 
         Raises:
-            Exception: If `config` contains keyword arguments that the tfidf vectorizer does not accept.
+            Exception: If `config` contains keyword arguments that TruncatedSVD does not accept.
         """
         defaults = {
             "n_components": 1000, 
@@ -209,19 +199,16 @@ class SklearnTruncatedSVD(DimensionModel):
             model = TruncatedSVD(**config)
         except TypeError:
             raise Exception(
-                f"vectorizer config {config} contains unexpected keyword arguments for TfidfVectorizer"
+                f"dimension config {config} contains unexpected keyword arguments for TruncatedSVD"
             )
         model.fit(X_emb)
         return cls(config, model)
 
     def transform(self, corpus):
-        """Vectorize a corpus.
-
-        Args:
-            corpus (list): List of strings to vectorize.
+        """Reduce corpus (n x d features) to (n x n_components), or return it unchanged without a model.
 
         Returns:
-            scipy.sparse.csr.csr_matrix: Matrix of features.
+            numpy.ndarray: Reduced features.
         """
         
         if self.model is None:

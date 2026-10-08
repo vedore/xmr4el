@@ -3,7 +3,8 @@ import hashlib
 import json
 from collections import defaultdict
 
-def deterministic_split(pmid: str, train_ratio=0.8, dev_ratio=0.1, test_ratio=0.1) -> str:
+def deterministic_split(pmid: str, train_ratio=0.8, dev_ratio=0.1) -> str:
+    """Hash split; test gets the remaining 1 - train_ratio - dev_ratio."""
     h = hashlib.md5(pmid.encode("utf8")).hexdigest()
     val = int(h[:8], 16) / float(0xFFFFFFFF)
     if val < train_ratio:

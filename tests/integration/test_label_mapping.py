@@ -44,7 +44,7 @@ def test_label_mapping():
             pickle.dump(state, f)
         try:
             XModel.load(saved)
-        except AssertionError:
+        except ValueError:
             pass
         else:
             raise AssertionError("load accepted more labels than Z rows")

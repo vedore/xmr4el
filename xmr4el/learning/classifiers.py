@@ -50,8 +50,8 @@ class ClassifierModel(metaclass=ClassifierMeta):
             config = json.loads(fin.read())
 
         classifier_type = config.get("type", None)
-        assert classifier_type is not None, f"{classifier_folder} is not a valid classifier folder"
-        assert classifier_type in classifier_dict, f"invalid classifier type {config['type']}"
+        if classifier_type not in classifier_dict:
+            raise ValueError(f"{classifier_folder}: invalid classifier type {classifier_type}")
         model = classifier_dict[classifier_type].load(classifier_folder, config)
         return cls(config, model)
 

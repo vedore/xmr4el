@@ -16,7 +16,7 @@ from xmr4el.hierarchy.tree import HierarchicalMLModel, augment_features
 def train(X, Y, Z, cfg, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
     hml = HierarchicalMLModel(
         clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": n_clusters, "iter_limit": 20}},
-        matcher_config=cfg["matcher_config"], min_leaf_size=min_leaf_size, max_leaf_size=20,
+        matcher_config=cfg["matcher_config"], min_leaf_size=min_leaf_size,
         cut_half_cluster=cut_half, layer=layer,
     )
     L = Z.shape[0]

@@ -11,7 +11,6 @@ from copy import deepcopy
 from os.path import join as pjoin, exists as pexists, isdir as pisdir
 from os import makedirs as pmakedirs, listdir as plistdir
 from pickle import dump as pkl_dump, load as pkl_load
-from joblib import dump as jdump, load as jload
 from scipy.sparse import hstack as sp_hstack, csr_matrix
 from numpy import (
     asarray, int32, log, vstack as np_vstack
@@ -49,7 +48,6 @@ class HierarchicalMLModel():
                  clustering_config=None, 
                  matcher_config=None, 
                  min_leaf_size=20,
-                 max_leaf_size=None,
                  cut_half_cluster=False,
                  layer=1):
         
@@ -58,7 +56,6 @@ class HierarchicalMLModel():
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
         self.min_leaf_size = min_leaf_size
-        self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
         
         self._hmodel = []
@@ -102,20 +99,13 @@ class HierarchicalMLModel():
             pmakedirs(layer_path, exist_ok=True)
 
             for model_idx, model in enumerate(model_list):
-                        if model is None:
-                            continue
-                        sub_model_path = pjoin(layer_path, f"ml_{model_idx}")
-                        pmakedirs(sub_model_path, exist_ok=True)
-                        if hasattr(model, "save") and callable(model.save):
-                            model.save(sub_model_path)
-                        else:
-                            try:
-                                jdump(model, f"{sub_model_path}.joblib")
-                            except ImportError:
-                                with open(f"{sub_model_path}.pkl", "wb") as f:
-                                    pkl_dump(model, f)
+                if model is None:
+                    continue
+                sub_model_path = pjoin(layer_path, f"ml_{model_idx}")
+                pmakedirs(sub_model_path, exist_ok=True)
+                model.save(sub_model_path)
 
-        state.pop("_hmodel", None)  # Correct key
+        state.pop("_hmodel", None)
 
         with open(os.path.join(save_dir, "hml.pkl"), "wb") as fout:
             pkl_dump(state, fout)
@@ -123,7 +113,8 @@ class HierarchicalMLModel():
     @classmethod
     def load(cls, load_dir):
         xmodel_path = pjoin(load_dir, "hml.pkl")
-        assert pexists(xmodel_path), f"Hierarchical ML Model path {xmodel_path} does not exist"
+        if not pexists(xmodel_path):
+            raise FileNotFoundError(f"Hierarchical ML Model path {xmodel_path} does not exist")
             
         with open(xmodel_path, "rb") as fin:
             model_data = pkl_load(fin)
@@ -138,7 +129,8 @@ class HierarchicalMLModel():
             full_path = pjoin(load_dir, entry)
             if pisdir(full_path) and pattern.match(entry):
                 layer_folders.append(full_path)
-        assert len(layer_folders) > 0, "No layer folders found"
+        if not layer_folders:
+            raise ValueError(f"No layer folders found in {load_dir}")
         layer_folders.sort(key=lambda x: int(re.search(r'layer_(\d+)', x).group(1)))
             
         # `child_index_map` indexes the models of a layer by their TRAINING order, which save()
@@ -156,20 +148,10 @@ class HierarchicalMLModel():
             layer_models = []
             for subentry in sorted(plistdir(layer_path), key=_ml_key):
                 sub_path = pjoin(layer_path, subentry)
-                if pisdir(sub_path):  # If model is saved via model.save()
-                    try:
-                        model_obj = MLModel.load(sub_path)
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to load MLModel from {sub_path}: {e}")
-                elif subentry.endswith(".joblib"):
-                    model_obj = jload(sub_path)
-                elif subentry.endswith(".pkl"):
-                    with open(sub_path, "rb") as f:
-                        model_obj = pkl_load(f)
-                else:
-                    continue  # Skip unexpected files
-                layer_models.append(model_obj)
-            assert layer_models, f"No models found in layer folder {layer_path}"
+                if pisdir(sub_path):
+                    layer_models.append(MLModel.load(sub_path))
+            if not layer_models:
+                raise ValueError(f"No models found in layer folder {layer_path}")
             hmodel.append(layer_models)
 
         setattr(model, "_hmodel", hmodel)
@@ -191,11 +173,12 @@ class HierarchicalMLModel():
                     for c, child_idx in (cmap or {}).items():
                         want = set(l2g[np.where(C_dense[:, int(c)] > 0)[0]].tolist())
                         got = set(np.asarray(hmodel[layer + 1][child_idx].local_to_global_idx).tolist())
-                        assert want == got, (
-                            f"child_index_map[{layer}][{parent_idx}][{c}] -> child {child_idx} holds "
-                            f"{len(got)} labels but cluster {c} has {len(want)} "
-                            f"(overlap {len(want & got)}). Layer models are out of training order."
-                        )
+                        if want != got:
+                            raise ValueError(
+                                f"child_index_map[{layer}][{parent_idx}][{c}] -> child {child_idx} holds "
+                                f"{len(got)} labels but cluster {c} has {len(want)} "
+                                f"(overlap {len(want & got)}). Layer models are out of training order."
+                            )
 
         return model
     
@@ -285,7 +268,7 @@ class HierarchicalMLModel():
                 
                 next_inputs: list[tuple] = []
                 ml_list: list[str] = []
-                layer_child_maps: list[dict[int, int]] = []   # <-- add this
+                layer_child_maps: list[dict[int, int]] = []
                 
                 is_last_layer = (layer == last_layer_index)
 
@@ -305,7 +288,6 @@ class HierarchicalMLModel():
                         clustering_config=clustering_config,
                         matcher_config=self.matcher_config,
                         min_leaf_size=self.min_leaf_size,
-                        max_leaf_size=self.max_leaf_size,
                         is_last_layer=is_last_layer,
                         layer=layer,
                     )

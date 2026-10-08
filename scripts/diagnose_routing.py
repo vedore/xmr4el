@@ -83,7 +83,7 @@ def main():
 
     xm = XModel.load(args.xmodel_path)
     root = xm.model.hmodel[0][0]
-    if root.cluster_model is None:
+    if root.is_last_layer:
         ap.error("one-layer tree: the root is a leaf, no routing to diagnose")
     Z = _dense(xm.Z)
     cluster_of = np.asarray(root.cluster_model.c_node.argmax(axis=1)).ravel()

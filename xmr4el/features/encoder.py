@@ -1,6 +1,5 @@
 import os
 import pickle
-import joblib
 import logging
 import numpy as np
 from typing import Any, Dict, Optional, Tuple, Sequence, List
@@ -64,23 +63,17 @@ class TextEncoder():
         
     def save(self, save_dir: str) -> None:
         """Persist the encoder and its models to ``save_dir``."""
+        models = ["vectorizer_model", "dimension_model", "context_vectorizer_model", "context_dimension_model"]
+        models_data = [getattr(self, model_name, None) for model_name in models]
+        for name, model in zip(models, models_data):
+            if model is not None and not callable(getattr(model, "save", None)):
+                raise TypeError(f"{name} ({type(model).__name__}) has no save()")
         os.makedirs(save_dir, exist_ok=True)
 
         state = self.__dict__.copy()
-        models = ["vectorizer_model", "dimension_model", "context_vectorizer_model", "context_dimension_model"]
-        models_data = [getattr(self, model_name, None) for model_name in models]
-
         for idx, model in enumerate(models_data):
             if model is not None:
-                model_path = os.path.join(save_dir, models[idx])
-                if hasattr(model, "save"):
-                    model.save(model_path)
-                else:
-                    try:
-                        joblib.dump(model, f"{model_path}.joblib")
-                    except ImportError:
-                        with open(f"{model_path}.pkl", "wb") as f:
-                            pickle.dump(model, f)
+                model.save(os.path.join(save_dir, models[idx]))
                 state.pop("_" + models[idx] if idx < 2 else models[idx], None)
 
         with open(os.path.join(save_dir, "text_encoder.pkl"), "wb") as fout:
@@ -91,7 +84,8 @@ class TextEncoder():
     def load(cls, load_dir: str) -> "TextEncoder":
         """Load a previously saved :class:`TextEncoder` instance."""
         text_encoder_path = os.path.join(load_dir, "text_encoder.pkl")
-        assert os.path.exists(text_encoder_path), f"Text Encoder path {text_encoder_path} does not exist"
+        if not os.path.exists(text_encoder_path):
+            raise FileNotFoundError(f"Text Encoder path {text_encoder_path} does not exist")
 
         with open(text_encoder_path, "rb") as fin:
             model_data = pickle.load(fin)

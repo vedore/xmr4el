@@ -71,7 +71,6 @@
         }
     },
     "min_leaf_size": 5,
-    "max_leaf_size": 200,
     "cut_half_cluster": true,
     "depth": 2,
     "verbose": 1,

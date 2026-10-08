@@ -9,14 +9,14 @@ from xmr4el.learning.classifiers import ClassifierModel
 
 class MatcherTrainer():
     
-    # Y = Y_binazer
+    # Y = Y_binary
     @staticmethod
     def train(
         X: np.ndarray,
-        Y: np.ndarray,
+        Y: sp.csr_matrix,
         local_to_global_idx: List[int],
         global_to_local_idx: Dict[int, int],
-        C: np.ndarray,
+        C: sp.csr_matrix,
         config: Dict[str, Any],
         dtype: Any = np.float32,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, ClassifierModel]:
@@ -25,15 +25,15 @@ class MatcherTrainer():
         Parameters
         ----------
         X:
-            Feature matrix for documents.
+            Features, n x d.
         Y:
-            Label matrix for documents.
+            Labels, n x L (sparse, one-hot rows).
         local_to_global_idx:
             Mapping of local label indices to global indices.
         global_to_local_idx:
             Mapping of global label indices to local indices.
         C:
-            Matrix used to construct the matching graph.
+            Label-to-cluster assignment, L x K (sparse); the matcher's targets are Y @ C (n x K).
         config:
             Configuration dictionary for the classifier.
         dtype:
@@ -100,19 +100,14 @@ class Matcher:
             Directory where the model and state will be saved.
         """
 
+        model = self.model
+        if model is not None and not callable(getattr(model, "save", None)):
+            raise TypeError(f"matcher model ({type(model).__name__}) has no save()")
         os.makedirs(save_dir, exist_ok=True)
 
         state = self.__dict__.copy()
-        model = self.model
-
         if model is not None:
-            model_path = os.path.join(save_dir, "matcher")
-
-            if hasattr(model, "save") and callable(model.save):
-                model.save(model_path)
-            else:
-                joblib.dump(model, f"{model_path}.joblib")
-
+            model.save(os.path.join(save_dir, "matcher"))
             state.pop("_model", None)
 
         with open(os.path.join(save_dir, "matcher.pkl"), "wb") as fout:
@@ -134,7 +129,8 @@ class Matcher:
         """
         
         matcher_path = os.path.join(load_dir, "matcher.pkl")
-        assert os.path.exists(matcher_path), f"Matcher path {matcher_path} does not exist"
+        if not os.path.exists(matcher_path):
+            raise FileNotFoundError(f"Matcher path {matcher_path} does not exist")
 
         with open(matcher_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -152,10 +148,10 @@ class Matcher:
     def train(
         self,
         X: np.ndarray,
-        Y: np.ndarray,
+        Y: sp.csr_matrix,
         local_to_global_idx: List[int],
         global_to_local_idx: Dict[int, int],
-        C: np.ndarray,
+        C: sp.csr_matrix,
         matcher_config: Optional[Dict[str, Any]] = None,
         dtype: Any = np.float32,
     ) -> None:
@@ -164,15 +160,15 @@ class Matcher:
         Parameters
         ----------
         X:
-            Feature matrix for documents.
+            Features, n x d.
         Y:
-            Label matrix for documents.
+            Labels, n x L (sparse, one-hot rows).
         local_to_global_idx:
             Mapping of local label indices to global indices.
         global_to_local_idx:
             Mapping of global label indices to local indices.
         C:
-            Matrix used to construct the matching graph.
+            Label-to-cluster assignment, L x K (sparse); the matcher's targets are Y @ C (n x K).
         """
 
         _, _, _, model = MatcherTrainer.train(

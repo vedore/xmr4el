@@ -72,12 +72,8 @@ class Vectorizer(metaclass=VectorizerMeta):
                 config = json.loads(fin.read())
 
         vectorizer_type = config.get("type", None)
-        assert (
-            vectorizer_type is not None
-        ), f"{vectorizer_folder} is not a valid vectorizer folder"
-        assert (
-            vectorizer_type in vectorizer_dict
-        ), f"invalid vectorizer type {config['type']}"
+        if vectorizer_type not in vectorizer_dict:
+            raise ValueError(f"{vectorizer_folder}: invalid vectorizer type {vectorizer_type}")
         model = vectorizer_dict[vectorizer_type].load(vectorizer_folder)
         return cls(config, model)
 
@@ -169,9 +165,8 @@ class Tfidf(Vectorizer):
         """
 
         vectorizer_path = os.path.join(load_dir, "vectorizer.pkl")
-        assert os.path.exists(
-            vectorizer_path
-        ), f"vectorizer path {vectorizer_path} does not exist"
+        if not os.path.exists(vectorizer_path):
+            raise FileNotFoundError(f"vectorizer path {vectorizer_path} does not exist")
 
         with open(vectorizer_path, "rb") as fin:
             model_data = pickle.load(fin)

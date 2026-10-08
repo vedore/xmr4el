@@ -33,7 +33,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 .venv/bin/python scripts/split_pubtator.py \
   --input datasets/corpus_pubtator.txt \
   --outdir datasets/splits \
-  --train_ratio 0.8 --dev_ratio 0.1 --test_ratio 0.1 \
+  --train_ratio 0.8 --dev_ratio 0.1 \
   --emit_jsonl
 ```
 

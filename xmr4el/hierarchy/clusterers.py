@@ -3,14 +3,12 @@ import json
 import pickle
 import numpy as np
 import logging
-import joblib
 import torch
 from abc import ABCMeta
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Counter, List
-from numpy import ones, ndarray, asarray, argmax
+from typing import Any, Dict, Optional, Tuple, Counter
+from numpy import ones
 from scipy.sparse import csr_matrix
-from collections import defaultdict
 
 
 cluster_dict = {}
@@ -67,10 +65,8 @@ class ClusteringModel(metaclass=ClusterMeta):
             config = json.loads(fin.read())
 
         cluster_type = config.get("type", None)
-        assert (
-            cluster_type is not None
-        ), f"{clustering_folder} is not a valid clustering folder"
-        assert cluster_type in cluster_dict, f"invalid cluster type {config['type']}"
+        if cluster_type not in cluster_dict:
+            raise ValueError(f"{clustering_folder}: invalid cluster type {cluster_type}")
         model = cluster_dict[cluster_type].load(clustering_folder, config["kwargs"])
         return cls(config, model)
 
@@ -90,7 +86,6 @@ class ClusteringModel(metaclass=ClusterMeta):
         """
 
         config = deepcopy(config)
-        # LOGGER.debug(f"Train Clustering with config: {json.dumps(config, indent=True)}")
         cluster_type = config.get("type", None)
         assert (
             cluster_type is not None
@@ -136,11 +131,9 @@ class BalancedKMeans(ClusteringModel):
             BalancedKMeans: The loaded object.
         """
 
-        # LOGGER.info(f"Loading Balanced KMeans Clustering Model from {load_dir}")
         clustering_path = os.path.join(load_dir, "clustering.pkl")
-        assert os.path.exists(
-            clustering_path
-        ), f"clustering path {clustering_path} does not exist"
+        if not os.path.exists(clustering_path):
+            raise FileNotFoundError(f"clustering path {clustering_path} does not exist")
 
         with open(clustering_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -229,7 +222,6 @@ class ClusteringTrainer:
         Z: np.ndarray,
         config: Dict[str, Any],
         min_leaf_size: int = 20,
-        max_leaf_size: Optional[int] = None,
         dtype: Any = np.float32,
     ) -> Tuple[Optional[csr_matrix], Optional[ClusteringModel]]:
         """Train clustering without recursive partitioning."""
@@ -290,17 +282,16 @@ class Clustering:
         self,
     ) -> None:
         """Initialize the clustering pipeline."""
-        self._C_node: Optional[ndarray] = None
+        self._C_node: Optional[csr_matrix] = None
         self._model: Optional[ClusteringModel] = None
-        self._cluster_to_labels: Optional[Dict[int, List[int]]] = None
 
     @property
-    def c_node(self) -> Optional[ndarray]:
-        """Sparse cluster assignment matrix."""
+    def c_node(self) -> Optional[csr_matrix]:
+        """C (n_labels x n_clusters, CSR, one 1 per row)."""
         return self._C_node
     
     @c_node.setter
-    def c_node(self, value: ndarray) -> None:
+    def c_node(self, value: csr_matrix) -> None:
         """Set the cluster assignment matrix."""
         self._C_node = value
         
@@ -315,35 +306,20 @@ class Clustering:
         self._model = value
         
     @property
-    def cluster_to_labels(self) -> Optional[Dict[int, List[int]]]:
-        """Mapping from cluster id to list of label indices."""
-        return self._cluster_to_labels
-    
-    @cluster_to_labels.setter
-    def cluster_to_labels(self, value: Dict[int, List[int]]) -> None:
-        """Set the cluster to label mapping."""
-        self._cluster_to_labels = value
-    
-    @property
     def is_empty(self) -> bool:
         """Return ``True`` if clustering was not trained."""
         return self.c_node is None
 
     def save(self, save_dir: str) -> None:
         """Persist the clustering object to disk."""
+        model = self.model
+        if model is not None and not callable(getattr(model, "save", None)):
+            raise TypeError(f"clustering model ({type(model).__name__}) has no save()")
         os.makedirs(save_dir, exist_ok=True)
 
         state = self.__dict__.copy()
-        model = self.model
-
         if model is not None:
-            model_path = os.path.join(save_dir, "clustering")
-
-            if hasattr(model, "save") and callable(model.save):
-                model.save(model_path)
-            else:
-                joblib.dump(model, f"{model_path}.joblib")
-
+            model.save(os.path.join(save_dir, "clustering"))
             state.pop("_model", None)
 
         # Save remaining state
@@ -354,7 +330,8 @@ class Clustering:
     def load(cls, load_dir: str) -> "Clustering":
         """Load a clustering object from ``load_dir``."""
         cluster_path = os.path.join(load_dir, "clustering.pkl")
-        assert os.path.exists(cluster_path), f"Clustering path {cluster_path} does not exist"
+        if not os.path.exists(cluster_path):
+            raise FileNotFoundError(f"Clustering path {cluster_path} does not exist")
 
         with open(cluster_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -372,19 +349,16 @@ class Clustering:
     def train(
         self,
         Z: np.ndarray,
-        local_to_global_idx: List[int],
         min_leaf_size: int,
-        max_leaf_size: Optional[int],
         clustering_config: Optional[Dict[str, any]],
         dtype: float
     ) -> None:
-        """Train the clustering model and populate cluster assignments."""
+        """Cluster Z (n_labels x d) into `c_node` (n_labels x K); leaves both None when Z is too small."""
         
         C_node, model = ClusteringTrainer.train(
             Z=Z,
             config=clustering_config,
             min_leaf_size=min_leaf_size,
-            max_leaf_size=max_leaf_size,
             dtype=dtype,
         )
         
@@ -393,15 +367,3 @@ class Clustering:
         
         self.c_node = C_node
         self.model = model
-        
-        self.cluster_to_labels = defaultdict(list)
-        for local_idx in range(C_node.shape[0]):
-            cluster_vector = (
-                C_node[local_idx].toarray().ravel()
-                if hasattr(C_node[local_idx], "toarray")
-                else asarray(C_node[local_idx]).ravel()
-            )
-            cid = int(argmax(cluster_vector))
-        
-            gidx = local_to_global_idx[local_idx]
-            self.cluster_to_labels[cid].append(int(gidx))

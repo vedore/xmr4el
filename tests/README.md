@@ -17,12 +17,13 @@ small classifiers/hierarchies, so the project ML dependencies are still required
 | --- | --- |
 | `data/` | PubTator/grouped TSV readers, label alignment, training CLI inputs, BC5CDR `-1`/composite ids, split CLI output, CTD dictionary conversion. |
 | `features/` | Text encoding, feature-block normalization, embedding row order, CUDA/MPS out-of-memory recovery. |
-| `hierarchy/` | Cluster reassignment, layer preparation, training without rankers, hierarchy persistence. |
-| `learning/` | Joint logistic classifier, single-positive matcher handling, ranker curriculum, score fusion. |
+| `hierarchy/` | Cluster reassignment, balanced k-means, layer preparation, tree training. |
+| `learning/` | Joint logistic classifier, mention-kNN label scores (`label_max_cos`). |
 | `integration/` | Config preservation, import behavior, label mapping, pipeline persistence. |
 | `test_eval.py` | Ranking metric self-check and known metric values. |
 | `test_eval_quiet.py` | Evaluation quiet/verbose settings in fresh Python processes. |
 | `test_logging.py` | Logging levels, application-owned handlers, and label-truncation warnings. |
+| `test_audit_regressions.py` | Bug-audit regressions: knn before topk, candidate knn, split CLI, save/load errors, predict config checks. |
 
 ## Run a subset
 

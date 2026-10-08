@@ -93,7 +93,7 @@ def main():
 
     cfg = xm.resolve_predict_config(beam_size=args.beam_size, knn_beta=args.knn_beta)
     beta = cfg["knn_beta"]
-    score_raw = xm.predict(texts, beam_size=cfg["beam_size"], knn_beta=0)
+    score_raw = xm.predict(texts, beam_size=cfg["beam_size"], topk=0, knn_beta=0)  # every candidate, for the screen
     score_csr = xm.predict(texts, beam_size=cfg["beam_size"], knn_beta=beta)
     ranks_all = np.array([gold_rank(score_csr.getrow(i), gold_idx[i]) for i in range(len(texts))])
     ranks = ranks_all[u_idx]

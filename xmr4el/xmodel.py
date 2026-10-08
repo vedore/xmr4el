@@ -1,6 +1,5 @@
 import json
 import os
-import joblib
 import pickle
 import time 
 import logging
@@ -34,7 +33,6 @@ class XModel:
                  clustering_config: dict = None,
                  matcher_config: dict = None,
                  min_leaf_size: int = 20,
-                 max_leaf_size: int = None,
                  cut_half_cluster: bool = False,
                  depth: int = 1,
                  features: str = "sapbert_char_context",
@@ -65,7 +63,6 @@ class XModel:
         self.matcher_config = matcher_config
         
         self.min_leaf_size = min_leaf_size
-        self.max_leaf_size = max_leaf_size
         self.cut_half_cluster = cut_half_cluster
         self.depth = depth
         self.features = features
@@ -98,8 +95,6 @@ class XModel:
                     
                 if isinstance(obj, (list, tuple, set)):
                     n = len(obj)
-                    # preview = ", ".join(repr(x) for x in list(obj)[:6])
-                    # more = f", ... (+{n-6})" if n > 6 else ""
                     return f"{type(obj).__name__}(len={n})"
                     
                 # for numpy arrays / pandas objects show shape/len if possible
@@ -128,7 +123,7 @@ class XModel:
             f"XModel summary:",
             f"  logger: {logger_info}",
             f"  depth={self.depth}, features={self.features}, predict={self.predict_config}",
-            f"  cluster: min_leaf_size={self.min_leaf_size}, max_leaf_size={self.max_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
+            f"  cluster: min_leaf_size={self.min_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
@@ -210,6 +205,10 @@ class XModel:
         
     def save(self, save_dir):
         start = time.perf_counter()
+        parts = {"hml": self.model, "text_encoder": self.text_encoder}
+        for name, part in parts.items():
+            if part is not None and not callable(getattr(part, "save", None)):
+                raise TypeError(f"{name} ({type(part).__name__}) has no save()")
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         base = os.path.join(save_dir, f"{self.__class__.__name__.lower()}_{timestamp}")
         save_dir, n = base, 1
@@ -221,36 +220,11 @@ class XModel:
                 save_dir, n = f"{base}_{n}", n + 1
     
         state = self.__dict__.copy()
-        
-        model = self.model
-        model_path = os.path.join(save_dir, "hml")
-        
-        if model is not None:
-            if hasattr(model, "save"):
-                model.save(model_path)
-            else:
-                try:
-                    joblib.dump(model, f"{model_path}.joblib")
-                except ImportError:
-                    with open(f"{model_path}.pkl", "wb") as f:
-                        pickle.dump(model, f)  
-            
-            state.pop("_hml", None) # Popped _hml from class
-        
-        text_encoder = self.text_encoder
-        text_encoder_path = os.path.join(save_dir, "text_encoder")
-        state.pop("_text_encoder", None)
-        
-        if text_encoder is not None:
-            if hasattr(text_encoder, "save"):
-                text_encoder.save(text_encoder_path)
-            else:
-                try:
-                    joblib.dump(text_encoder, f"{text_encoder_path}.joblib")
-                except ImportError:
-                    with open(f"{text_encoder_path}.pkl", "wb") as f:
-                        pickle.dump(text_encoder, f)  
-                          
+        state.pop("_hml"), state.pop("_text_encoder")
+        for name, part in parts.items():
+            if part is not None:
+                part.save(os.path.join(save_dir, name))
+
         with open(os.path.join(save_dir, "xmodel.pkl"), "wb") as fout:
             pickle.dump(state, fout)
         self.logger.info("Model saved: path=%s elapsed=%.1fs", save_dir, time.perf_counter() - start)
@@ -258,7 +232,8 @@ class XModel:
     @classmethod
     def load(cls, load_dir):
         xmodel_path = os.path.join(load_dir, "xmodel.pkl")
-        assert os.path.exists(xmodel_path), f"XModel path {xmodel_path} does not exist"
+        if not os.path.exists(xmodel_path):
+            raise FileNotFoundError(f"XModel path {xmodel_path} does not exist")
         
         with open(xmodel_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -266,10 +241,8 @@ class XModel:
         model = cls()
         model.__dict__.update(model_data)
         # Label index j is row j of Z: refuse a label list that does not match it
-        if model.Z is not None:
-            assert len(model.initial_labels) == model.Z.shape[0], (
-                f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows"
-            )
+        if model.Z is not None and len(model.initial_labels) != model.Z.shape[0]:
+            raise ValueError(f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows")
         
         model_path = os.path.join(load_dir, "hml")
         hml = HierarchicalMLModel.load(model_path)
@@ -324,14 +297,14 @@ class XModel:
         Y_label_matrix = LabelEmbeddingFactory.generate_label_matrix(Y_label_to_indices)
         
         # Process Labels
-        Y_binazer, classes = LabelEmbeddingFactory.label_binarizer(Y_label_matrix)
+        Y_binary, classes = LabelEmbeddingFactory.label_binarizer(Y_label_matrix)
         # Label index j is column j of Y; empty label groups have no column
         self.initial_labels = classes.tolist()
-        Z = LabelEmbeddingFactory.generate_PIFA(X_emb, Y_binazer)
+        Z = LabelEmbeddingFactory.generate_PIFA(X_emb, Y_binary)
         self.logger.info("Label embeddings completed: labels=%d shape=%s elapsed=%.1fs",
                          len(classes), Z.shape, time.perf_counter() - start)
         
-        return X_emb, Y_binazer, Z 
+        return X_emb, Y_binary, Z
     
     def train(self, X_text, Y_text):
         
@@ -350,7 +323,6 @@ class XModel:
             clustering_config=self.clustering_config,
             matcher_config=self.matcher_config,
             min_leaf_size=self.min_leaf_size,
-            max_leaf_size=self.max_leaf_size,
             cut_half_cluster=self.cut_half_cluster,
             layer=self.depth,
         )
@@ -390,9 +362,10 @@ class XModel:
             Y = self.Y.tocsr()
             assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
             block = self.mention_block()
-            knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1])
             rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
-            vals = scores.data * np.exp(knn_beta * knn[rows, scores.indices].astype(np.float64))
+            knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1],
+                                rows=rows, cols=scores.indices)
+            vals = scores.data * np.exp(knn_beta * knn.astype(np.float64))
             scores = rank_rows(rows, scores.indices, vals, scores.shape, cfg["topk"])
             self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
                              time.perf_counter() - time_start_knn)
@@ -400,7 +373,10 @@ class XModel:
 
     def resolve_predict_config(self, **overrides):
         """`predict_config` with the non-None overrides applied."""
-        return {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
+        cfg = {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
+        if cfg["beam_size"] < 1 or cfg["topk"] < 0:
+            raise ValueError(f"need beam_size >= 1 and topk >= 0, got {cfg}")
+        return cfg
 
     def mention_block(self):
         """Columns of the mention encoder in X (`feature_blocks`); all for "tfidf"."""

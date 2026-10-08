@@ -6,7 +6,42 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1-N6, U3, B, B1 done; next = R code (Claude)).
+Last updated 2026-10-08 (N1-N6, U3, B, B1, C1 done; next: C2+C3 code (Claude), user retrain, then R).
+
+**C1 passed (pytest 32 + 4 selfchecks; `c1_dev_eval.log` on `15-38-58` identical to B1, eval 7 s).** As planned, plus: both configs set `max_leaf_size: 200`
+(never read by code) -> key deleted; `Clustering.train` lost its `local_to_global_idx` arg (only fed
+`cluster_to_labels`); 7 save fallbacks removed (tree.py had one too) and the `.joblib`/`.pkl` load branches in
+`HierarchicalMLModel.load`; load asserts -> `FileNotFoundError` (missing file) / `ValueError` (content). Old trees
+still load (stale attrs ignored). Next: C2+C3 code.
+
+**C. Second audit (2026-10-08, plan; 10 findings checked against code, all real).** Scores: quality 6.5,
+readability 6, architecture 6. Architecture kept (pipeline boundaries are fine); the fixes are local.
+- C1 (no result change): delete unused `max_leaf_size` (XModel/node/clusterers; configs set it but nothing reads it);
+  `label_max_cos(..., rows, cols)` scores only candidate pairs in query chunks for `XModel.predict` (full
+  matrix kept for diagnostics); split CLI: all three official PMID lists or none, ratios >= 0 summing to 1,
+  drop `test_ratio`; load `assert`s -> `raise ValueError`, `beam_size >= 1` / `topk >= 0` checked in
+  `resolve_predict_config`; diagnose_unseen kNN-free pool with `topk=0`; diagnose_routing guard
+  `root.is_last_layer`; remove the 6 `joblib.dump` save fallbacks (raise `TypeError` before writing);
+  docs: `filter_labels_and_inputs` (flat labels), `reduction.py`, sparse/ndarray hints, stale tests/README lines
+  (rankers, `per_leaf`, `early_stopping`); `Y_binazer` -> `Y_binary`; junk comments; delete unused
+  `cluster_to_labels`. Regressions in `tests/test_audit_regressions.py` (partial split, beam 0, save without
+  `.save`, candidate kNN = full kNN at random rows).
+- C2 (readability; changes saved-tree format -> retrain): plain attributes instead of the ~19 pass-through
+  property pairs (xmodel, node, clusterers, tree, matcher, encoder; keep `local_to_global_idx` setter and
+  `is_empty`); `tree.train`: `NodeInput` NamedTuple for the positional child tuples, inline
+  `_accumulate_children` / `_save_ml_for_layer` / `_finalize_layer`; shape lines (`X` n x d, `Y` n x L,
+  `Z` L x d, `C` L x K) at API entry points; PIFA = `normalize(Y.T @ X)` (drops the 1e-10, ~1e-7 shift, may
+  flip k-means ties). Pass: user retrain + dev eval (B1 commands) equal to B1 0.9041 / MRR 0.9335 /
+  unseen 0.6800 / hybrid 0.9062 within noise; no results.md row.
+- C3 (user 2026-10-08): `XModel.save` also writes `xmodel.json` next to `xmodel.pkl`: every key of the pickled
+  `state` (after C2's attribute rename). JSON-native values (configs, scalars, strings) as is; arrays/sparse
+  matrices as `{"type", "shape", "dtype"}` (+ `nnz` for sparse); label lists as `{"type", "len", "first"}`;
+  anything else as `repr`. Write-only (load still reads the pkl); one helper in xmodel.py, `json.dump(...,
+  indent=2, default=...)`. Test: synthetic save -> json loads, keys == pkl state keys. Lands with C2's retrain.
+- Do not run `/code-review` (user 2026-10-08).
+- Deferred: dense classifier (#3; features are dense by design: `ponytail:` comment with the memory ceiling);
+  all-empty context block (#4; only CTD-only training hits it, no planned run does); `wrapper.model.model`
+  flattening and encoder `getattr(f"{prefix}...")` access (touch when editing those files).
 
 **B. Bug audit fixes (2026-10-08, 14 findings):** knn fused before topk and rows re-sorted
 (`tree.rank_rows`); split CLI rejects PMID overlap and output = input; fitted block widths

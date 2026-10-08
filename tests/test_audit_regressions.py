@@ -1,5 +1,5 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
-widths, persistence (fused_scores, stale layers, same-second saves), reader edge cases."""
+widths, persistence (fused_scores, stale layers, same-second saves), reader edge cases; second audit (C1)."""
 from copy import deepcopy
 from pathlib import Path
 import subprocess
@@ -11,6 +11,7 @@ import pytest
 
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
+from xmr4el.learning.scoring import label_max_cos
 from xmr4el.xmodel import XModel
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,3 +88,44 @@ def test_split_cli(tmp_path):
     assert r.returncode != 0 and "PMID 1" in r.stderr and not (tmp_path / "out").exists()
     r = run("--outdir", str(tmp_path))
     assert r.returncode != 0 and "is the input file" in r.stderr and "2|a|a" in corpus.read_text()
+
+
+# C1 (second audit, 2026-10-08)
+
+def test_candidate_knn_equals_full_knn():
+    rng = np.random.default_rng(0)
+    Q, B, b_labels = rng.normal(size=(600, 5)), rng.normal(size=(40, 5)), rng.integers(0, 12, 40)
+    b_labels[b_labels == 3] = 4  # label 3 has no B row: -1 in both modes
+    full = label_max_cos(Q, B, b_labels, 12, chunk=64)
+    rows = np.sort(rng.integers(0, 600, 900))
+    cols = rng.integers(0, 12, 900)
+    cols[:5] = 3
+    pairs = label_max_cos(Q, B, b_labels, 12, chunk=64, rows=rows, cols=cols)
+    assert np.allclose(pairs, full[rows, cols]) and (pairs[:5] == -1).all()
+
+
+def test_predict_config_checks(xm):
+    for bad in ({"beam_size": 0}, {"topk": -1}):
+        with pytest.raises(ValueError):
+            xm.resolve_predict_config(**bad)
+
+
+def test_save_without_save_method(xm, tmp_path):
+    other = deepcopy(xm)
+    other.text_encoder = object()
+    with pytest.raises(TypeError):
+        other.save(str(tmp_path))
+    assert not list(tmp_path.iterdir()), "nothing written"
+
+
+def test_split_cli_partial_and_ratios(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("1|t|t\n1|a|a\n\n")
+    (tmp_path / "tr").write_text("1\n")
+    script = str(ROOT / "scripts/split_pubtator.py")
+    run = lambda *a: subprocess.run([sys.executable, script, "--input", str(corpus), "--outdir",
+                                     str(tmp_path / "out"), *a], capture_output=True, text=True, cwd=ROOT)
+    r = run("--train_pmids", str(tmp_path / "tr"))
+    assert r.returncode != 0 and "all three" in r.stderr
+    r = run("--train_ratio", "0.9", "--dev_ratio", "0.2")
+    assert r.returncode != 0 and "<= 1" in r.stderr and not (tmp_path / "out").exists()

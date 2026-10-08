@@ -11,21 +11,17 @@ def mention_key(text):
 
 
 def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
-    """
-    Filters out gold_labels (list of lists) and corresponding input_texts
-    where the first label in each gold label list is not in allowed_labels.
+    """Keep the (label, text) rows whose label is in allowed_labels, in input order.
 
     Args:
-        gold_labels (List[List[str]]): Nested list of gold labels.
         input_texts (List[str]): Raw input texts, aligned with gold_labels.
-        allowed_labels (Iterable[str]): Set or list of valid labels.
+        gold_labels (List[str]): One gold label per text (flat, as the PubTator loader returns).
+        allowed_labels (Iterable[str]): Valid labels.
 
     Returns:
-        Tuple[List[List[str]], List[str]]: Filtered gold_labels and input_texts.
+        Tuple[List[str], List[str]]: Filtered gold_labels and input_texts.
     """
     allowed_set = set(allowed_labels)
-
-    # exit()
 
     filtered_labels = []
     filtered_texts = []

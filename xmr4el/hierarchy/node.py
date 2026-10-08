@@ -6,7 +6,6 @@ import numpy as np
 
 from os.path import dirname, isfile, join as pjoin, exists as pexists
 from pickle import dump as pkl_dump
-from joblib import dump as jdump
 from scipy.sparse import csr_matrix, eye as sp_eye
 from sklearn.preprocessing import normalize
 from xmr4el.hierarchy.clusterers import Clustering
@@ -26,7 +25,6 @@ class MLModel():
                  clustering_config=None, 
                  matcher_config=None, 
                  min_leaf_size=20,
-                 max_leaf_size=None,
                  is_last_layer=False,
                  layer=None,
                  ):
@@ -36,7 +34,6 @@ class MLModel():
         self.clustering_config = clustering_config
         self.matcher_config = matcher_config
         self.min_leaf_size = min_leaf_size
-        self.max_leaf_size = max_leaf_size
         self.is_last_layer = is_last_layer
         self.layer = layer
         
@@ -108,28 +105,23 @@ class MLModel():
 
     
     def save(self, save_dir):
-        os.makedirs(save_dir, exist_ok=True)  # Ensure directory exists
-
-        state = self.__dict__.copy()
-
         # Mapping attribute names to their internal keys
         model_attrs = {
             "cluster_model": "_cluster_model",
             "matcher_model": "_matcher_model",
         }
+        for model_name in model_attrs:
+            model = getattr(self, model_name)
+            if model is not None and not callable(getattr(model, "save", None)):
+                raise TypeError(f"{model_name} ({type(model).__name__}) has no save()")
+        os.makedirs(save_dir, exist_ok=True)  # Ensure directory exists
 
+        state = self.__dict__.copy()
         for model_name, attr_key in model_attrs.items():
             model = getattr(self, model_name)
             if model is not None:
-                model_path = pjoin(save_dir, model_name)
-
-                if hasattr(model, 'save') and callable(model.save):
-                    model.save(model_path)
-                else:
-                    jdump(model, f"{model_path}.joblib")
-
-                # Remove model from state before pickling
-                state.pop(attr_key, None)
+                model.save(pjoin(save_dir, model_name))
+                state.pop(attr_key, None)  # Remove model from state before pickling
 
         # Save fused scores separately
         fused_scores = self.fused_scores
@@ -158,7 +150,8 @@ class MLModel():
             base_dir = dirname(base_dir)
 
         model_state_path = pjoin(base_dir, "mlmodel.pkl")
-        assert pexists(model_state_path), f"MLModel path {model_state_path} does not exist"
+        if not pexists(model_state_path):
+            raise FileNotFoundError(f"MLModel path {model_state_path} does not exist")
 
         with open(model_state_path, "rb") as fin:
             model_data = pickle.load(fin)
@@ -174,7 +167,8 @@ class MLModel():
 
         # Load fused scores / label embeddings
         emb_path = pjoin(base_dir, "fused_scores.npy")
-        assert pexists(emb_path) or model.is_last_layer, f"Expecting fused_scores at {emb_path}"
+        if not (pexists(emb_path) or model.is_last_layer):
+            raise ValueError(f"Expecting fused_scores at {emb_path}")
         model.fused_scores = _load_npy(emb_path) if pexists(emb_path) else None
 
         label_emb_path = pjoin(base_dir, "label_embeddings.npy")
@@ -191,7 +185,7 @@ class MLModel():
     def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
         """
             X_train: X_processed
-            Y_train, Y_binazier
+            Y_train, Y_binary
             Z, Pifa embeddings
         """
         
@@ -211,9 +205,7 @@ class MLModel():
         if not self.is_last_layer:  # a leaf uses identity C below, so it is never clustered
             self.logger.debug("Clustering started: layer_index=%s labels=%d", self.layer, self.label_embeddings.shape[0])
             cluster_model.train(Z=self.label_embeddings,
-                                local_to_global_idx=self.local_to_global_idx,
                                 min_leaf_size=self.min_leaf_size,
-                                max_leaf_size=self.max_leaf_size,
                                 clustering_config=self.clustering_config,
                                 dtype=np.float32
                                 )
