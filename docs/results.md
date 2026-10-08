@@ -470,7 +470,7 @@ Reading:
   logreg_bal 0.8974 in 238 s; liblinear tol 1e-2: 0.8974 in 197 s; char/context SVD cut to 256 dims: 0.8919 in 143 s
   (unseen -0.013, rejected); **joint** (same objective, all labels of a leaf in one L-BFGS problem on BLAS,
   `JointOvRLogistic`): 0.8974 in **19 s**, identical in every group. On one 167-label leaf it agreed with liblinear's top-1
-  on every dev row. Retained: base config matcher `jointlogisticregression` {C 1, class_weight balanced, tol 1e-4}.
+  on every dev row. Retained: base config matcher `jointlogisticregression` {C 1, class_weight balanced, tol 1e-4} (1e-3 since 2026-10-08, `11-04-56`).
   Cost per label of the old path: liblinear 0.45 s single-core; 8 OneVsRest worker processes only reach 0.12-0.16 s.
 - Speed changes (prediction-neutral up to float noise): `Transformer.transform` embeds each distinct text once (500
   labels: 23512 rows -> 5937 strings; measured 13.2 s -> 6.2 s on 3000 rows, max abs diff 6e-6) and runs on the Apple
@@ -523,6 +523,8 @@ PECOS: `pecos_run.py -features ours -nr_splits 16 -max_leaf_size 100 -threshold 
 | XMR4EL `13-47-38` | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | **0.778** | 0.587 | 0.886 | 0.845 | 567 s |
 | XMR4EL `15-15-09` (torch L-BFGS) | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | 0.778 | 0.587 | 0.886 | 0.845 | 454 s |
 | XMR4EL `17-28-48` (own balanced k-means) | train + CTD | 2 | 10 | 4305 | **0.853** | **0.895** | **0.950** | 0.994 (1000) | **0.930** | **0.778** | **0.615** | **0.892** | **0.853** | 179 s* |
+| XMR4EL `11-04-56` (scaled L-BFGS, tol 1e-3) | train + CTD | 2 | 10 | 4305 | 0.851 | 0.895 | 0.951 | 0.994 (1000) | 0.929 | 0.774 | 0.613 | 0.891 | 0.851 | 132 s* |
+| XMR4EL `11-09-56` (128 leaves, tol 1e-3) | train + CTD | 2 | 10 | 4305 | **0.856** | **0.898** | 0.947 | 0.992 (917) | **0.941** | 0.764 | 0.595 | 0.887 | **0.855** | 106 s* |
 | XMR4EL `13-49-39` | train | 3 | 2 | 3631 | 0.801 | 0.824 | 0.847 | 0.881 (10) | 0.901 | 0.672 | 0.528 | 0.862 | 0.675 | 41 s |
 | XMR4EL `13-55-09` | train | 2 | 2 | 3631 | 0.879 | 0.910 | 0.947 | 0.965 (82) | 0.954 | 0.672 | 0.681 | 0.902 | 0.741 | 15 s |
 | PECOS, our features | train + CTD | 8 -> 128 -> labels | 2 | 4305 | 0.838 | 0.864 | 0.892 | (100) | 0.923 | 0.755 | 0.576 | 0.883 | 0.837 | 34.6 s |
@@ -550,6 +552,16 @@ Rows with the same train data share the same row set; the no-CTD rows cover 3631
   `outputs/logs/bkmeans_bc5cdr_ctd.log`. Same code with seed 1: acc@1 0.843, MRR 0.889, hybrid 0.887, so the
   seed 0 gain over PECOS (+0.006) is within the seed spread; kmeans-pytorch had 0.845-0.847 at seed 0.
   The test section below still uses `13-47-38`; not rerun with this clustering.
+- `11-04-56` = `17-28-48` with the joint matcher's objective divided by n, so the max|grad| <= tol stop is reached
+  (before, every fit ran to the float32 loss stall whatever tol was), and tol 1e-3: acc@1 -0.0017, hierarchy
+  148.4 -> 100.8 s (L-BFGS iterations root 258 -> 118, leaves 83-129 -> 62-93). *Cache-hit run. Log
+  `outputs/logs/tol1e3s_bc5cdr_ctd.log`.
+- `11-09-56` = `11-04-56` with root `n_clusters` 128 (leaves of 91-92 labels, PECOS's leaf size): acc@1 +0.005,
+  seen 1-label +0.012, but unseen -0.018, hybrid -0.004, R@20-R@100 lower (R@100 0.977 vs 0.987). Hierarchy
+  100.8 -> 75.1 s: root clustering 17.6 s (3.0 s at 16), root matcher 22.5 s, 128 leaves 34.9 s. *Cache-hit run.
+  Log `outputs/logs/k128_bc5cdr_ctd.log`. Beam 20: R@cand 0.9940 (1835 cand), all ranked metrics identical, so
+  the lower R@20-R@100 is cross-leaf scoring, not routing. Rerun `11-31-05` with the vectorized balanced assignment:
+  identical metrics, root clustering 17.6 -> 5.0 s, hierarchy 65.8 s, run 96.3 s* (`k128c_bc5cdr_ctd.log`).
 
 ## 2026-10-07: BC5CDR-disease test, selected configuration
 

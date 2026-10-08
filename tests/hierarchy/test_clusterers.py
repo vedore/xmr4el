@@ -1,5 +1,5 @@
 import numpy as np
-from xmr4el.hierarchy.clusterers import ClusteringModel, ClusteringTrainer
+from xmr4el.hierarchy.clusterers import ClusteringModel, ClusteringTrainer, _balanced_assign
 
 
 def test_small_cluster_reassignment():
@@ -36,3 +36,19 @@ def test_balanced_kmeans():
     labels = ClusteringModel.train(Z, {"type": "balancedkmeans", "kwargs": {"n_clusters": 4}}).labels()
     blocks = labels.reshape(4, 25)
     assert (blocks == blocks[:, :1]).all() and len(set(blocks[:, 0])) == 4, blocks
+
+
+def test_balanced_assign_matches_greedy():
+    """The vectorized fill equals the greedy scan over all entries by S - p descending (steps=0: p = 0)."""
+    rs = np.random.RandomState(0)
+    for n, k in ((500, 7), (2000, 64)):
+        S = rs.normal(size=(n, k)).astype(np.float32)
+        S[:, 0] += 1  # contested column
+        cap = np.full(k, n // k)
+        cap[: n - cap.sum()] += 1
+        want, left = np.full(n, -1), cap.copy()
+        for f in np.argsort(-S, axis=None, kind="stable"):
+            i, j = divmod(int(f), k)
+            if want[i] < 0 and left[j]:
+                want[i], left[j] = j, left[j] - 1
+        assert (_balanced_assign(S, cap, steps=0) == want).all()

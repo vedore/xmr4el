@@ -4,6 +4,7 @@ import pickle
 import numpy as np
 import logging
 import joblib
+import torch
 from abc import ABCMeta
 from copy import deepcopy
 from joblib import parallel_backend
@@ -302,16 +303,24 @@ def _balanced_assign(S, cap, steps=300):
     Dual prices p are raised on over-full columns, then rows are taken greedily by S - p in descending order;
     on the BC5CDR root this matches scipy linprog's exact optimum (0.5584 mean cosine) at ~0.15 s vs ~38 s."""
     n, k = S.shape
-    p, lr = np.zeros(k), (S.max() - S.min()) / n
+    # Price loop in torch float64 (multithreaded, same values as numpy's float64 S - p).
+    St, p, capt = torch.from_numpy(S).double(), torch.zeros(k, dtype=torch.float64), torch.from_numpy(cap).double()
+    lr = float(S.max() - S.min()) / n
     for _ in range(steps):
-        p += lr * (np.bincount((S - p).argmax(axis=1), minlength=k) - cap)
-    labels, left = np.full(n, -1), cap.copy()
-    # ponytail: Python loop over n*k entries (~0.1 s at 11744x16); vectorize if roots grow 10x
-    for f in np.argsort(-(S - p), axis=None, kind="stable"):
-        i, j = divmod(int(f), k)
-        if labels[i] < 0 and left[j]:
-            labels[i] = j
-            left[j] -= 1
+        p += lr * (torch.bincount((St - p).argmax(dim=1), minlength=k) - capt)
+    V = (St - p).numpy()
+    # The greedy over all (row, column) entries by V descending equals row-proposing deferred acceptance with
+    # columns keeping their top-V rows (common weights -> unique stable matching), vectorized per round.
+    pref = np.argsort(-V, axis=1, kind="stable")
+    nxt, labels, free = np.zeros(n, dtype=np.int64), np.full(n, -1), np.arange(n)
+    while free.size:
+        labels[free] = pref[free, nxt[free]]
+        nxt[free] += 1
+        rows = np.flatnonzero(np.isin(labels, np.unique(labels[free])))
+        o = np.lexsort((rows, -V[rows, labels[rows]], labels[rows]))  # column, V desc, row (the greedy's tie order)
+        r, c = rows[o], labels[rows[o]]
+        free = r[np.arange(len(r)) - np.searchsorted(c, c) >= cap[c]]
+        labels[free] = -1
     return labels
 
 

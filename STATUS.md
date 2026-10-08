@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-07 (training speed: C and C2 passed; E done: E4 passed, tree `17-28-48` acc@1 0.853 in `docs/results.md`; next = commits B/C/E, then the test-set rerun).
+Last updated 2026-10-08 (training speed F: tol fix + 1e-3 (F1b), 128 leaves (F2), faster balanced assignment (F2c) all passed; tree `11-31-05` acc@1 0.856, hierarchy 65.8 s; next = user commits, then F3).
 
-**Runs:** none in flight. All older saved trees were deleted; only `17-28-48` exists. Uncommitted: torch L-BFGS (B), SapBERT cache (C), own balanced k-means (E; replaces kmeans-pytorch).
+**Runs:** none in flight. Next: user commits F1b / F2 / F2c separately (list under F2c), then F3. Saved trees: `17-28-48`, `10-50-53` (redundant), `11-04-56`, `11-09-56`.
 
 **Logging cleanup (2026-10-07, commit `1ccaf0b`):** INFO reports stage/layer/node timings and shapes;
 training `-verbose` enables DEBUG, `-quiet` keeps warnings/errors. Evaluation always
@@ -100,7 +100,71 @@ E4. User: delete all saved trees (results stay in `docs/results.md`; `outputs/ca
    E row to `docs/results.md` and suggest commits (B, C, E separately).
 E4 passed: tree `17-28-48` (`bkmeans_bc5cdr_ctd*.log`) = `17-07-13` metrics exactly (acc@1 0.8530, MRR 0.8954,
    hybrid 0.8918), cache hit, sizes all 734, root clustering 3.0 s, hierarchy 148.4 s, run 178.5 s. Row in `docs/results.md`.
-   Next: user commits B, C, E separately; then rerun the BC5CDR test section (`docs/results.md`) on `17-28-48`.
+   Committed. Later: rerun the BC5CDR test section (`docs/results.md`) on `17-28-48`.
+F. Node training speed (2026-10-07). All node time is the matcher's torch L-BFGS; time = iterations x cost/iter.
+   `17-28-48` `n_iter_` (from `matcher/classifier_model.pkl`): root 258 (node 34.9 s, clustering 3.0 s), leaves 83-129
+   (3.4-13.0 s, 113 s total). Synthetic (scratch benchmark, same closure): converges in ~40 iterations, so real data
+   is the slow tail of the max|grad| <= 1e-4 rule. MPS vs CPU: root shape 90000x2305x16 6.1 -> 2.8 s (2.2x),
+   leaf 6000x2305x734 2.1 -> 1.8 s (no gain); top-1 agreement 1.0.
+   Why PECOS is 34.6 s (hierarchy only; ours 148.4 s): (1) leaf size. PECOS tree 8 -> 128 -> labels (~92 labels/leaf)
+   and each leaf trains only on the rows whose gold is in that cluster (TFN negatives), so one pass over a layer
+   costs ~89,929 x 92 x d; our 16 leaves of 734 cost ~89,929 x 734 x d, 8x more. (2) Solver: per-label liblinear dual
+   coordinate descent, squared hinge, loose eps (PECOS defaults L2R_L2LOSS_SVC_DUAL, eps 0.1, max_iter 100, all
+   threads; from PECOS docs, pecos is not installed locally) vs our joint logistic L-BFGS to max|grad| <= 1e-4
+   (83-258 iterations, each 1+ line-search evals). (3) C++ threaded per label. Not the features: PECOS ran on ours.
+   Plan, cheapest first, one change per run (all on `17-28-48`'s seed 0 path; baseline acc@1 0.8530, hierarchy 148.4 s):
+F1. User: config-only `tol` 1e-4 -> 1e-3 (`configs/xmr4el_bc5cdr_tol1e3_config.json`, temporary), train + eval, logs
+   `outputs/logs/tol1e3_bc5cdr_ctd*.log`. Same seed/code as `17-28-48`, so any metric change is the tol effect.
+   Pass = acc@1 within ~0.002 of 0.8530 and hierarchy well below 148.4 s -> make 1e-3 the `JointOvRLogistic` default
+   and the configs' value. Read `n_iter_` per node from the new tree (`matcher/classifier_model.pkl`).
+F2. User: config-only smaller leaves, PECOS's main lever: root `n_clusters` 16 -> 128 (~92 labels/leaf, same depth-2
+   code; `configs/xmr4el_bc5cdr_k128_config.json`, temporary), train + eval as F1 with logs `k128_bc5cdr_ctd*.log`.
+   Expect leaves ~8x less work; root matcher has 128 targets (more cost, X reads dominate at 16). Watch R@cand
+   (beam 10 x ~92 = ~920 candidates vs 1000 now) and acc@1; if routing loses gold, also try beam 20 at eval only.
+   PECOS reaches 0.847 with this leaf size at beam 10. Pass = acc@1 >= ~0.847 and hierarchy far below 148.4 s.
+   Combine with F1's tol if both pass (one confirming run).
+F1 result (2026-10-08, tree `10-50-53`, `tol1e3_bc5cdr_ctd*.log`): metrics = `17-28-48` exactly, hierarchy 149.7 s, every
+   node's `n_iter_` identical. Cause: the unscaled objective's gradient (sum over rows) never reached tol, so every fit
+   stopped at the float32 loss stall (`tolerance_change` 1e-9); synthetic final max|grad| 0.26 for any tol <= 1e-2.
+   So "slow tail of the 1e-4 rule" above was wrong. Fix (uncommitted): `JointOvRLogistic` divides loss and grad by n
+   (sklearn lbfgs scaling, same minimizer). Synthetic 6000x2304x734: stall 36 iters -> 24 at tol 1e-4, 9 at 1e-2,
+   top-1 agreement 1.0. pytest 24 pass. Tree `10-50-53` is redundant (user may delete).
+F1b. User: same F1 command (tol 1e-3 config, now effective) on the scaled code, logs `tol1e3s_bc5cdr_ctd*.log`.
+   Pass = acc@1 within ~0.002 of 0.8530, hierarchy well below 148.4 s -> 1e-3 default. Fail -> retry base config (1e-4).
+F1b passed: tree `11-04-56` acc@1 0.8513 (-0.0017), MRR 0.8945, hybrid 0.8913, hierarchy 100.8 s, run 131.6 s;
+   `n_iter_` root 118, leaves 62-93. Done (uncommitted): tol 1e-3 is the `JointOvRLogistic` default and in every
+   joint-matcher config (incl. k128); temp tol1e3 config deleted; row in `docs/results.md`. New baseline for F2:
+   `11-04-56` (acc@1 0.8513, hierarchy 100.8 s). F2 now runs with tol 1e-3 (no separate combine run).
+F2 passed: tree `11-09-56` (`k128_bc5cdr_ctd*.log`), sizes 91-92, acc@1 0.8560, MRR 0.8977, hybrid 0.8873 (-0.004),
+   unseen 0.595 (-0.018), seen 1-label 0.941 (+0.012), R@cand 0.9916 (917 cand), R@100 0.977 (0.987 at 16).
+   Hierarchy 75.1 s: root clustering 17.6 s, root matcher 22.5 s, 128 leaves 34.9 s total; `n_iter_` 7-132, median 31.
+   Row in `docs/results.md`. Not yet the configs' default.
+F2b. User: eval only, `11-09-56` at beam 20 (log `k128_bc5cdr_ctd_eval_b20.log`). If unseen/hybrid/R@100 recover to
+   the 16-leaf level at acc@1 >= 0.856, k128 + beam 20 is the setting; else decide k128 (acc@1) vs 16 (hybrid).
+   Then the root is 40 of 75 s: next targets are clustering at k=128 (17.6 s; own balanced k-means) and F3 (root matcher on MPS).
+F2b: beam 20 changes only R@cand (0.9916 -> 0.9940, 1835 cand); every ranked metric identical, eval 41 -> 85 s. So the
+   lower R@20-R@100 at 128 leaves is cross-leaf scoring, not routing. Decision (Claude default, metrics within the
+   seed-0/1 spread of ~0.01): 128 leaves, beam 10. `configs/xmr4el_bc5cdr_config.json` `n_clusters` 16 -> 128; k128
+   config deleted. Uncommitted.
+F2c. Done (uncommitted): `_balanced_assign` (k-means refinement, 20 calls per fit) was 2/3 Python greedy loop over
+   n*k entries, 1/3 numpy float64 price loop. Now: price loop in torch float64 (bit-identical p), greedy replaced by
+   vectorized row-proposing deferred acceptance (same matching: common weights -> unique stable matching, same tie
+   order). Synthetic 11744x2304: k=128 17.6 -> 4.9 s, k=16 1.8 -> 1.0 s, labels identical to `HEAD` at both.
+   Test `tests/hierarchy/test_clusterers.py::test_balanced_assign_matches_greedy`; pytest 25 pass.
+   User: confirm run with the bc5cdr config (now k128), logs `k128c_bc5cdr_ctd*.log`.
+   Pass = dev metrics identical to `11-09-56` (acc@1 0.8560, MRR 0.8977), root clustering ~5 s (17.6), hierarchy ~62 s.
+   Then: commit (tol fix, k128 config, clustering separately), F3 if the root matcher (22.5 s) still dominates,
+   rerun the BC5CDR test section on the new tree.
+F2c passed: tree `11-31-05` (`k128c_bc5cdr_ctd*.log`) = `11-09-56` metrics exactly; root clustering 5.0 s, root node
+   32.0 s (matcher ~27 s), 128 leaves 33.7 s, hierarchy 65.8 s, run 96.3 s (cache hit). Commits (uncommitted now):
+   1. `classifiers.py` + joint-matcher configs' tol + `docs/results.md` `11-04-56` lines: scaled objective, tol 1e-3.
+   2. `configs/xmr4el_bc5cdr_config.json` n_clusters 128.
+   3. `clusterers.py` + `test_clusterers.py`: vectorized balanced assignment.
+   STATUS.md / results.md go with the last commit. Trees `10-50-53`, `11-04-56`, `11-09-56` are superseded (user may delete).
+   Next: F3 (root matcher ~27 s on MPS, synthetic 2.2x) and the BC5CDR test-section rerun on `11-31-05`.
+F3. Code: root matcher on MPS (synthetic root 2.2x, leaves no gain); worth it only if the root dominates after F2.
+F4. Only if F1-F3 are not enough: a PECOS-style per-label solver (dual CD, squared hinge). Big change: the model
+   becomes an SVM, and routing/scoring use sigmoid probabilities today.
 E plan (original): Goal: root clustering ~38 s -> ~1-2 s and drop the git-pinned
    `kmeans-pytorch` dependency (+ numba). Read C's `Clustering completed` timing first; if the patched root
    clustering is already < ~5 s, E is only worth it for dropping the dependency.
