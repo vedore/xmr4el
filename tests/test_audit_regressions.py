@@ -1,5 +1,5 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
-widths, persistence (fused_scores, stale layers, same-second saves), reader edge cases; second audit (C1)."""
+widths, persistence (training-only arrays not saved, stale layers, same-second saves), reader edge cases; second audit (C1)."""
 from copy import deepcopy
 import gzip
 import logging
@@ -49,7 +49,7 @@ def test_knn_fused_before_topk(xm):
 
 def test_persistence(xm, tmp_path):
     root = xm.model.hmodel[0][0]
-    assert root.fused_scores.shape == (xm.X.shape[0], 2), "routing scores survive the node reload"
+    assert root.fused_scores is None and root.label_embeddings is None, "training-only arrays are not saved"
     (tmp_path / "old").write_text("x")
     with pytest.raises(FileExistsError):  # stale layer_* dirs would load into the tree
         xm.model.save(str(tmp_path))
@@ -58,6 +58,9 @@ def test_persistence(xm, tmp_path):
         xm.save(str(tmp_path / "trees"))
         xm.save(str(tmp_path / "trees"))
     assert sorted(p.name for p in (tmp_path / "trees").iterdir()) == ["xmodel_same-second", "xmodel_same-second_1"]
+    saved = {p.name for p in (tmp_path / "trees").rglob("*")}
+    assert not saved & {"fused_scores.npy", "label_embeddings.npy"}, "training-only arrays are not saved"
+    assert XModel.load(str(tmp_path / "trees" / "xmodel_same-second")).predict(["concept1"]).nnz, "loads and predicts"
 
 
 def test_feature_blocks():

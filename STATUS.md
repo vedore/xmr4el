@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F1a kept (+8 dev rows), F1b done; F1c next).
+Last updated 2026-10-09 (F1 done: F1a kept (+8 dev rows), F1b, F1c; F2 next).
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -38,8 +38,12 @@ The gain is all on unseen strings, as intended. Real effect lands with the F3 re
 B rows of the labels its pairs name (`scoring.label_rows`); exhaustive mode unchanged. Test: candidate == full at
 random rows incl. sparse chunks, `label_rows` picks exactly the candidate labels' rows. Speed gain depends on the
 candidate overlap within a 256-query chunk (unmeasured); check `Knn re-scoring completed ... elapsed` in the F3 log.
+**F1c (2026-10-09, code done, pytest 43, selfchecks ok):** `MLModel.save` no longer writes `fused_scores.npy` /
+`label_embeddings.npy` (training-only: `prepare_layer` and clustering use them before the save); `load` no longer
+reads or requires them (`_load_npy` removed). Only reader was `test_persistence`, now asserting the files are absent
+and the saved tree loads and predicts. Existing trees still load (their extra .npy files are ignored).
 
-**NEXT: F1 (Claude, code only, no user runs).** Plan F below (user 2026-10-09). Local commits up to this one are
+**NEXT: F2 (Claude, code only: minimal run wrapper).** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 

@@ -13,12 +13,6 @@ from xmr4el.learning.matcher import Matcher
 
 
 
-def _load_npy(path):
-    """np.load; a sparse matrix saved by np.save comes back as a 0-d object array: unwrap it."""
-    a = np.load(path, allow_pickle=True)
-    return a.item() if a.dtype == object and a.shape == () else a
-
-
 class MLModel():
 
     def __init__(self, 
@@ -42,8 +36,8 @@ class MLModel():
         
         self.cluster_model = None  # Clustering; a leaf holds identity C
         self.matcher_model = None
-        self.fused_scores = None  # internal node: matcher cluster scores on its train rows (n x K), consumed by prepare_layer
-        self.label_embeddings = None  # internal node: normalised Z (L x d)
+        self.fused_scores = None  # internal node: matcher cluster scores on its train rows (n x K), consumed by prepare_layer; not saved
+        self.label_embeddings = None  # internal node: normalised Z (L x d); not saved
     
     @property
     def local_to_global_idx(self):
@@ -78,19 +72,9 @@ class MLModel():
             if model is not None:
                 model.save(pjoin(save_dir, model_name))
 
-        # Save fused scores separately
-        fused_scores = self.fused_scores
-        if fused_scores is None and not self.is_last_layer:
-            raise ValueError("fused_scores is None. Cannot save.")
-        if fused_scores is not None:
-            np.save(pjoin(save_dir, "fused_scores.npy"), fused_scores)
+        # training-only arrays (prepare_layer / clustering consume them before the save); prediction needs neither
         state.pop("fused_scores", None)
-
-        # Save label embeddings separately
-        label_embeddings = self.label_embeddings
-        if label_embeddings is not None:
-            np.save(pjoin(save_dir, "label_embeddings.npy"), label_embeddings)
-            state.pop("label_embeddings", None)
+        state.pop("label_embeddings", None)
 
         # Save remaining state
         with open(pjoin(save_dir, "mlmodel.pkl"), "wb") as fout:
@@ -119,15 +103,6 @@ class MLModel():
             subdir = pjoin(base_dir, name)
             if pexists(subdir):
                 setattr(model, name, cls_.load(subdir))
-
-        # Load fused scores / label embeddings
-        emb_path = pjoin(base_dir, "fused_scores.npy")
-        if not (pexists(emb_path) or model.is_last_layer):
-            raise ValueError(f"Expecting fused_scores at {emb_path}")
-        model.fused_scores = _load_npy(emb_path) if pexists(emb_path) else None
-
-        label_emb_path = pjoin(base_dir, "label_embeddings.npy")
-        model.label_embeddings = _load_npy(label_emb_path) if pexists(label_emb_path) else None
 
         return model
         
