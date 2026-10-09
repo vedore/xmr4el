@@ -8,7 +8,15 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-09 (R done; plan E written: E1 next).
 
-**NEXT: E1 (user run, no code change).** Plan E below; user 2026-10-09: run all options.
+**NEXT: E2 (user run; code `7683b5d`, server `git pull` first).** Plan E below; user 2026-10-09: run all options.
+
+**E1 result (2026-10-09, `e1_dev_eval.log`, reranker `..._12-35-14`, 1 epoch): rejected.** `not seen 1` w 0.25
+0.9064 vs R2b 0.9108; unseen 0.6946 vs 0.7009; seen >1 0.7877 vs 0.8491 (the 2-epoch model learned the seen >1
+string conventions, 1 epoch does not). Epoch 2's low loss was not the problem: E2 keeps 2 epochs.
+Cost view (user asked vs PECOS): PECOS train 34.6 s on our exported features ~ our hierarchy (31-33 s on the Mac,
+127 s on the server); PECOS predict 2.3 s vs tree eval ~15-30 s. The reranker adds ~18 min training (2 epochs) and
+~3 min per 4.3k dev rows (~250 pairs/s); scoring only `not seen 1` rows (~27%) would cut that to ~50 s (eval scores
+all rows today for the scope table). E2's folds add ~20 min of training only.
 
 **E. Next round (plan 2026-10-09; user: run every open option).** Order keeps each tree change in ONE retrain: a
 reranker is tied to its tree, so tree-changing code (E3) lands after the reranker work on the current tree.
