@@ -92,9 +92,9 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
     m = {"tree": tree, "test_path": test_path, "train_path": train_path, "labels": len(labels),
          "features": xm.features, "rows": len(gold), "rows_total": len(test["labels"]),
          "distinct_gold": len(set(gold))}
+    m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
     if not gold:
         return m, None
-    m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
     start = time.perf_counter()
     scores = xm.predict(texts, **m["search"])
     m["predict_seconds"] = round(time.perf_counter() - start, 1)

@@ -6,9 +6,22 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (plan F done: BC5CDR test 0.9225 in results.md; next = plan G, step G0; chat reset).
+Last updated 2026-10-09 (plan H items 1-4 done, uncommitted; then plan G, step G0).
 
-**NEXT: G0 (Claude, code only, no user runs): for NCBI-disease, BioRED, NLM-Chem check the PubTator reader loads
+**Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, uncommitted):
+spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
+config); empty eval fails the run (`status.json` failed, `evaluate.py` exit 1), search validated even then;
+`git.json` dirty counts untracked files (+ list); `provenance.json` (input sha256, packages, platform, torch device);
+atomic run JSON + `xmodel.pkl` written last/atomically; `run(spec, xmodel_path)` callable, log handler removed;
+failed retrain sets `model = None`; transformer `kwargs.revision` (pins the Hub checkpoint; joins the cache key only
+when set, unpinned caches stay valid); SVD default `random_state` 0 (both configs already set 42). No result
+changes expected: the next server run of `run_experiment.py` is the acceptance (expect the new files; metrics
+unchanged). Items 5-8 (explicit device/threads, batches/compare, install check, CLI/TUI) not started: ask before.
+Thesis vs code (checked 2026-10-09): per-label OvR rankers, curriculum hard-negative mining, Lp fusion, rapids.ai,
+nDCG/Hit@k suite and Hybrid X-Linker integration are not in this repo (removed or out of scope); the thesis's
+"exactly repeatable runs" does not hold on GPU (same-code retrains move ~10-20 rows; seeds are fixed).
+
+**NEXT after H: G0 (Claude, code only, no user runs): for NCBI-disease, BioRED, NLM-Chem check the PubTator reader loads
 them (conversion needs, row/label counts, dictionary choice), write their specs, plan baselines 3-4 (one script over
 `evaluate_tree`'s rows) and 5 (scispaCy, own env). Bring plan + counts to the user before coding. Plan G below.**
 Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?

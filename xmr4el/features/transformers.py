@@ -18,7 +18,8 @@ from sentence_transformers.sentence_transformer.modules import Pooling, Transfor
 logger = logging.getLogger(__name__)
 
 # Short config `type` names -> checkpoints (configs and saved trees use these). Any other model:
-# "kwargs": {"model_name": "<HF or sentence-transformers id>"}, optionally "pooling" and "max_seq_length".
+# "kwargs": {"model_name": "<HF or sentence-transformers id>"}, optionally "pooling", "max_seq_length" and
+# "revision" (a Hub commit hash pins the checkpoint; None = the Hub's current main).
 MODEL_NAMES = {
     "biobert": "dmis-lab/biobert-base-cased-v1.2",
     "sentencetbiobert": "pritamdeka/S-BioBert-snli-multinli-stsb",
@@ -29,24 +30,27 @@ MODEL_NAMES = {
 # SentenceTransformer(name) alone would mean-pool them.
 CLS_POOLED = {"cambridgeltl/SapBERT-from-PubMedBERT-fulltext": 25}
 
-# Embeddings of a frozen encoder depend only on (model, pooling, max length, dtype, texts): `transform` saves them here
-# and reuses them on any later run with the same distinct texts. Delete the directory after changing a checkpoint.
+# Embeddings of a frozen encoder depend only on (model, revision, pooling, max length, dtype, texts): `transform` saves
+# them here and reuses them on any later run with the same distinct texts. Without a pinned revision the key cannot see
+# a checkpoint update on the Hub: delete the directory then.
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          "outputs", "cache", "transformers")
 
 
-def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None):
+def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None, revision=None):
     """Load the encoder used for every transformer embedding (training, prediction, screening).
     pooling "cls" | "mean" | ... builds [transformer, pooling] explicitly; None = the checkpoint's own
     sentence-transformers setup (mean pooling for a plain HF checkpoint), or CLS_POOLED's."""
     if pooling is None and model_name in CLS_POOLED:
         pooling, max_seq_length = "cls", max_seq_length or CLS_POOLED[model_name]
+    rev = {"revision": revision} if revision else None
     if pooling is None:
-        model = SentenceTransformer(model_name).to(device)
+        model = SentenceTransformer(model_name, **(rev or {})).to(device)
         if max_seq_length is not None:
             model.max_seq_length = max_seq_length
         return model
-    tok = STTransformer(model_name, max_seq_length=max_seq_length)
+    tok = STTransformer(model_name, max_seq_length=max_seq_length, model_kwargs=rev, processor_kwargs=rev,
+                        config_kwargs=rev)
     pool = Pooling(tok.get_embedding_dimension(), pooling_mode=pooling)
     return SentenceTransformer(modules=[tok, pool], device=str(device))
 
@@ -57,7 +61,7 @@ class Transformer:
     @classmethod
     def transform(cls, trn_corpus, config=None, dtype=np.float32):
         """Returns (run config, embeddings ndarray). kwargs: model_name (overrides type), pooling,
-        max_seq_length, batch_size, max_oom_retries."""
+        max_seq_length, revision, batch_size, max_oom_retries."""
         config = config if config is not None else {"type": "sentencetbiobert", "kwargs": {}}
         kwargs = {"batch_size": 1000, "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
         model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
@@ -65,7 +69,9 @@ class Transformer:
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
-        key = "\0".join([model_name, str(kwargs.get("pooling")), str(kwargs.get("max_seq_length")),
+        # revision joins the key only when pinned, so unpinned configs keep their cached embeddings
+        rev = [f"revision={kwargs['revision']}"] if kwargs.get("revision") else []
+        key = "\0".join([model_name, *rev, str(kwargs.get("pooling")), str(kwargs.get("max_seq_length")),
                          np.dtype(kwargs["dtype"]).name, *uniq.tolist()])
         path = os.path.join(CACHE_DIR, hashlib.sha256(key.encode()).hexdigest()[:24] + ".npy")
         if os.path.exists(path):
@@ -96,6 +102,7 @@ class Transformer:
         max_oom_retries=3,
         pooling=None,
         max_seq_length=None,
+        revision=None,
     ):
         """
         Optimized function for efficient memory usage during CPU or GPU-based embedding extraction.
@@ -107,7 +114,7 @@ class Transformer:
         logger.info("Transformer started: model=%s device=%s rows=%d batch_size=%d",
                     model_name, device, len(trn_corpus), batch_size or 400)
 
-        model = sentence_model(model_name, device, pooling, max_seq_length)
+        model = sentence_model(model_name, device, pooling, max_seq_length, revision)
         len_corpus = len(trn_corpus)
 
         if batch_size == 0:

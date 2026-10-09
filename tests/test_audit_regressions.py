@@ -119,9 +119,23 @@ def test_candidate_knn_equals_full_knn():
 
 
 def test_predict_config_checks(xm):
-    for bad in ({"beam_size": 0}, {"topk": -1}):
+    for bad in ({"beam_size": 0}, {"topk": -1}, {"beam_size": 1.5}, {"topk": 2.0}, {"knn_beta": float("nan")},
+                {"knn_beta": float("inf")}, {"beam_size": True}):
         with pytest.raises(ValueError):
             xm.resolve_predict_config(**bad)
+    for depth in (0, -1, 1.0):
+        with pytest.raises(ValueError, match="depth"):
+            XModel(**{**CONFIG, "depth": depth})
+
+
+def test_failed_retrain_leaves_no_tree(xm):
+    """Second audit: a refit that fails after encoding must not pair the old tree with the new encoder/labels."""
+    other = deepcopy(xm)
+    texts = [[f"other{j} name{i}" for i in range(8)] for j in range(8)]
+    with patch("xmr4el.xmodel.HierarchicalMLModel.train", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            other.train(texts, [f"M{j}" for j in range(8)])
+    assert other.model is None
 
 
 def test_save_without_save_method(xm, tmp_path):

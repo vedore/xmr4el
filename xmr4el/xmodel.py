@@ -1,4 +1,6 @@
 import json
+import math
+import numbers
 import os
 import pickle
 import time 
@@ -36,6 +38,22 @@ def _json_state(state):
         else:
             out[key] = v
     return out
+
+
+def check_search(cfg):
+    """Raise ValueError unless beam_size is an int >= 1, topk an int >= 0 and knn_beta a finite number
+    (keys left out or None are not checked)."""
+    is_int = lambda v: isinstance(v, numbers.Integral) and not isinstance(v, bool)
+    bad = []
+    if cfg.get("beam_size") is not None and not (is_int(cfg["beam_size"]) and cfg["beam_size"] >= 1):
+        bad.append(f"beam_size {cfg['beam_size']!r} (int >= 1)")
+    if cfg.get("topk") is not None and not (is_int(cfg["topk"]) and cfg["topk"] >= 0):
+        bad.append(f"topk {cfg['topk']!r} (int >= 0)")
+    beta = cfg.get("knn_beta")
+    if beta is not None and not (isinstance(beta, numbers.Real) and not isinstance(beta, bool) and math.isfinite(beta)):
+        bad.append(f"knn_beta {beta!r} (finite number)")
+    if bad:
+        raise ValueError("search settings: " + ", ".join(bad))
 
 
 class XModel:
@@ -82,6 +100,8 @@ class XModel:
         
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
+        if not (isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1):
+            raise ValueError(f"depth must be an int >= 1, got {depth!r}")
         self.depth = depth
         self.features = features
         # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
@@ -188,10 +208,12 @@ class XModel:
             if part is not None:
                 part.save(os.path.join(save_dir, name))
 
-        with open(os.path.join(save_dir, "xmodel.pkl"), "wb") as fout:
-            pickle.dump(state, fout)
         with open(os.path.join(save_dir, "xmodel.json"), "w") as fout:  # readable view, never loaded
             json.dump(_json_state(state), fout, indent=2, default=repr)
+        # written last, then renamed: xmodel.pkl exists only in a completely saved tree (load requires it)
+        with open(os.path.join(save_dir, "xmodel.pkl.tmp"), "wb") as fout:
+            pickle.dump(state, fout)
+        os.replace(os.path.join(save_dir, "xmodel.pkl.tmp"), os.path.join(save_dir, "xmodel.pkl"))
         self.logger.info("Model saved: path=%s elapsed=%.1fs", save_dir, time.perf_counter() - start)
         return save_dir
     
@@ -271,7 +293,8 @@ class XModel:
         """X_text: one list of training texts per label group, Y_text: the group labels. Sets X (n x d),
         Y (n x L), Z (L x d), initial_labels and the tree."""
         start = time.perf_counter()
-        
+        self.model = None  # a failed (re)train leaves no tree, never an old tree with the new encoder/labels
+
         self.X, self.Y, self.Z = self._fit(X_text=X_text, Y_text=Y_text)
 
         n_labels = self.Z.shape[0]
@@ -336,8 +359,7 @@ class XModel:
     def resolve_predict_config(self, **overrides):
         """`predict_config` with the non-None overrides applied."""
         cfg = {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
-        if cfg["beam_size"] < 1 or cfg["topk"] < 0:
-            raise ValueError(f"need beam_size >= 1 and topk >= 0, got {cfg}")
+        check_search(cfg)
         return cfg
 
     def mention_block(self):

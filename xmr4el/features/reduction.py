@@ -180,7 +180,7 @@ class SklearnTruncatedSVD(DimensionModel):
             "n_iter": 5, 
             "n_oversamples": 10, 
             "power_iteration_normalizer": 'auto', 
-            "random_state": None, 
+            "random_state": 0,  # randomized SVD: seeded so an unset config is still repeatable
             "tol": 0.0
         }
 

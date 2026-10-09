@@ -53,8 +53,7 @@ def main():
     m, state = evaluate_tree(trained_xtree, tree, args.test_path, train_path=args.train_path,
                              beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta)
     if state is None:
-        print(format_metrics(m))
-        return
+        sys.exit(format_metrics(m))  # no metrics: exit status 1
     print("-" * 72)
     print(format_metrics(m))
 
