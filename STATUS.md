@@ -8,7 +8,14 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-09 (R done; plan E written: E1 next).
 
-**NEXT: E2 (user run; code `7683b5d`, server `git pull` first).** Plan E below; user 2026-10-09: run all options.
+**NEXT: E3 (code, no runs).** Plan E below; user 2026-10-09: run all options.
+
+**E2 result (2026-10-09, `e2_dev_eval.log`, reranker `..._13-27-32`, 5 folds, 2 epochs, 2720 s = +1617 s for the
+fold trees): rejected.** `not seen 1` w 0.25 0.9080 vs R2b 0.9108; unseen 0.6967 vs 0.7009; seen >1 0.8113 vs
+0.8491. Epoch 2 loss still 0.036: the model memorizes the 4.2k train (query, gold) pairs whatever the negatives.
+Of {R, c1, c2} R stays best on dev; no new test run. Across the three, unseen at w 0.25 spans 0.6946-0.7009
+(6 rows): the reranker's unseen gain is ~+20-26 dev rows and +6 on test; the training set (4.2k BC5CDR rows) is
+the limit, not the negatives or epochs. E4 retrains R's recipe (in-sample, 2 epochs). `-folds` stays (tested, opt-in).
 
 **E1 result (2026-10-09, `e1_dev_eval.log`, reranker `..._12-35-14`, 1 epoch): rejected.** `not seen 1` w 0.25
 0.9064 vs R2b 0.9108; unseen 0.6946 vs 0.7009; seen >1 0.7877 vs 0.8491 (the 2-epoch model learned the seen >1
