@@ -599,9 +599,11 @@ labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in t
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | XMR4EL, 16 leaves (`13-47-38`) | 10 | 0.860 | 0.898 | 0.945 | 0.963 | 0.974 | 0.930 | 0.730 | 0.641 | 0.906 | 0.858 | 0.904 |
 | XMR4EL, 128 leaves (`12-21-30`) | 10 | 0.873 | 0.909 | 0.949 | 0.961 | 0.965 | 0.947 | 0.672 | 0.653 | 0.909 | 0.871 | 0.906 |
-| XMR4EL, 128 leaves + knn beta 10 (`12-21-30`) | 10 | **0.916** | **0.940** | **0.969** | **0.977** | **0.980** | **0.985** | 0.730 | **0.712** | **0.921** | **0.914** | **0.919** |
-| PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | **0.747** | 0.618 | 0.901 | 0.850 | 0.899 |
-| PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | **0.747** | 0.634 | 0.904 | 0.860 | 0.902 |
+| XMR4EL, 128 leaves + knn beta 10 (`12-21-30`) | 10 | 0.916 | 0.940 | **0.969** | **0.977** | **0.980** | **0.985** | 0.730 | 0.712 | 0.921 | 0.914 | 0.919 |
+| XMR4EL, same config, new tree (`10-18-51`) | 10 | 0.918 | 0.941 | 0.968 | 0.974 | 0.978 | **0.985** | 0.718 | 0.719 | **0.923** | 0.915 | **0.920** |
+| `10-18-51` + reranker, not seen 1, w 0.25 | 10 | **0.923** | **0.944** | - | - | - | **0.985** | **0.816** | **0.725** | - | **0.921** | - |
+| PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | 0.747 | 0.618 | 0.901 | 0.850 | 0.899 |
+| PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | 0.747 | 0.634 | 0.904 | 0.860 | 0.902 |
 
 XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/query). Eval 54 s at 16 leaves
 (before eval batching), 15 s at 128 (`outputs/logs/test_12-21-30_eval.log`); PECOS predict 2.3 s.
@@ -611,6 +613,13 @@ XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/
   1-label +0.017 and unseen +0.012, but seen >1-label -0.058 (n=174) and R@20 -0.009 (cross-leaf scoring, as on dev).
 - `-knn_beta 10` (beta chosen on dev, test run once, `outputs/logs/knn10_test_eval.log`): acc@1 0.873 -> 0.916, unseen
   0.653 -> 0.712, hybrid 0.909 -> 0.921; the tree alone (0.916) is now above the old hybrid. Dev section 2026-10-08 below.
+- Reranker (2026-10-09, `outputs/logs/r3_test_eval.log`; scope and w chosen on dev from 3 x 7 configs, test run
+  once): cross-encoder (SapBERT init) over the tree's top 10, final = log(tree score) + 0.25 x logit, applied only to
+  rows whose mention string is not seen in train (+ CTD) with exactly one label; recall columns are not reported for
+  the reranked row. acc@1 0.918 -> 0.923 (+23 rows): seen >1 +17, unseen +6, seen 1 untouched. On dev the same
+  choice gave +38 (unseen +26); on test the gain is close to the tree's own hybrid (0.9229 vs 0.9227). Ungated
+  (all rows, w 0.25) test 0.920 with seen 1 -13 rows. `10-18-51` vs `12-21-30`: same code and config, new server
+  (fresh CUDA encoding).
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 

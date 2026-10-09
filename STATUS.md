@@ -6,15 +6,32 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (R1 + R2 done: R fails the pass rule as is; D1 + D2 done; R2b (scoped rerank) code done).
+Last updated 2026-10-09 (R done: R3 test 0.9177 -> 0.9229 with the dev-chosen reranker; results.md row added).
 
-**NEXT: user runs R2b (eval only, same tree + reranker) on the server after `git pull`; log `r2b_dev_eval.log`.**
-`evaluate.py` with `-train_path` now prints each w for 3 scopes: `all rows` (= R2), `unseen` (rerank only rows whose
-mention string is not in train), `not seen 1` (unseen + seen with >1 label); other rows keep the tree's order.
-"Seen" = exact `mention_key` in `-train_path` (train_plus_ctd, as R2's groups). w grid adds 0.1, 0.25 (option b).
-Check: each scope's w 0 row = R2 w 0; `unseen` rows: seen groups = w 0 values, unseen group = `all rows` value.
-Pass rule vs w 0 (0.9020 / unseen 0.6737 / seen 1 floor 0.9767): pick scope + w on dev, then R3 test once with
-that w (read the chosen scope's row). Synthetic e2e (tfidf tree, random tiny BERT) satisfied the check above.
+**NEXT: user picks.** Open: R generality (same recipe on MedMentions), option (c) out-of-sample reranker negatives,
+abbreviations (U3), deferred D items (#8, #9).
+
+**R3 result (2026-10-09, `r3_test_eval.log`, test 4399/4410 rows).** Tree w 0: acc@1 0.9177 / MRR 0.9408 / seen 1
+0.9851 / seen >1 0.7184 / unseen 0.7186 / hybrid 0.9227. `not seen 1` w 0.25: **0.9229** / MRR 0.9443 / seen >1 0.8161
+(+17 rows) / unseen 0.7249 (+6 rows) / seen 1 unchanged = +23 rows. Smaller than dev (+38, unseen +26): on test the
+gain is mostly seen >1 and ends level with the tree's hybrid (0.9229 vs 0.9227); the unseen gain (+6 of 938) is
+within noise. Ungated w 0.25: 0.9200, seen 1 -13 rows (the gate holds on test). `docs/results.md` test table updated.
+
+
+**R2b result (2026-10-09, `r2b_dev_eval.log`, same tree + reranker).** Check ok: every scope's w 0 row = R2 w 0;
+`unseen` rows keep seen groups at w 0 and match `all rows` on unseen. acc@1 all / seen 1 / seen >1 / unseen, MRR:
+- `not seen 1` w 0.25: **0.9108** / 0.9787 / 0.8491 / 0.7009, MRR 0.9374 (+38 rows vs w 0 0.9020; unseen +26,
+  seen >1 +12, seen 1 untouched). Chosen. w 0.1-0.5 all 0.9089-0.9108: a plateau, not a knife edge.
+- `all rows` w 0.25: 0.9099 / 0.9774 (-4 rows, above floor 0.9767) / 0.8491 / 0.7009: also passes; the gate adds
+  ~4 rows. `unseen` w 0.25: 0.9080. w >= 1 worse in every scope.
+- Why the gate is principled, not tuning: on seen-1 strings the tree (0.9787) is already at the tree-or-dict ceiling
+  (0.9793), so the reranker can only lose there; the gate uses train strings only (like `hybrid`).
+- Selection: 21 configs (3 scopes x 7 w) picked on dev -> test once. Generality not shown: w and scope are BC5CDR
+  dev choices; a second dataset (MedMentions) with the same recipe is the real check.
+R3 (server, in container): `python3 scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-09_10-18-51
+-test_path datasets/BC5CDR/disease/test.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator
+-reranker_path outputs/rerankers/xmodel_2026-10-09_10-18-51_2026-10-09_10-37-32 -rerank_w 0 0.25 2>&1 | tee
+outputs/logs/r3_test_eval.log`; report the `not seen 1` w 0.25 row (w 0 row = tree on test).
 
 **R1 + R2 result (2026-10-09, remote CUDA, commit `b92e36c`, tree `xmodel_2026-10-09_10-18-51`, reranker
 `..._10-37-32`; logs `r1_tree.log`, `r1_train.log`, `r1_dev_eval.log`).**
