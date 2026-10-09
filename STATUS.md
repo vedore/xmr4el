@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F2 acceptance passed; user runs F3).
+Last updated 2026-10-09 (F2 acceptance passed; user runs F3; plan G = baselines across datasets).
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -62,7 +62,7 @@ Paste the `Eval dev` block from the log + `git.json`.
 retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 moved -11 rows). Check the log's
 `Knn re-scoring completed ... elapsed` (F1b) and the tree size vs `10-18-51` (F1c). Test once after the user agrees.
 
-**NEXT: user runs F3 (BC5CDR retrain via `scripts/run_experiment.py`); paste `metrics_dev.json` + log timings.** Plan F below (user 2026-10-09). Local commits up to this one are
+**NEXT: user runs F3 (BC5CDR retrain via `scripts/run_experiment.py`); paste `metrics_dev.json` + log timings. Then plan G (G0 code can start during F3).** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 
@@ -98,6 +98,29 @@ report: leave it untracked and unedited unless asked.
 - F4 = E5 via the wrapper: MedMentions st21pv (base config), dev; beam / knn beta chosen on dev (base config has
   beam 2, beta 0; BC5CDR's beta 10 was chosen on its dev); PECOS on the exported features
   (`scripts/baselines/pecos_compare.py export` -> `pecos_run.py` -> `score`); test once each -> results.md.
+  Superseded by plan G (user 2026-10-09): MedMentions becomes G's last dataset.
+
+**G. Baseline comparison across datasets (decided 2026-10-09, after F3).** Task = entity linking (mention -> concept
+ID); the PECOS paper XMC benchmarks (Eurlex, Wiki10, ...) are out of scope (multi-label documents, P@k, PECOS's own
+TF-IDF: a different task; user agreed). Same rows, same vocabulary, same metrics (acc@1, MRR, R@k, string groups)
+for every system; dev to choose settings, test once per final system.
+- Datasets, smallest first: NCBI-disease -> BC5CDR-disease (F3 tree) -> BioRED -> NLM-Chem -> MedMentions st21pv.
+- Systems per dataset:
+  1. XMR4EL (spec in `configs/experiments/`, via `run_experiment.py`; beam / knn beta chosen on dev).
+  2. PECOS XR-Linear on the same exported features, `threshold 0` (default 0.1 pruning was the whole 2026-10-06
+     gap): `pecos_compare.py export` -> `pecos_run.py` -> `score`.
+  3. SapBERT 1-NN over the same names (train + dictionary rows): what the tree / matcher / context add over SapBERT.
+  4. Char n-gram TF-IDF 1-NN (the "Elasticsearch fuzzy match" baseline).
+  5. scispaCy EntityLinker, MeSH KB, on the gold mentions (off-the-shelf tool; MeSH ids must map to the dataset's
+     ids; new dependency: own venv/container like PECOS, not the project lock).
+  6. Literature (BioSyn, SapBERT; BC5CDR-disease test 93.2 / 93.5): context only, different protocol (full
+     vocabulary, all test rows); labelled as such in results.md.
+  Not comparable here: MedCAT / QuickUMLS / MetaMap / cTAKES (UMLS/SNOMED licences, UMLS out of scope), commercial
+  APIs (cost, data leaves the machine, ICD/SNOMED/RxNorm targets), BLINK / GENRE / ReFinED (Wikipedia vocabulary).
+- G0 (Claude, code only, can run during F3): per dataset, check the PubTator reader loads it (BioRED, NLM-Chem may
+  need conversion: id prefixes, composite ids, entity types), pick its dictionary (CTD MEDIC for diseases, CTD
+  chemicals for NLM-Chem / BC5CDR-chemical) and write its spec. Baselines 3-4: one script over the same rows as
+  `evaluate_tree` (metrics dict reused); 5: separate script + environment. Plan + row counts to the user first.
 
 **E2 result (2026-10-09, `e2_dev_eval.log`, reranker `..._13-27-32`, 5 folds, 2 epochs, 2720 s = +1617 s for the
 fold trees): rejected.** `not seen 1` w 0.25 0.9080 vs R2b 0.9108; unseen 0.6967 vs 0.7009; seen >1 0.8113 vs
