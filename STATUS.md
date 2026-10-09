@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F1 done: F1a kept (+8 dev rows), F1b, F1c; F2 next).
+Last updated 2026-10-09 (F1 + F2 code done; user runs the F2 acceptance, then F3).
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -42,8 +42,24 @@ candidate overlap within a 256-query chunk (unmeasured); check `Knn re-scoring c
 `label_embeddings.npy` (training-only: `prepare_layer` and clustering use them before the save); `load` no longer
 reads or requires them (`_load_npy` removed). Only reader was `test_persistence`, now asserting the files are absent
 and the saved tree loads and predicts. Existing trees still load (their extra .npy files are ignored).
+**F2 (2026-10-09, code done, pytest 45, selfchecks ok):** `scripts/run_experiment.py -spec <json> [-xmodel_path]`
+(stdlib). Metric code moved to `xmr4el.eval.evaluate_tree` (JSON-ready dict + state for the reranker) and
+`format_metrics`; `evaluate.py` prints from them (output byte-identical on a synthetic tree, with and without
+`-train_path`, and the no-overlap case). `XModel.save` returns its path. Spec `configs/experiments/bc5cdr.json`
+(train_plus_ctd, dev with breakdown). Run dir: spec.json, model_config.json (train only), git.json (+ git_diff.patch
+if dirty; commit null if git is unavailable), run.log, tree.json, metrics_<split>.json. Test
+`tests/test_run_experiment.py` (synthetic end to end, eval-only reuse, spec errors, no overwrite).
+**F2 acceptance (user, server container, after push + pull):** `python3 scripts/run_experiment.py -spec
+configs/experiments/bc5cdr.json -xmodel_path outputs/saved_trees/xmodel_2026-10-09_10-18-51`. Expect
+`metrics_dev.json` = the F1a eval (reader changed since R1): acc@1 0.9038 / MRR 0.9341 / unseen 0.6821 / hybrid
+0.9066. Also checks F1b on real data (F1a's eval ran before F1b): any difference = F1b float/tie effect, inspect.
+Paste the `Eval dev` block from the log + `git.json`.
+**F3 (user, after acceptance):** `python3 scripts/run_experiment.py -spec configs/experiments/bc5cdr.json`
+(train + dev eval). Compare dev with the F1a eval on `10-18-51` (0.9038 / unseen 0.6821) and R1 (0.9020): the
+retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 moved -11 rows). Check the log's
+`Knn re-scoring completed ... elapsed` (F1b) and the tree size vs `10-18-51` (F1c). Test once after the user agrees.
 
-**NEXT: F2 (Claude, code only: minimal run wrapper).** Plan F below (user 2026-10-09). Local commits up to this one are
+**NEXT: user runs the F2 acceptance (eval-only), then F3 (BC5CDR retrain), both via `scripts/run_experiment.py`.** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 
@@ -72,7 +88,7 @@ report: leave it untracked and unedited unless asked.
   rows used/total, groups, hybrid, search settings, timings). With `-xmodel_path`: eval only. Needs evaluate.py's
   metric code callable as a function returning a dict (evaluate.py prints from it; output unchanged).
   Test: synthetic tfidf spec end to end in tmp (run dir files, metrics keys, no overwrite).
-  Acceptance (user run): eval-only on `10-18-51` dev reproduces acc@1 0.9020 / MRR 0.9319 / unseen 0.6737.
+  Acceptance (user run): eval-only on `10-18-51` dev reproduces the F1a eval (0.9038 / 0.9341 / unseen 0.6821).
 - F3 = E4 via the wrapper: BC5CDR spec (train_plus_ctd, `configs/xmr4el_bc5cdr_config.json`, dev + train_plus_ctd
   breakdown). Compare dev with `10-18-51` (0.9020 / unseen 0.6737; F1a's effect, F1b/F1c neutral). Then test once
   -> `docs/results.md` row. Delete `10-18-51` only after the user agrees.

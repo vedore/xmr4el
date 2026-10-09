@@ -19,6 +19,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | `dict_to_pubtator.py` | Preprocessing: CTD vocabulary (MEDIC/chemicals) -> PubTator pseudo-documents. |
 | `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers and save the model. |
 | `evaluate.py` | Traverse a saved tree and report ranking metrics and candidate recall. |
+| `run_experiment.py` | One tracked run from a spec (`configs/experiments/`): train (or `-xmodel_path`: reuse a tree), evaluate each split, write `outputs/runs/<timestamp>_<name>/` (spec, config, git commit/diff, log, `metrics_<split>.json`). |
 | `train_reranker.py` | Train a cross-encoder reranker on a saved tree's top-K candidates (`xmr4el/rerank.py`); `evaluate.py -reranker_path` sweeps its weight. |
 | `diagnose_routing.py` | Compare root matcher, cosine routing, flat retrieval, and a mention dictionary on train/dev inputs. |
 | `diagnose_unseen.py` | Ranking as `evaluate.py` (`-beam_size`, `-knn_beta`, default the tree's): acc@1 + gold-rank buckets per string group; unseen rows: flat 1-NN per feature block; knn fusion screen over beta (knn-free base); TSV of all errors (group, abbrev, gold/pred in the string's train label set). |
@@ -134,6 +135,18 @@ Diagnose routing before retraining; compare routing accuracy with the printed ch
   -xmodel_path "$MODEL" -train_path "$TRAIN" -test_path "$DEV" \
   -max_rows 5000
 ```
+
+## Tracked run
+
+```bash
+.venv/bin/python scripts/run_experiment.py -spec configs/experiments/bc5cdr.json
+.venv/bin/python scripts/run_experiment.py -spec configs/experiments/bc5cdr.json -xmodel_path outputs/saved_trees/<run>
+```
+
+Spec keys: `name`, `model_config`, `train_path` (not needed with `-xmodel_path`), `evals` = list of `split`,
+`test_path`, optional `train_path` (string breakdown), `beam_size`, `topk`, `knn_beta` (default: the tree's
+`predict_config`). Unknown keys are errors; an existing run directory is never overwritten. The metrics are
+`evaluate.py`'s (`xmr4el.eval.evaluate_tree`).
 
 ## Experiments
 

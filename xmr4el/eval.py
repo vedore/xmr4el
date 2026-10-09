@@ -1,8 +1,13 @@
-"""Evaluation metrics shared by the evaluate and diagnostic scripts."""
+"""Evaluation metrics shared by the evaluate, run_experiment and diagnostic scripts."""
+import time
 from collections import Counter, defaultdict
 
 import numpy as np
 from scipy.sparse import csr_matrix
+
+from xmr4el.data.readers import Preprocessor
+
+RECALL_KS = (5, 10, 20, 50, 100)
 
 
 def mention_key(text):
@@ -73,6 +78,69 @@ def string_breakdown(test_texts, gold, tree_top1, train_pairs):
            for k, g in groups.items()}
     out["hybrid"] = np.where(n_lab > 0, dict_ok, tree_ok).mean()
     return out
+
+
+def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=None, knn_beta=None):
+    """Rank the PubTator `test_path` with the loaded tree `xm` (named `tree`); search settings left None come from
+    its predict_config. Rows whose gold label is not in the tree are dropped (`rows` of `rows_total` kept).
+    Returns (metrics, state): metrics is JSON-ready (acc@1, MRR, R@k, R@cand, with `train_path` the mention-string
+    breakdown and hybrid); state = the ranked rows for the reranker (None if no row is kept)."""
+    abbrev = xm.abbrev_expansion  # train side too: same dictionary keys
+    test = Preprocessor.load_pubtator_file(test_path, window=xm.context_window, abbrev=abbrev)
+    gold, texts = filter_labels_and_inputs(test["corpus"], test["labels"], xm.initial_labels)
+    labels = np.array(xm.initial_labels)
+    m = {"tree": tree, "test_path": test_path, "train_path": train_path, "labels": len(labels),
+         "features": xm.features, "rows": len(gold), "rows_total": len(test["labels"]),
+         "distinct_gold": len(set(gold))}
+    if not gold:
+        return m, None
+    m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+    start = time.perf_counter()
+    scores = xm.predict(texts, **m["search"])
+    m["predict_seconds"] = round(time.perf_counter() - start, 1)
+    label_to_idx = {lab: i for i, lab in enumerate(labels)}
+    # Rank of the gold label in each query's score row. 0 = never retrieved.
+    # Single gold CUI per mention (Preprocessor.load_pubtator_file -> one-hot Y), so acc@1 / MRR /
+    # recall@k are the right metrics; precision@k (the PECOS suite) is not.
+    ranks = np.array([gold_rank(scores.getrow(qi), label_to_idx[g]) for qi, g in enumerate(gold)], dtype=int)
+    m.update({k: float(v) for k, v in ranking_metrics(ranks, ks=RECALL_KS).items()})
+    m["R@cand"] = float(np.mean(ranks > 0))
+    m["candidates_per_query"] = scores.nnz / max(scores.shape[0], 1)
+    train_pairs = None
+    if train_path:
+        train = Preprocessor.load_pubtator_file(train_path, abbrev=abbrev)
+        train_pairs = [(t, y) for t, y in zip(train["corpus"], train["labels"]) if y in label_to_idx]
+        top1 = [labels[r.indices[np.argmax(r.data)]] if r.nnz else None
+                for r in (scores.getrow(i) for i in range(scores.shape[0]))]
+        b = string_breakdown(texts, gold, top1, train_pairs)
+        m["hybrid"] = float(b.pop("hybrid"))
+        m["strings"] = {k: dict(zip(("n", "tree", "dict", "either"), (int(v[0]), *map(float, v[1:]))))
+                        for k, v in b.items()}
+    state = {"scores": scores, "texts": texts, "gold": gold, "ranks": ranks, "train_pairs": train_pairs}
+    return m, state
+
+
+def format_metrics(m):
+    """The scripts/evaluate.py report of `evaluate_tree` metrics, without the separator lines."""
+    n = m["rows"]
+    lines = [f"tree     {m['tree']}  ({m['labels']} labels, features {m['features']})",
+             f"rows     {n}/{m['rows_total']} gold label in vocabulary ({n / max(m['rows_total'], 1):.1%}); "
+             f"{m['distinct_gold']} distinct gold labels"]
+    if not n:
+        return f"rows     0/{m['rows_total']} gold label in vocabulary: nothing to evaluate"
+    s = m["search"]
+    lines += [f"search   beam {s['beam_size']}, topk {s['topk']}, knn beta {s['knn_beta']:g}, "
+              f"{m['candidates_per_query']:.0f} candidates/query", "",
+              f"acc@1    {m['acc@1']:.4f}", f"MRR      {m['MRR']:.4f}",
+              "recall   " + "  ".join(f"@{k} {m[f'R@{k}']:.4f}" for k in RECALL_KS),
+              f"         @cand {m['R@cand']:.4f}  (gold among the candidates: the cap for every metric)"]
+    if "strings" in m:
+        lines += ["", "acc@1 by mention string (dict = most frequent train label for the exact string)",
+                  f"  {'':16s} {'n':>6s} {'share':>6s} {'tree':>7s} {'dict':>7s} {'either':>7s}"]
+        lines += [f"  {k:16s} {g['n']:6d} {g['n'] / n:6.3f} {g['tree']:7.4f} {g['dict']:7.4f} {g['either']:7.4f}"
+                  for k, g in m["strings"].items()]
+        lines.append(f"  hybrid (dict if string seen, else tree): {m['hybrid']:.4f}")
+    return "\n".join(lines)
 
 
 def _selfcheck():

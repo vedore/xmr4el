@@ -193,6 +193,7 @@ class XModel:
         with open(os.path.join(save_dir, "xmodel.json"), "w") as fout:  # readable view, never loaded
             json.dump(_json_state(state), fout, indent=2, default=repr)
         self.logger.info("Model saved: path=%s elapsed=%.1fs", save_dir, time.perf_counter() - start)
+        return save_dir
     
     @classmethod
     def load(cls, load_dir):

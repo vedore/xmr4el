@@ -1,0 +1,9 @@
+{
+  "name": "bc5cdr",
+  "model_config": "configs/xmr4el_bc5cdr_config.json",
+  "train_path": "datasets/BC5CDR/disease/train_plus_ctd.pubtator",
+  "evals": [
+    {"split": "dev", "test_path": "datasets/BC5CDR/disease/dev.pubtator",
+     "train_path": "datasets/BC5CDR/disease/train_plus_ctd.pubtator"}
+  ]
+}
