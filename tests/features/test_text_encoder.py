@@ -72,6 +72,13 @@ def test_text_encoder():
     assert load() == ["SSI", "SSI"]
     assert load(abbrev="append", window=1) == ["SSI Surgical site infection", "SSI"]
     assert load(abbrev="replace") == ["Surgical site infection", "SSI"]
+    abbrs = Preprocessor.abbreviations("Deaths from excited delirium (EDDs) and adverse events (AEs) of the "
+                                       "gastrointestinal (GI) tract. EDDs rose.")
+    assert abbrs == {"EDDs": "excited delirium", "AEs": "adverse events", "GI": "gastrointestinal"}, abbrs
+    expand = lambda m: Preprocessor.expand_abbreviation(m, abbrs)
+    assert expand("EDDs") == expand("EDD") == "excited delirium"  # plural SF; singular use of it
+    assert expand("GI AEs") == "gastrointestinal adverse events"  # SF tokens inside a longer mention
+    assert expand("GI") == "gastrointestinal" and expand("delirium") is None and expand("bad GIs") is None
 
     assert MODEL_NAMES["sapbert"] in CLS_POOLED, "config type sapbert must load SapBERT with [CLS] pooling"
     assert MODEL_NAMES["sentencetbiobert"] not in CLS_POOLED

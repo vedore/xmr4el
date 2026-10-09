@@ -110,10 +110,25 @@ class Preprocessor:
                     and any(ch.isalpha() for ch in sf)) or sf in out:
                 continue
             words = re.split(r"[.;!?]\s", document[:m.start()])[-1].split()
-            lf = Preprocessor.best_long_form(sf, " ".join(words[-min(len(sf) + 5, 2 * len(sf)):]))
+            cand = " ".join(words[-min(len(sf) + 5, 2 * len(sf)):])
+            lf = Preprocessor.best_long_form(sf, cand)
+            if lf is None and len(sf) > 2 and sf.endswith("s"):  # plural SF: "excited delirium (EDDs)"
+                lf = Preprocessor.best_long_form(sf[:-1], cand)
             if lf and len(lf) > len(sf) and sf not in lf.split():
                 out[sf] = lf
         return out
+
+    @staticmethod
+    def expand_abbreviation(mention, abbrs):
+        """Long form for `mention` from `abbreviations` output, or None: the SF itself, the singular of a plural
+        SF ("MD" for "MDs"), or a multi-word mention with SF tokens expanded ("GI AEs" -> "gastrointestinal
+        adverse events")."""
+        mention = mention.strip()
+        lf = abbrs.get(mention) or abbrs.get(mention + "s")
+        tokens = mention.split()
+        if lf is None and len(tokens) > 1 and any(t in abbrs for t in tokens):
+            lf = " ".join(abbrs.get(t, t) for t in tokens)
+        return lf
 
     @staticmethod
     def load_pubtator_file(pubtator_filepath: str, window: Optional[int] = None,
@@ -128,8 +143,8 @@ class Preprocessor:
             labels[i] = CUI
             spans[i] = (start, end) of the mention in title + " " + abstract (PubTator offsets)
             docs[i] = document id (PMID) of the row
-        `abbrev` "append" / "replace": a mention that is a short form defined in its document
-        (`abbreviations`) becomes "SF long form" / "long form"; None keeps it.
+        `abbrev` "append" / "replace": a mention with a long form from its document (`abbreviations`,
+        `expand_abbreviation`) becomes "mention long form" / "long form"; None keeps it.
         BC5CDR: "-1" ids are skipped; composite "D1|D2" mentions are split via column 7.
         """
         assert abbrev in (None, "append", "replace"), abbrev
@@ -184,7 +199,7 @@ class Preprocessor:
                             if cui == "-1":
                                 continue
                             if abbrev is not None:
-                                lf = abbrs.get(mention_text.strip())
+                                lf = Preprocessor.expand_abbreviation(mention_text, abbrs)
                                 if lf is not None:
                                     mention_text = lf if abbrev == "replace" else f"{mention_text.strip()} {lf}"
                             corpus.append(f"{mention_text} [SEP] {context}")

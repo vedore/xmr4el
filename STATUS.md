@@ -6,7 +6,31 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (R/E1/E2 done, reranker dropped; plan F decided: F1 next, new session).
+Last updated 2026-10-09 (F1a code done; user runs the F1a dev eval on `10-18-51`).
+
+**F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
+- 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
+  is correct; the model misses (mds/pas gold is annotation-level). Not a reader fix.
+- 10 never defined in the doc (oab 9, eps 1). A train-corpus SF dictionary hits only eps (and is noisy: TMA, PA map
+  to the wrong long form there): skip.
+- 11 reader-fixable: plural SF whose long form lacks the "s" ("excited delirium (EDDs)", 4); singular use of a plural
+  SF (MD 2, PA 1); defined SFs as tokens inside a longer mention ("GI AEs", 3; "IOP rise", 1).
+Plan (prototype in a scratch script, not in the repo): in `abbreviations`, retry `best_long_form` with a trailing "s"
+removed; in the lookup, fall back to SF+"s" and expand SF tokens inside multi-word mentions. Changed rows: train 26
+(all token case), dev 24 (13 token, 11 new), test 19, train_plus_ctd 26. Expected dev effect small (<= ~11 rows).
+MedMentions st21pv (same prototype; base config also uses append): train 1478 / 122k rows changed (1170 token),
+dev 550 / 41k (428 token); mostly correct (DVT, ACL reconstruction, NK cells), some noise ("DPP4 inhibitors" ->
+"... inhibitors inhibitors", RNA in "long noncoding RNAs" -> "ribonucleic acids").
+Approved as a measured step (user 2026-10-09). Code done: `abbreviations` plural retry,
+`Preprocessor.expand_abbreviation` (SF, singular of a plural SF, SF tokens in a multi-word mention); test in
+`tests/features/test_text_encoder.py`; pytest 43. Expanded rows (append): train_plus_ctd 224 -> 250, dev 269 -> 293,
+test 356 -> 375.
+**F1a eval (user, server, after push + pull):** eval-only on the existing tree (its train text differs in 26 of 90k
+rows: negligible): `python3 scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-09_10-18-51
+-test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator 2>&1 |
+tee outputs/logs/f1a_dev_eval.log`. Compare with R1 w 0: acc@1 0.9020 / MRR 0.9319 / unseen 0.6737 / seen 1 0.9787.
+Keep for F3 if acc@1 gains >= ~3 rows (0.0007) without seen 1 loss; else revert the reader change. Then F1b, F1c.
+Note: the train-side breakdown groups shift slightly (26 train rows get new text).
 
 **NEXT: F1 (Claude, code only, no user runs).** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
