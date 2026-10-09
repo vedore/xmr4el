@@ -6,7 +6,22 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-08 (N1-N6, U3, B, B1, C1, C2+C3 done; next: R code (Claude) on tree `17-28-02`).
+Last updated 2026-10-08 (N1-N6, U3, B, B1, C1, C2+C3 done; R code done, committed; next: user R1 + R2).
+
+**R code done (committed; pytest 36 + selfchecks).** `xmr4el/rerank.py`: `label_texts` (label j = Y column j:
+top 5 distinct `mention_key` strings by count, ties first-seen -> BC5CDR strings before CTD names),
+`top_k`, `rerank_order`, `CrossEncoderReranker` (`AutoModelForSequenceClassification`, num_labels 1: SapBERT
+pooler + linear; AdamW 2e-5, linear warmup 10%, listwise CE, 4 rows x K per step, dynamic padding, max_length 96).
+`scripts/train_reranker.py`: negatives = tree top K (its predict_config, beta 10) minus gold, cut to K-1; rows with
+< K-1 candidates dropped (no knn top-up: tree gives ~hundreds per row). `evaluate.py -reranker_path [-rerank_k]
+[-rerank_w ...]`: logits once, one MRR + acc@1-per-group row per w (default 0 0.5 1 2 inf); load refuses a reranker
+of another tree. Synthetic e2e (tfidf tree, tiny BERT): w 0 row = tree metrics. Tiny-BERT toy needs ~800 steps
+without dropout to learn query-label matching (test uses 100 epochs, ~6 s).
+User runs (log names as planned):
+- R1: `python scripts/train_reranker.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_17-28-02 -train_path datasets/BC5CDR/disease/train.pubtator 2>&1 | tee outputs/logs/r1_train.log`
+- R2: `python scripts/evaluate.py -xmodel_path outputs/saved_trees/xmodel_2026-10-08_17-28-02 -test_path datasets/BC5CDR/disease/dev.pubtator -train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator -reranker_path $(ls -d outputs/rerankers/xmodel_2026-10-08_17-28-02_* | tail -1) 2>&1 | tee outputs/logs/r1_dev_eval.log`
+- Pasted output: R1 check `gold in tree top 10` ~0.97+ on train and loss falling; R2 check w 0 row = 0.9045 /
+  MRR 0.9335 / unseen 0.6821 / seen 1 0.9783, then apply the R pass rule; pick w; R3 test with `-rerank_w <w>` only.
 
 **C2+C3 passed (pytest 33 + 4 selfchecks).** Plain attributes instead of pass-through properties; `NodeInput`,
 `prepare_layer` -> `[(c, NodeInput)]`, `tree.train` helpers inlined; shape docstrings; PIFA = `normalize(Y.T @ X)`;

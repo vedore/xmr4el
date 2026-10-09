@@ -19,6 +19,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | `dict_to_pubtator.py` | Preprocessing: CTD vocabulary (MEDIC/chemicals) -> PubTator pseudo-documents. |
 | `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers and save the model. |
 | `evaluate.py` | Traverse a saved tree and report ranking metrics and candidate recall. |
+| `train_reranker.py` | Train a cross-encoder reranker on a saved tree's top-K candidates (`xmr4el/rerank.py`); `evaluate.py -reranker_path` sweeps its weight. |
 | `diagnose_routing.py` | Compare root matcher, cosine routing, flat retrieval, and a mention dictionary on train/dev inputs. |
 | `diagnose_unseen.py` | Ranking as `evaluate.py` (`-beam_size`, `-knn_beta`, default the tree's): acc@1 + gold-rank buckets per string group; unseen rows: flat 1-NN per feature block; knn fusion screen over beta (knn-free base); TSV of all errors (group, abbrev, gold/pred in the string's train label set). |
 | `experiments/screen_features.py` | Compare feature variants with flat label retrieval, without training a tree. |
