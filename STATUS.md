@@ -6,7 +6,14 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F3 dev done: within retrain noise; next = BC5CDR test once, then plan G).
+Last updated 2026-10-09 (plan F done: BC5CDR test 0.9225 in results.md; next = plan G, step G0; chat reset).
+
+**NEXT: G0 (Claude, code only, no user runs): for NCBI-disease, BioRED, NLM-Chem check the PubTator reader loads
+them (conversion needs, row/label counts, dictionary choice), write their specs, plan baselines 3-4 (one script over
+`evaluate_tree`'s rows) and 5 (scispaCy, own env). Bring plan + counts to the user before coding. Plan G below.**
+Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?
+Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
+report: leave it untracked and unedited unless asked.
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -66,14 +73,15 @@ below retrain noise; one retrain per variant cannot rank variants at this size. 
 the Mac). Proposal: F3 tree = the BC5CDR system (trained by the current code at a recorded commit); test once:
 `python3 scripts/run_experiment.py -spec configs/experiments/bc5cdr_test.json -xmodel_path
 outputs/saved_trees/xmodel_2026-10-09_14-12-26`; report retrain noise with it. Seed repeats are a G option.
+**F3 test (2026-10-09, eval-only `bc5cdr_test.json` on `14-12-26`, run dir on the server): acc@1 0.9225 / MRR 0.9429
+/ R@10 0.9757 / unseen 0.7322 / seen >1 0.7701 / seen 1 0.9851 / hybrid 0.9254 (4399/4410 rows).** vs `10-18-51` test
+0.9177: +21 rows, but dev went -16 for the same pair: retrain noise, not an F1a effect (written so in results.md).
+`14-12-26` = the BC5CDR-disease system for plan G. Plan F done.
 **F3 (user, after acceptance):** `python3 scripts/run_experiment.py -spec configs/experiments/bc5cdr.json`
 (train + dev eval). Compare dev with the F1a eval on `10-18-51` (0.9038 / unseen 0.6821) and R1 (0.9020): the
 retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 moved -11 rows). Check the log's
 `Knn re-scoring completed ... elapsed` (F1b) and the tree size vs `10-18-51` (F1c). Test once after the user agrees.
 
-**NEXT: user decides the BC5CDR test (F3 tree, `configs/experiments/bc5cdr_test.json`), then plan G (G0 = Claude, code).** Plan F below (user 2026-10-09). Local commits up to this one are
-unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
-report: leave it untracked and unedited unless asked.
 
 **F. Plan (decided 2026-10-09; order F1 -> F2 -> F3 -> F4). Main system = tree + knn (reranker dropped).**
 - F1 = E3, code only (tree-changing changes batched into one retrain, F3). Pytest + selfchecks after each part.

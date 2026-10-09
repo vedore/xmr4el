@@ -601,6 +601,7 @@ labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in t
 | XMR4EL, 128 leaves (`12-21-30`) | 10 | 0.873 | 0.909 | 0.949 | 0.961 | 0.965 | 0.947 | 0.672 | 0.653 | 0.909 | 0.871 | 0.906 |
 | XMR4EL, 128 leaves + knn beta 10 (`12-21-30`) | 10 | 0.916 | 0.940 | **0.969** | **0.977** | **0.980** | **0.985** | 0.730 | 0.712 | 0.921 | 0.914 | 0.919 |
 | XMR4EL, same config, new tree (`10-18-51`) | 10 | 0.918 | 0.941 | 0.968 | 0.974 | 0.978 | **0.985** | 0.718 | 0.719 | **0.923** | 0.915 | **0.920** |
+| F1 code (abbreviations), new tree (`14-12-26`) | 10 | 0.922 | 0.943 | 0.967 | 0.976 | 0.979 | **0.985** | 0.770 | **0.732** | **0.925** | 0.920 | **0.923** |
 | `10-18-51` + reranker, not seen 1, w 0.25 | 10 | **0.923** | **0.944** | - | - | - | **0.985** | **0.816** | **0.725** | - | **0.921** | - |
 | PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | 0.747 | 0.618 | 0.901 | 0.850 | 0.899 |
 | PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | 0.747 | 0.634 | 0.904 | 0.860 | 0.902 |
@@ -620,6 +621,12 @@ XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/
   choice gave +38 (unseen +26); on test the gain is close to the tree's own hybrid (0.9229 vs 0.9227). Ungated
   (all rows, w 0.25) test 0.920 with seen 1 -13 rows. `10-18-51` vs `12-21-30`: same code and config, new server
   (fresh CUDA encoding).
+- F1 tree (2026-10-09, run `outputs/runs/2026-10-09_14-07-17_bc5cdr` + `bc5cdr_test` eval-only, commit `eeeb668`;
+  F1a abbreviation expansion, F1b/F1c result-neutral; test run once): acc@1 0.9225 vs `10-18-51` 0.9177 (+21 rows;
+  unseen +13, seen >1 +9), hybrid 0.925, level with the reranker row without a reranker. Group sizes shift with the
+  reader (seen 1 n=3284, unseen n=941). On dev this tree was -16 rows vs `10-18-51` with the same reader (0.9001 vs
+  0.9038): same-code retrains move ~10-20 rows on dev and test, so the +21 is within retrain noise, not an F1a effect.
+  This tree is the BC5CDR-disease system for the cross-dataset comparison (plan G).
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 
