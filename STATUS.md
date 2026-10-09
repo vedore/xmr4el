@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F1a code done; user runs the F1a dev eval on `10-18-51`).
+Last updated 2026-10-09 (F1a kept (+8 dev rows), F1b done; F1c next).
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -31,6 +31,13 @@ rows: negligible): `python3 scripts/evaluate.py -xmodel_path outputs/saved_trees
 tee outputs/logs/f1a_dev_eval.log`. Compare with R1 w 0: acc@1 0.9020 / MRR 0.9319 / unseen 0.6737 / seen 1 0.9787.
 Keep for F3 if acc@1 gains >= ~3 rows (0.0007) without seen 1 loss; else revert the reader change. Then F1b, F1c.
 Note: the train-side breakdown groups shift slightly (26 train rows get new text).
+**F1a result (2026-10-09, `f1a_dev_eval.log`, tree `10-18-51`, eval-only): kept.** acc@1 0.9038 vs 0.9020 (+8 rows) /
+MRR 0.9341 vs 0.9319 / unseen 0.6821 vs 0.6737 / seen 1 0.9787 unchanged / hybrid 0.9066 vs 0.9048 / R@10 0.9744.
+The gain is all on unseen strings, as intended. Real effect lands with the F3 retrain (train text changes too).
+**F1b (2026-10-09, code done, pytest 43):** `label_max_cos` candidate mode multiplies each query chunk only with the
+B rows of the labels its pairs name (`scoring.label_rows`); exhaustive mode unchanged. Test: candidate == full at
+random rows incl. sparse chunks, `label_rows` picks exactly the candidate labels' rows. Speed gain depends on the
+candidate overlap within a 256-query chunk (unmeasured); check `Knn re-scoring completed ... elapsed` in the F3 log.
 
 **NEXT: F1 (Claude, code only, no user runs).** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design

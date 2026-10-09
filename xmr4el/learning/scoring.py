@@ -8,7 +8,8 @@ def label_max_cos(Q, B, b_labels, n_labels, chunk=256, rows=None, cols=None):
     links mentions); -1 for labels with no B row.
 
     With `rows`, `cols` (query and label index per pair, `rows` ascending, e.g. CSR order): only those pairs, as a
-    1-D array, so the (n_Q, n_labels) matrix is never built."""
+    1-D array, so the (n_Q, n_labels) matrix is never built; each Q chunk is multiplied only with the B rows of
+    the labels its pairs name (`label_rows`)."""
     order = np.argsort(b_labels, kind="stable")
     present, starts = np.unique(b_labels[order], return_index=True)
     B = normalize(np.asarray(B[order].toarray() if hasattr(B, "toarray") else B[order], dtype=np.float32))
@@ -24,11 +25,24 @@ def label_max_cos(Q, B, b_labels, n_labels, chunk=256, rows=None, cols=None):
             continue
         q = Q[s:s + chunk]
         q = normalize(np.asarray(q.toarray() if hasattr(q, "toarray") else q, dtype=np.float32))
-        m = np.maximum.reduceat(q @ B.T, starts, axis=1)  # (len(q), len(present))
         if rows is None:
-            out[s:s + len(q), present] = m
+            out[s:s + len(q), present] = np.maximum.reduceat(q @ B.T, starts, axis=1)
         else:
             lo, hi = bounds[i], bounds[i + 1]
             c = col_of[cols[lo:hi]]
-            out[lo:hi] = np.where(c >= 0, m[rows[lo:hi] - s, np.maximum(c, 0)], -1.0)
+            used = np.unique(c[c >= 0])  # indices into `present`
+            if not len(used):
+                continue
+            idx, local = label_rows(starts, len(B), used)
+            m = np.maximum.reduceat(q @ B[idx].T, local, axis=1)  # (len(q), len(used))
+            out[lo:hi] = np.where(c >= 0, m[rows[lo:hi] - s, np.searchsorted(used, np.maximum(c, 0))], -1.0)
     return out
+
+
+def label_rows(starts, n_rows, groups):
+    """Row indices of the contiguous groups `groups` (ascending) of a matrix whose group g starts at row
+    `starts[g]`, and each selected group's start inside that selection (`np.maximum.reduceat` offsets)."""
+    ends = np.append(starts[1:], n_rows)[groups]
+    lengths = ends - starts[groups]
+    local = np.concatenate(([0], np.cumsum(lengths)[:-1]))
+    return np.repeat(starts[groups] - local, lengths) + np.arange(lengths.sum()), local
