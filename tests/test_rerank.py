@@ -1,9 +1,11 @@
 """Cross-encoder reranker: label texts follow the Y columns, a tiny BERT learns a toy task, save/load round trip."""
 import numpy as np
 import pytest
+import torch
 from transformers import BertConfig, BertForSequenceClassification, BertTokenizer
 
 from xmr4el.data.readers import Preprocessor
+from xmr4el.eval import gold_rank
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from scipy.sparse import csr_matrix
 from xmr4el.rerank import CrossEncoderReranker, label_texts, rerank_order, top_k
@@ -12,11 +14,15 @@ WORDS = ["alpha", "beta", "gamma", "delta", "ctx", "one", "two"]
 
 
 def tiny_reranker():
+    torch.manual_seed(1)  # ponytail: toy fit plateaus (2 tied labels) for ~40% of inits; seed 1 on CPU converges
     tok = BertTokenizer(vocab={w: i for i, w in enumerate(["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", ";", *WORDS])})
     cfg = BertConfig(vocab_size=tok.vocab_size, hidden_size=32, num_hidden_layers=2, num_attention_heads=2,
                      intermediate_size=64, max_position_embeddings=64, num_labels=1,
                      hidden_dropout_prob=0.0, attention_probs_dropout_prob=0.0)
-    return CrossEncoderReranker(BertForSequenceClassification(cfg), tok, {"tree": "t1", "k": 4}, max_length=32)
+    rr = CrossEncoderReranker(BertForSequenceClassification(cfg), tok, {"tree": "t1", "k": 4}, max_length=32)
+    rr.device = torch.device("cpu")
+    rr.model.to(rr.device)
+    return rr
 
 
 def test_label_texts_follow_y_columns():
@@ -62,3 +68,20 @@ def test_fit_score_save_load(tmp_path):
     np.testing.assert_allclose(back.score(queries[:3], labels[:3]), rr.score(queries[:3], labels[:3]), atol=1e-5)
     with pytest.raises(ValueError, match="trained on tree t1"):
         CrossEncoderReranker.load(str(tmp_path / "rr"), tree="t2")
+
+
+# D (third audit, 2026-10-09)
+
+def test_tied_scores_rank_like_rerank_w0():
+    s = csr_matrix(np.full((1, 20), 0.5))  # > 16 ties: numpy's default argsort is not stable there
+    idx, val = top_k(s, 20)
+    order = idx[0][rerank_order(val[0], np.zeros(20), 0)]
+    assert all(gold_rank(s.getrow(0), g) == int(np.flatnonzero(order == g)[0]) + 1 for g in range(20))
+
+
+def test_fit_rejects_empty_and_k1():
+    r = tiny_reranker()
+    with pytest.raises(ValueError):
+        r.fit([], [], ["alpha"])
+    with pytest.raises(ValueError):
+        r.fit(["alpha"], [[0]], ["alpha"])

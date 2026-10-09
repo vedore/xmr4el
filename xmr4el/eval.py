@@ -34,8 +34,8 @@ def filter_labels_and_inputs(input_texts, gold_labels, allowed_labels):
     return filtered_labels, filtered_texts
 
 def gold_rank(row, gold_idx):
-    """1-based rank of gold_idx in one CSR score row, 0 if absent."""
-    ranked = row.indices[np.argsort(-row.data)]
+    """1-based rank of gold_idx in one CSR score row, 0 if absent. Ties keep CSR order (= rerank.top_k)."""
+    ranked = row.indices[np.argsort(-row.data, kind="stable")]
     pos = np.flatnonzero(ranked == gold_idx)
     return int(pos[0]) + 1 if pos.size else 0
 
@@ -50,16 +50,21 @@ def ranking_metrics(ranks, ks=(5, 10, 20)):
     return metrics
 
 
+def train_string_labels(test_texts, train_pairs):
+    """Per test text: Counter of train labels for its exact mention string (empty = unseen string)."""
+    counts = defaultdict(Counter)
+    for t, y in train_pairs:
+        counts[mention_key(t)][y] += 1
+    return [counts.get(mention_key(t), Counter()) for t in test_texts]
+
+
 def string_breakdown(test_texts, gold, tree_top1, train_pairs):
     """acc@1 of the tree and of the mention dictionary, split by whether the exact mention string
     occurs in train (and with how many labels). Returns {group: (n, tree, dict, either)} plus the
     hybrid (dictionary if the string was seen, tree otherwise)."""
-    counts = defaultdict(Counter)
-    for t, y in train_pairs:
-        counts[mention_key(t)][y] += 1
-    m = [mention_key(t) for t in test_texts]
-    n_lab = np.array([len(counts[s]) if s in counts else 0 for s in m])
-    dict_ok = np.array([s in counts and counts[s].most_common(1)[0][0] == g for s, g in zip(m, gold)])
+    seen = train_string_labels(test_texts, train_pairs)
+    n_lab = np.array([len(c) for c in seen])
+    dict_ok = np.array([bool(c) and c.most_common(1)[0][0] == g for c, g in zip(seen, gold)])
     tree_ok = np.array([p == g for p, g in zip(tree_top1, gold)])
     groups = {"all": n_lab >= 0, "seen, 1 label": n_lab == 1,
               "seen, >1 label": n_lab > 1, "unseen string": n_lab == 0}

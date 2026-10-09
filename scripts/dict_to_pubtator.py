@@ -7,6 +7,7 @@ Only MESH ids are kept (prefix stripped, matching BC5CDR); OMIM-only concepts ar
 """
 import argparse
 import gzip
+import os
 
 
 def convert(lines, entity_type):
@@ -36,6 +37,8 @@ def main():
     parser.add_argument("-out", required=True)
     parser.add_argument("-type", required=True, help="entity type column, e.g. Disease or Chemical")
     args = parser.parse_args()
+    if os.path.exists(args.out) and os.path.samefile(args.out, args.ctd_path):
+        parser.error(f"output {args.out} is the input file")
     with gzip.open(args.ctd_path, "rt", encoding="utf-8") as fin, open(args.out, "w", encoding="utf-8") as fout:
         fout.writelines(convert(fin, args.type))
 

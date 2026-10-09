@@ -38,6 +38,8 @@ def main():
     parser.add_argument("-init", type=str, default=MODEL_NAMES["sapbert"])
     parser.add_argument("-verbose", action="store_true")
     args = parser.parse_args()
+    if args.k < 2 or args.epochs < 1 or args.rows_per_batch < 1:
+        parser.error("need -k >= 2 (K = 1 gives zero loss), -epochs >= 1, -rows_per_batch >= 1")
     set_verbosity(2 if args.verbose else 1)
     start = time.perf_counter()
 
@@ -57,6 +59,8 @@ def main():
     gold_in_top = np.mean([label_to_idx[g] in top for g, top in zip(golds, idx)])
     print(f"rows {len(kept)}/{len(data['labels'])} (gold in vocabulary, >= K-1 negatives); "
           f"gold in tree top {args.k}: {gold_in_top:.4f}", flush=True)
+    if not kept:
+        raise SystemExit(f"no row has >= {args.k - 1} tree negatives: lower -k")
 
     reranker = CrossEncoderReranker.from_pretrained(
         args.init, {"tree": tree, "k": args.k, "train_path": args.train_path, "rows": len(kept),

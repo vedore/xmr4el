@@ -6,14 +6,53 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (N1-N6, U3, B, B1, C1, C2+C3 done; R code done; R1 + R2 running remotely).
+Last updated 2026-10-09 (R1 + R2 done: R fails the pass rule as is; D1 + D2 done; R2b (scoped rerank) code done).
 
-**IN FLIGHT (2026-10-09): waiting for logs.** User launched on a remote server, in the persistent Docker container
-`xmr4el-shell`, at commit `b92e36c` (origin/repeat): new tree -> R1 reranker -> R2 dev eval. Expected logs (user pastes):
-`outputs/logs/r1_tree.log`, `r1_train.log`, `r1_dev_eval.log`; checks below. Local code edits are allowed meanwhile
-(the run uses the server checkout), but the server must not `git pull` until the run ends, and any change to tree,
-features, search or rerank code invalidates comparing later runs with this one: note it here when made.
-When the logs arrive: judge them against `b92e36c`'s behaviour, not the edited code.
+**NEXT: user runs R2b (eval only, same tree + reranker) on the server after `git pull`; log `r2b_dev_eval.log`.**
+`evaluate.py` with `-train_path` now prints each w for 3 scopes: `all rows` (= R2), `unseen` (rerank only rows whose
+mention string is not in train), `not seen 1` (unseen + seen with >1 label); other rows keep the tree's order.
+"Seen" = exact `mention_key` in `-train_path` (train_plus_ctd, as R2's groups). w grid adds 0.1, 0.25 (option b).
+Check: each scope's w 0 row = R2 w 0; `unseen` rows: seen groups = w 0 values, unseen group = `all rows` value.
+Pass rule vs w 0 (0.9020 / unseen 0.6737 / seen 1 floor 0.9767): pick scope + w on dev, then R3 test once with
+that w (read the chosen scope's row). Synthetic e2e (tfidf tree, random tiny BERT) satisfied the check above.
+
+**R1 + R2 result (2026-10-09, remote CUDA, commit `b92e36c`, tree `xmodel_2026-10-09_10-18-51`, reranker
+`..._10-37-32`; logs `r1_tree.log`, `r1_train.log`, `r1_dev_eval.log`).**
+- Tree: cache miss (new server), 128 leaves of 91-92 labels, run 326 s. Tree code = C2's (`1789a29..b92e36c` touches
+  only rerank/eval files).
+- w 0 row: acc@1 0.9020 / MRR 0.9319 / unseen 0.6737 / seen 1 0.9787 / hybrid 0.9048 vs C2 `17-28-02` 0.9045 / 0.9335
+  / 0.6821 / 0.9783: -11 rows (unseen -8), more than C2's +2/-3; cause = fresh CUDA encoding + k-means ties (same
+  code). This tree's w 0 row is R's baseline (as planned).
+- R1: 4236/4236 rows kept, gold in tree top 10 = 1.0000 on train (in-sample kNN puts gold first); loss epoch 1 2.27 ->
+  0.45, epoch 2 0.03 (memorizes the train lists); 1103 s at ~79 pairs/s.
+- Sweep (acc@1 all / seen 1 / seen >1 / unseen, MRR): w 0.5 0.9055 / 0.9739 / 0.8538 / 0.6915, MRR 0.9347;
+  w 1 0.8959; w 2 0.8880; inf 0.8762 / 0.9564 / 0.8538 / 0.6170.
+- Pass rule vs w 0: best w 0.5 gains all +15 rows, unseen +17, seen >1 +13 (= dict 0.8538 for every w > 0), but
+  seen 1 -15 rows (0.9739 < floor 0.9767): **fail, no R3**. The reranker alone breaks exact-string matches
+  (seen 1 0.9564 at inf).
+- Follow-ups (user picks; first two are eval-only on the same reranker):
+  (a) [user 2026-10-09: do it -> R2b] apply the reranker only to rows whose mention string is unseen in train (seen strings keep the tree; uses
+      train strings like `hybrid`). Arithmetic from the w 0.5 groups: all ~0.9090 (+30 rows vs w 0), seen 1 unchanged;
+      or also on seen >1 (it gives the dict's 0.8538 there).
+  (b) finer w (0.1, 0.25) on all rows: seen 1 loss may shrink faster than the unseen gain.
+  (c) retrain: 1 epoch, or out-of-sample negatives (tree top K on held-out folds), against the memorization.
+
+**D. Third audit (2026-10-09; all 9 findings checked against code, all real). D1 + D2 done (pytest 42, selfchecks).**
+- D1 (no result change): `dict_to_pubtator.py` refuses `-out` == `-ctd_path` (`os.path.samefile`, as split CLI);
+  `pecos_compare.py export` refuses a non-empty `-out` (before loading the tree); `train_reranker.py` requires
+  `-k >= 2`, `-epochs`/`-rows_per_batch >= 1` and exits before model load when 0 rows are kept; `CrossEncoderReranker.fit`
+  raises on empty / misaligned / K < 2 input; `beam_sweep.py` exits non-zero listing failed beams;
+  `JointOvRLogistic.fit` logs a warning when `n_iter_ >= max_iter` (fit unchanged).
+- D2: `gold_rank` argsort `kind="stable"` (= `top_k`): base ranks on tied scores now equal the reranker w 0 ranks.
+  Exact float ties are rare; recorded rows are expected unchanged (not re-run).
+- Regressions: `tests/test_audit_regressions.py` (converter alias, non-empty export dir, failing sweep child,
+  max_iter warning), `tests/test_rerank.py` (20-way tie: `gold_rank` == w 0 rank; fit rejects empty / K 1).
+- Also fixed: `test_fit_score_save_load` was flaky (unseeded init on MPS; the toy plateaus at 2 tied labels for ~40%
+  of inits): test model now on CPU with seed 1 (deterministic).
+- Deferred: #2 dense matcher (already deferred, C); #8 candidate-only kNN products (BC5CDR train rows are small;
+  do when a large-corpus run needs it); #9 drop `fused_scores`/`label_embeddings` from saved nodes (tree-format
+  change -> retrain; bundle with the next planned retrain); pyproject `joblib` line and `docs/full_cuda_comparison.md`
+  stale claims (touch with those files). Pickle load = trusted-provenance boundary, no change.
 
 **R code done (committed; pytest 36 + selfchecks).** `xmr4el/rerank.py`: `label_texts` (label j = Y column j:
 top 5 distinct `mention_key` strings by count, ties first-seen -> BC5CDR strings before CTD names),

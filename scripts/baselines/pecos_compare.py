@@ -21,7 +21,8 @@ from xmr4el.xmodel import XModel
 
 
 def export(args):
-
+    if os.path.isdir(args.out) and os.listdir(args.out):
+        raise SystemExit(f"{args.out} is not empty: export into a fresh directory (old pred_*.npz would be scored)")
     xm = XModel.load(args.xmodel_path)
     labels = list(xm.initial_labels)
     l2i = {lab: i for i, lab in enumerate(labels)}

@@ -14,6 +14,7 @@ def log(msg, color="cyan"):
     print(f"{colors.get(color,'')}{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {msg}{colors['reset']}")
 
 def run_tests(model_path, test_path, beam_start=5, beam_end=25, topk=10):
+    failed = []
     for beam in range(beam_start, beam_end + 1, 5):
         log(f"Running test with beam_size={beam}", "yellow")
         cmd = [
@@ -29,6 +30,8 @@ def run_tests(model_path, test_path, beam_start=5, beam_end=25, topk=10):
             log(f"Completed beam_size={beam}", "green")
         except subprocess.CalledProcessError:
             log(f"Test failed for beam_size={beam}", "red")
+            failed.append(beam)
+    return failed
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
@@ -41,4 +44,6 @@ if __name__ == "__main__":
     beam_end = int(sys.argv[4])
     topk = int(sys.argv[5])
 
-    run_tests(model_path, test_path, beam_start, beam_end, topk)
+    failed = run_tests(model_path, test_path, beam_start, beam_end, topk)
+    if failed:
+        sys.exit(f"failed beam sizes: {failed}")

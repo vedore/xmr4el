@@ -1,6 +1,8 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
 widths, persistence (fused_scores, stale layers, same-second saves), reader edge cases; second audit (C1)."""
 from copy import deepcopy
+import gzip
+import logging
 import json
 import pickle
 from pathlib import Path
@@ -13,6 +15,7 @@ import pytest
 
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
+from xmr4el.learning.classifiers import JointOvRLogistic
 from xmr4el.learning.scoring import label_max_cos
 from xmr4el.xmodel import XModel
 
@@ -144,3 +147,36 @@ def test_xmodel_json(xm, tmp_path):
     assert view["initial_labels"] == {"type": "list", "len": 8, "first": "L0"}
     assert view["Z"]["shape"] == list(xm.Z.shape) and view["Y"]["nnz"] == xm.Y.nnz
     assert view["predict_config"] == xm.predict_config
+
+
+# D (third audit, 2026-10-09)
+
+def test_dict_to_pubtator_refuses_own_input(tmp_path):
+    ctd = tmp_path / "ctd.tsv.gz"
+    with gzip.open(ctd, "wt") as f:
+        f.write("# header\nFever\tMESH:D005334\n")
+    before = ctd.read_bytes()
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/dict_to_pubtator.py"), "-ctd_path", str(ctd),
+                        "-out", str(ctd), "-type", "Disease"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "is the input file" in r.stderr and ctd.read_bytes() == before
+
+
+def test_pecos_export_refuses_nonempty_dir(tmp_path):
+    (tmp_path / "pred_old.npz").write_bytes(b"")
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/baselines/pecos_compare.py"), "export",
+                        "-xmodel_path", "unused", "-out", str(tmp_path)], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "not empty" in r.stderr
+
+
+def test_beam_sweep_fails_when_a_child_fails(tmp_path):
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/experiments/beam_sweep.py"), str(tmp_path / "none"),
+                        str(tmp_path / "none"), "5", "5", "0"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "failed beam sizes: [5]" in r.stderr
+
+
+def test_matcher_warns_at_max_iter(caplog):
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(40, 5)), rng.integers(0, 3, 40)
+    with caplog.at_level(logging.WARNING, logger="xmr4el.learning.classifiers"):
+        JointOvRLogistic(tol=1e-8, max_iter=1).fit(X, y)
+    assert "max_iter=1" in caplog.text

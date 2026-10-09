@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import pickle
 import numpy as np
 from abc import ABCMeta
@@ -10,6 +11,7 @@ from xmr4el import torch_device
 
 
 classifier_dict = {}
+logger = logging.getLogger(__name__)
 
 
 
@@ -174,6 +176,9 @@ class JointOvRLogistic:
         with torch.no_grad():
             opt.step(closure)
         self.W_, self.n_iter_ = W.cpu().numpy(), opt.state[W]["n_iter"]
+        if self.n_iter_ >= self.max_iter:
+            logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, L=%d)",
+                           self.max_iter, self.tol, n, L)
         return self
 
     def decision_function(self, X):

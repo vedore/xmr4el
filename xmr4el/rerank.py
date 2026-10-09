@@ -72,8 +72,11 @@ class CrossEncoderReranker:
 
     def fit(self, queries, candidates, label_text, epochs=2, rows_per_batch=4, lr=2e-5, seed=0):
         """queries[i] with candidates[i] = K label indices, gold first; listwise softmax CE over the K."""
+        if not queries or len(queries) != len(candidates):
+            raise ValueError(f"need >= 1 row and one candidate list per query ({len(queries)} vs {len(candidates)})")
         k = len(candidates[0])
-        assert all(len(c) == k for c in candidates), "every row needs exactly K candidates"
+        if k < 2 or any(len(c) != k for c in candidates):
+            raise ValueError("every row needs the same K >= 2 candidates (K = 1 gives zero loss)")
         rng = np.random.default_rng(seed)
         torch.manual_seed(seed)
         opt = torch.optim.AdamW(self.model.parameters(), lr=lr)

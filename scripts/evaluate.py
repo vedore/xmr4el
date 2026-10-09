@@ -12,7 +12,8 @@ if "-verbose" not in sys.argv:
 import numpy as np
 
 from xmr4el.data.readers import Preprocessor
-from xmr4el.eval import _selfcheck, filter_labels_and_inputs, gold_rank, ranking_metrics, string_breakdown
+from xmr4el.eval import (_selfcheck, filter_labels_and_inputs, gold_rank, ranking_metrics, string_breakdown,
+                         train_string_labels)
 from xmr4el.rerank import CrossEncoderReranker, label_texts, rerank_order, top_k
 from xmr4el.xmodel import XModel
 from xmr4el import set_verbosity
@@ -111,7 +112,9 @@ def main():
 
 def rerank(args, xm, score_csr, input_texts, golden_labels, ranks, train_pairs):
     """Reorder each row's top K by log(tree score) + w * reranker logit; one acc@1 / MRR row per w
-    (by mention-string group with -train_path). Logits are computed once for all w."""
+    (by mention-string group with -train_path). Logits are computed once for all w. With -train_path, also per
+    scope: rerank only rows whose mention string is unseen in train, or not seen with exactly 1 label; other rows
+    keep the tree's order."""
     tree = os.path.basename(os.path.normpath(args.xmodel_path))
     reranker = CrossEncoderReranker.load(args.reranker_path, tree=tree)
     k = args.rerank_k or reranker.meta["k"]
@@ -126,20 +129,25 @@ def rerank(args, xm, score_csr, input_texts, golden_labels, ranks, train_pairs):
     print(f"\nreranker {os.path.basename(os.path.normpath(args.reranker_path))}: top {k}, "
           f"{sum(map(len, idx))} pairs, {time.time() - start:.0f} s")
     groups = ["all", "seen, 1 label", "seen, >1 label", "unseen string"] if train_pairs else ["all"]
-    print(f"  {'w':>5s} {'MRR':>7s} " + " ".join(f"{g:>14s}" for g in groups) + "   (acc@1)")
-    for w in args.rerank_w:
-        orders = [rerank_order(v, lg, w) for v, lg in zip(vals, logits)]
-        # gold inside the top K moves with the reorder; below K (or not retrieved) the tree rank stands
-        new_ranks = np.array([int(np.flatnonzero(o == p[0])[0]) + 1 if p.size else r
-                              for o, p, r in zip(orders, gold_pos, ranks)])
-        mrr = ranking_metrics(new_ranks)["MRR"]
-        if train_pairs:
-            top1 = [xm.initial_labels[top[o[0]]] if top.size else None for top, o in zip(idx, orders)]
-            acc = string_breakdown(input_texts, golden_labels, top1, train_pairs)
-            cells = [acc[g][1] for g in groups]
-        else:
-            cells = [np.mean(new_ranks == 1)]
-        print(f"  {w:5g} {mrr:7.4f} " + " ".join(f"{c:14.4f}" for c in cells))
+    scopes = {"all rows": np.ones(len(idx), dtype=bool)}
+    if train_pairs:
+        n_lab = np.array([len(c) for c in train_string_labels(input_texts, train_pairs)])
+        scopes.update({"unseen": n_lab == 0, "not seen 1": n_lab != 1})
+    print(f"  {'scope':>10s} {'w':>5s} {'MRR':>7s} " + " ".join(f"{g:>14s}" for g in groups) + "   (acc@1)")
+    for scope, on in scopes.items():
+        for w in args.rerank_w:
+            orders = [rerank_order(v, lg, w) if a else np.arange(len(v)) for v, lg, a in zip(vals, logits, on)]
+            # gold inside the top K moves with the reorder; below K (or not retrieved) the tree rank stands
+            new_ranks = np.array([int(np.flatnonzero(o == p[0])[0]) + 1 if p.size else r
+                                  for o, p, r in zip(orders, gold_pos, ranks)])
+            mrr = ranking_metrics(new_ranks)["MRR"]
+            if train_pairs:
+                top1 = [xm.initial_labels[top[o[0]]] if top.size else None for top, o in zip(idx, orders)]
+                acc = string_breakdown(input_texts, golden_labels, top1, train_pairs)
+                cells = [acc[g][1] for g in groups]
+            else:
+                cells = [np.mean(new_ranks == 1)]
+            print(f"  {scope:>10s} {w:5g} {mrr:7.4f} " + " ".join(f"{c:14.4f}" for c in cells))
 
 
 if __name__ == "__main__":
