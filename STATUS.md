@@ -6,9 +6,44 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (R done; plan E written: E1 next).
+Last updated 2026-10-09 (R/E1/E2 done, reranker dropped; plan F decided: F1 next, new session).
 
-**NEXT: user decides the order (E3 / run wrapper / E4-E5, see "Open" in plan E).** Reranker dropped.
+**NEXT: F1 (Claude, code only, no user runs).** Plan F below (user 2026-10-09). Local commits up to this one are
+unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
+report: leave it untracked and unedited unless asked.
+
+**F. Plan (decided 2026-10-09; order F1 -> F2 -> F3 -> F4). Main system = tree + knn (reranker dropped).**
+- F1 = E3, code only (tree-changing changes batched into one retrain, F3). Pytest + selfchecks after each part.
+  - F1a abbreviations, analysis first: read `outputs/logs/u3_errors.tsv` (tree `13-16-09`, dev; column `abbrev`,
+    305 unseen errors, ~13% abbreviation: 30 flagged, plus unexpanded SFs e.g. oab, edds, ptld) and
+    `Preprocessor.abbreviations` / `best_long_form` (`xmr4el/data/readers.py`: only "long form (SF)" in the same
+    doc, SF 2-10 chars, <= 2 words). Classify why each abbreviation error is missed (no definition in doc, pattern
+    not matched, long form rejected, expansion present but wrong label). Bring the user a fix plan with
+    expected row counts; code only after approval. Synthetic reader tests for each new case.
+  - F1b #8 candidate-only kNN: `label_max_cos` candidate mode (`xmr4el/learning/scoring.py`) multiplies each query
+    chunk only with the training rows of that chunk's candidate labels (exhaustive mode kept for diagnostics).
+    Result identical: extend `test_candidate_knn_equals_full_knn` (random rows) + a check that fewer rows are
+    multiplied.
+  - F1c #9 smaller saved trees: `MLModel.save` (`xmr4el/hierarchy/node.py`) no longer writes `fused_scores` /
+    `label_embeddings`; `load` stops requiring `fused_scores` for internal nodes; `prepare_layer` still gets them
+    during training. Grep every reader first (diagnostics use `xm.Z`). Update persistence tests; old trees need
+    a retrain (no compat code).
+- F2 = minimal run wrapper (phase-1 core of `docs/experiment_management.md` only; stdlib, no Pydantic/scheduler/TUI).
+  `scripts/run_experiment.py -spec configs/experiments/<name>.json [-xmodel_path <tree>]`:
+  spec = {name, model_config, train_path, evals: [{split, test_path, train_path (breakdown), beam_size?, knn_beta?}]}.
+  Creates `outputs/runs/<timestamp>_<name>/` (refuses an existing dir): resolved spec + model config copy, git
+  commit + dirty flag (+ `git diff` saved if dirty), log file, then train (as `scripts/train.py`; `XModel.save`
+  returns the saved path; tree path recorded) and each eval -> `metrics_<split>.json` (acc@1, MRR, R@k, @cand,
+  rows used/total, groups, hybrid, search settings, timings). With `-xmodel_path`: eval only. Needs evaluate.py's
+  metric code callable as a function returning a dict (evaluate.py prints from it; output unchanged).
+  Test: synthetic tfidf spec end to end in tmp (run dir files, metrics keys, no overwrite).
+  Acceptance (user run): eval-only on `10-18-51` dev reproduces acc@1 0.9020 / MRR 0.9319 / unseen 0.6737.
+- F3 = E4 via the wrapper: BC5CDR spec (train_plus_ctd, `configs/xmr4el_bc5cdr_config.json`, dev + train_plus_ctd
+  breakdown). Compare dev with `10-18-51` (0.9020 / unseen 0.6737; F1a's effect, F1b/F1c neutral). Then test once
+  -> `docs/results.md` row. Delete `10-18-51` only after the user agrees.
+- F4 = E5 via the wrapper: MedMentions st21pv (base config), dev; beam / knn beta chosen on dev (base config has
+  beam 2, beta 0; BC5CDR's beta 10 was chosen on its dev); PECOS on the exported features
+  (`scripts/baselines/pecos_compare.py export` -> `pecos_run.py` -> `score`); test once each -> results.md.
 
 **E2 result (2026-10-09, `e2_dev_eval.log`, reranker `..._13-27-32`, 5 folds, 2 epochs, 2720 s = +1617 s for the
 fold trees): rejected.** `not seen 1` w 0.25 0.9080 vs R2b 0.9108; unseen 0.6967 vs 0.7009; seen >1 0.8113 vs
@@ -58,10 +93,7 @@ Test is run once per final system only (R3 = 0.9229, level with the tree's hybri
   trees do not load), dev eval, PECOS on the exported features, test once.
 - Reranker dropped from the system (user 2026-10-09): +0.5 pt on test (= the tree's hybrid) for ~18 min training and
   ~3 min per 4.3k rows. Reported as a rejected experiment; code (`rerank.py`, `train_reranker.py`, eval scopes) kept.
-- Open (user 2026-10-09): order of E3-E5 vs `docs/experiment_management.md` (untracked design report). Claude's
-  view: E3 code first (no runs, no overlap), then a minimal run wrapper (one experiment JSON -> train + eval ->
-  run dir with resolved config, commit, metrics.json; stdlib only), then E4/E5 through it; the report's phases 2-5
-  (scheduler, lifecycle, parallel, TUI, Pydantic) only when a real grid needs them.
+- E3-E5 superseded by plan F (above).
 
 **R3 result (2026-10-09, `r3_test_eval.log`, test 4399/4410 rows).** Tree w 0: acc@1 0.9177 / MRR 0.9408 / seen 1
 0.9851 / seen >1 0.7184 / unseen 0.7186 / hybrid 0.9227. `not seen 1` w 0.25: **0.9229** / MRR 0.9443 / seen >1 0.8161
