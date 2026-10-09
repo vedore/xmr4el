@@ -18,11 +18,20 @@ Test is run once per final system only (R3 = 0.9229, level with the tree's hybri
   `train_reranker.py -xmodel_path <10-18-51> -train_path datasets/BC5CDR/disease/train.pubtator -epochs 1`, then
   dev `evaluate.py` with `-train_path train_plus_ctd -reranker_path <new> -rerank_w 0 0.1 0.25 0.5 1 inf`.
   Compare per scope with R2b; key number = unseen at the chosen w.
-- E2 (code: `train_reranker.py -folds N -tree_train_path`): option c2, out-of-fold candidates. Split BC5CDR train
-  docs (PMIDs) into N folds (5); per fold train a tree on train_plus_ctd minus that fold's docs (config from the
-  saved tree; SapBERT cache hits), candidates for the fold's rows from it; gold missing from the fold top K -> row
-  dropped (count printed). The reranker still records `10-18-51` (eval tree). Cost ~5 extra tree trainings.
-  Synthetic test: no row's candidates come from a tree that saw its doc. User: train + dev eval as E1.
+- E2 (code done 2026-10-09, pytest 43): option c2, out-of-fold candidates. `train_reranker.py -folds N
+  -tree_train_path <train_plus_ctd>` -> `rerank.out_of_fold_top_k`: train PMIDs split at random (seed 0) into N
+  folds; per fold a tree with the saved tree's config (`XModel.__init__` params read off the loaded tree) on
+  tree_train_path minus the fold's docs (CTD pseudo-docs stay in every fold tree; all 500 BC5CDR train PMIDs are in
+  train_plus_ctd), fold rows ranked by it, labels mapped to the saved tree's indices by name. Gold missing from the
+  fold top K: row kept (gold is always inserted at position 0, negatives = top K-1); the printed "gold in tree top K"
+  is now the out-of-fold rate. Reader rows carry `docs` (PMID). Fold trees are not saved. Test
+  `test_out_of_fold_top_k_never_uses_own_document` (doc-unique labels never ranked out of fold, ranked in sample).
+  Single factor vs R: 2 epochs. User (after E1 finishes, `git pull` first): command in the chat / below.
+  `python3 scripts/train_reranker.py -xmodel_path outputs/saved_trees/xmodel_2026-10-09_10-18-51 -train_path
+  datasets/BC5CDR/disease/train.pubtator -folds 5 -tree_train_path datasets/BC5CDR/disease/train_plus_ctd.pubtator
+  2>&1 | tee outputs/logs/e2_train.log` then dev eval as E1 (log `e2_dev_eval.log`). Cost ~5 x 4 min fold trees
+  (SapBERT cache hits) + 18 min reranker + 4 min eval. Check: 5 "Fold f/5" lines, held-out rows ~1/5 of the BC5CDR
+  rows each; out-of-fold gold-in-top-10 well below R1's in-sample 1.0000 (dev R@10 0.9724 is the reference).
   Pick the best of {R, c1, c2} on dev; test once only if it beats R2b on dev.
 - E3 (code, no runs; tree-changing changes batched): #8 candidate-only kNN products (`scoring.py`; result
   identical: test = full kNN at random rows); #9 no `fused_scores`/`label_embeddings` in saved nodes (format change);

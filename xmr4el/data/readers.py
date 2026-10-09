@@ -127,6 +127,7 @@ class Preprocessor:
                         `window`, the words around the mention (`context_window`)
             labels[i] = CUI
             spans[i] = (start, end) of the mention in title + " " + abstract (PubTator offsets)
+            docs[i] = document id (PMID) of the row
         `abbrev` "append" / "replace": a mention that is a short form defined in its document
         (`abbreviations`) becomes "SF long form" / "long form"; None keeps it.
         BC5CDR: "-1" ids are skipped; composite "D1|D2" mentions are split via column 7.
@@ -137,8 +138,9 @@ class Preprocessor:
         corpus: List[str] = []
         labels: List[str] = []
         spans: List[Tuple[int, int]] = []  # mention offsets into the context after "[SEP] "
+        docs: List[str] = []
 
-        title, abstract, abbrs = "", "", None
+        title, abstract, abbrs, doc_id = "", "", None, ""
 
         with open(pubtator_filepath, "r", encoding="utf-8") as f:
             for raw in f:
@@ -151,7 +153,7 @@ class Preprocessor:
                 if "|t|" in line:
                     parts = raw.split("|", 2)
                     if len(parts) == 3:
-                        title = parts[2]
+                        doc_id, title = parts[0], parts[2]
                         abstract = ""
                         abbrs = None
 
@@ -188,8 +190,9 @@ class Preprocessor:
                             corpus.append(f"{mention_text} [SEP] {context}")
                             labels.append(cui)
                             spans.append(span)
+                            docs.append(doc_id)
 
-        return {"corpus": corpus, "labels": labels, "spans": spans}
+        return {"corpus": corpus, "labels": labels, "spans": spans, "docs": docs}
 
     @staticmethod
     def organize_pubtator_output(pub_output: Dict) -> Tuple[List[List[str]], List[str]]:

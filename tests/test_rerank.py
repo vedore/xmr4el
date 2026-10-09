@@ -8,7 +8,8 @@ from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import gold_rank
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from scipy.sparse import csr_matrix
-from xmr4el.rerank import CrossEncoderReranker, label_texts, rerank_order, top_k
+from xmr4el.rerank import CrossEncoderReranker, label_texts, out_of_fold_top_k, rerank_order, top_k
+from xmr4el.xmodel import XModel
 
 WORDS = ["alpha", "beta", "gamma", "delta", "ctx", "one", "two"]
 
@@ -85,3 +86,29 @@ def test_fit_rejects_empty_and_k1():
         r.fit([], [], ["alpha"])
     with pytest.raises(ValueError):
         r.fit(["alpha"], [[0]], ["alpha"])
+
+
+def test_out_of_fold_top_k_never_uses_own_document():
+    """Label U<d> occurs only in document d: no fold tree that held d out can rank it; the full tree does."""
+    corpus, labels, docs = [], [], []
+    for d in range(8):
+        for i in range(3):
+            corpus += [f"uniq{d} v{i} [SEP] ctx", f"shared{d % 4} w{d}{i} [SEP] ctx"]
+            labels += [f"U{d}", f"S{d % 4}"]
+            docs += [str(d), str(d)]
+    data = {"corpus": corpus, "labels": labels, "spans": [(0, 1)] * len(corpus), "docs": docs}
+    xm = XModel(vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char", "ngram_range": [2, 4]}},
+                dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 6, "random_state": 42}},
+                clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": 2}},
+                matcher_config={"type": "jointlogisticregression", "kwargs": {"max_iter": 100}},
+                features="tfidf", depth=2, min_leaf_size=2)
+    xm.train(*Preprocessor.organize_pubtator_output(data))
+    rows = [i for i, y in enumerate(labels) if y.startswith("U")]
+    queries, qdocs = [corpus[i] for i in rows], [docs[i] for i in rows]
+    own = [xm.initial_labels.index(labels[i]) for i in rows]
+    oof = out_of_fold_top_k(xm, queries, qdocs, data, folds=2, k=len(xm.initial_labels))
+    assert all(o not in top and len(top) for o, top in zip(own, oof))
+    names = [[xm.initial_labels[j] for j in top] for top in oof]
+    assert all(set(n) <= {f"S{j}" for j in range(4)} | {f"U{e}" for e in range(8)} for n in names)
+    full, _ = top_k(xm.predict(queries), len(xm.initial_labels))
+    assert all(o in top for o, top in zip(own, full)), "in-sample tree must rank the own-document label"

@@ -2,18 +2,22 @@
 
 One shared model scores every (query text, label text) pair, so logits compare across labels.
 Query text = the PubTator row "mention [SEP] context"; label text = `label_texts`."""
+import inspect
 import json
 import logging
 import os
 import time
 from collections import Counter
+from copy import deepcopy
 
 import numpy as np
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
 from xmr4el import torch_device
+from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import mention_key
+from xmr4el.xmodel import XModel
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,32 @@ def top_k(score_csr, k):
         idx.append(score_csr.indices[s:e][order])
         val.append(score_csr.data[s:e][order])
     return idx, val
+
+
+def out_of_fold_top_k(xm, queries, docs, tree_data, folds, k, seed=0):
+    """Per query: the top k label indices (xm's, mapped by name) of a tree trained, with xm's config, on tree_data
+    minus every document of the query's fold. Folds = query documents split at random; tree_data rows of other
+    documents (e.g. CTD names) are in every fold tree. Labels only in the held-out fold are absent from its tree."""
+    ids = sorted(set(docs))
+    fold_of = dict(zip(np.random.default_rng(seed).permutation(ids).tolist(), np.arange(len(ids)) % folds))
+    config = {p: deepcopy(getattr(xm, p)) for p in inspect.signature(XModel).parameters if p not in ("verbose", "logger")}
+    label_to_idx = {lab: i for i, lab in enumerate(xm.initial_labels)}
+    out = [None] * len(queries)
+    for f in range(folds):
+        rows = [i for i, d in enumerate(docs) if fold_of[d] == f]
+        keep = [fold_of.get(d) != f for d in tree_data["docs"]]
+        if all(keep):
+            raise ValueError(f"fold {f}: tree data shares no document with the queries")
+        fold_tree = XModel(**config)
+        fold_tree.train(*Preprocessor.organize_pubtator_output(
+            {key: [v for v, ok in zip(vals, keep) if ok] for key, vals in tree_data.items()}))
+        idx, _ = top_k(fold_tree.predict([queries[i] for i in rows]), k)
+        names = fold_tree.initial_labels
+        for i, top in zip(rows, idx):
+            out[i] = np.array([label_to_idx[names[j]] for j in top], dtype=int)
+        logger.info("Fold %d/%d: %d queries, %d of %d tree rows held out", f + 1, folds, len(rows),
+                    len(keep) - sum(keep), len(keep))
+    return out
 
 
 def rerank_order(tree_scores, logits, w):
