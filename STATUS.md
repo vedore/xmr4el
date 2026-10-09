@@ -8,7 +8,7 @@ Commands: `docs/results.md` § Commands.
 
 Last updated 2026-10-09 (R done; plan E written: E1 next).
 
-**NEXT: E3 (code, no runs).** Plan E below; user 2026-10-09: run all options.
+**NEXT: user decides the order (E3 / run wrapper / E4-E5, see "Open" in plan E).** Reranker dropped.
 
 **E2 result (2026-10-09, `e2_dev_eval.log`, reranker `..._13-27-32`, 5 folds, 2 epochs, 2720 s = +1617 s for the
 fold trees): rejected.** `not seen 1` w 0.25 0.9080 vs R2b 0.9108; unseen 0.6967 vs 0.7009; seen >1 0.8113 vs
@@ -52,12 +52,16 @@ Test is run once per final system only (R3 = 0.9229, level with the tree's hybri
   identical: test = full kNN at random rows); #9 no `fused_scores`/`label_embeddings` in saved nodes (format change);
   abbreviations: first an offline analysis of `u3_errors.tsv` `abbrev` rows + the reader's expansion (missed SFs:
   oab, edds, ptld) -> a fix plan for the user to approve -> code.
-- E4 (user run): BC5CDR retrain with E3 -> dev eval (w 0 vs `10-18-51`: abbreviation effect; #8/#9 are
-  result-neutral) -> retrain the winning reranker recipe on the new tree -> dev sweep -> test once.
-- E5 (user run; maybe code: `train_reranker.py -max_rows`): MedMentions st21pv, generality check. New tree (base
-  config; pre-C2 trees do not load), reranker with the winning recipe (122,241 train rows: 1 epoch ~4.3 h at 79
-  pairs/s; `-max_rows` sample if too slow), dev eval (40,884 rows, ~27 min of pairs) with the scope/w sweep, also the
-  BC5CDR choice (`not seen 1`, w 0.25) unre-tuned; test once.
+- E4 (user run): BC5CDR retrain with E3 -> dev eval (vs `10-18-51` w 0: abbreviation effect; #8/#9 are
+  result-neutral) -> test once. Tree only (reranker dropped, user 2026-10-09).
+- E5 (user run): MedMentions st21pv, generality of the tree vs PECOS (no reranker). New tree (base config; pre-C2
+  trees do not load), dev eval, PECOS on the exported features, test once.
+- Reranker dropped from the system (user 2026-10-09): +0.5 pt on test (= the tree's hybrid) for ~18 min training and
+  ~3 min per 4.3k rows. Reported as a rejected experiment; code (`rerank.py`, `train_reranker.py`, eval scopes) kept.
+- Open (user 2026-10-09): order of E3-E5 vs `docs/experiment_management.md` (untracked design report). Claude's
+  view: E3 code first (no runs, no overlap), then a minimal run wrapper (one experiment JSON -> train + eval ->
+  run dir with resolved config, commit, metrics.json; stdlib only), then E4/E5 through it; the report's phases 2-5
+  (scheduler, lifecycle, parallel, TUI, Pydantic) only when a real grid needs them.
 
 **R3 result (2026-10-09, `r3_test_eval.log`, test 4399/4410 rows).** Tree w 0: acc@1 0.9177 / MRR 0.9408 / seen 1
 0.9851 / seen >1 0.7184 / unseen 0.7186 / hybrid 0.9227. `not seen 1` w 0.25: **0.9229** / MRR 0.9443 / seen >1 0.8161
