@@ -1,0 +1,7 @@
+{
+  "name": "bc5cdr_test",
+  "evals": [
+    {"split": "test", "test_path": "datasets/BC5CDR/disease/test.pubtator",
+     "train_path": "datasets/BC5CDR/disease/train_plus_ctd.pubtator"}
+  ]
+}
