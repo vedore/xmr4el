@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (F1 + F2 code done; user runs the F2 acceptance, then F3).
+Last updated 2026-10-09 (F2 acceptance passed; user runs F3).
 
 **F1a analysis (2026-10-09, offline, `u3_errors.tsv` = tree `13-16-09` dev, 413 errors).** 51 abbreviation errors:
 - 30 expanded but still wrong (ptld 5, siat 5, ob 4, cip 3, dh 3, psp 3, rpgn 2, tma 2, mds 2, pas 1): the expansion
@@ -54,12 +54,15 @@ configs/experiments/bc5cdr.json -xmodel_path outputs/saved_trees/xmodel_2026-10-
 `metrics_dev.json` = the F1a eval (reader changed since R1): acc@1 0.9038 / MRR 0.9341 / unseen 0.6821 / hybrid
 0.9066. Also checks F1b on real data (F1a's eval ran before F1b): any difference = F1b float/tie effect, inspect.
 Paste the `Eval dev` block from the log + `git.json`.
+**F2 acceptance result (2026-10-09, run `2026-10-09_14-05-06_bc5cdr`, commit `eeeb668`, clean): passed.**
+`metrics_dev.json` = the F1a eval to every digit (acc@1 0.9038 / MRR 0.9341 / R@10 0.9744 / unseen 0.6821 / hybrid
+0.9066): wrapper = evaluate.py, and F1b's candidate-only kNN changes no result on real data. predict 19.0 s.
 **F3 (user, after acceptance):** `python3 scripts/run_experiment.py -spec configs/experiments/bc5cdr.json`
 (train + dev eval). Compare dev with the F1a eval on `10-18-51` (0.9038 / unseen 0.6821) and R1 (0.9020): the
 retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 moved -11 rows). Check the log's
 `Knn re-scoring completed ... elapsed` (F1b) and the tree size vs `10-18-51` (F1c). Test once after the user agrees.
 
-**NEXT: user runs the F2 acceptance (eval-only), then F3 (BC5CDR retrain), both via `scripts/run_experiment.py`.** Plan F below (user 2026-10-09). Local commits up to this one are
+**NEXT: user runs F3 (BC5CDR retrain via `scripts/run_experiment.py`); paste `metrics_dev.json` + log timings.** Plan F below (user 2026-10-09). Local commits up to this one are
 unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 
