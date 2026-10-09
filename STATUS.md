@@ -6,10 +6,34 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (R done: R3 test 0.9177 -> 0.9229 with the dev-chosen reranker; results.md row added).
+Last updated 2026-10-09 (R done; plan E written: E1 next).
 
-**NEXT: user picks.** Open: R generality (same recipe on MedMentions), option (c) out-of-sample reranker negatives,
-abbreviations (U3), deferred D items (#8, #9).
+**NEXT: E1 (user run, no code change).** Plan E below; user 2026-10-09: run all options.
+
+**E. Next round (plan 2026-10-09; user: run every open option).** Order keeps each tree change in ONE retrain: a
+reranker is tied to its tree, so tree-changing code (E3) lands after the reranker work on the current tree.
+Baseline = R2b dev: tree `10-18-51` w 0 0.9020; reranker `..._10-37-32`, `not seen 1` w 0.25 = 0.9108 (unseen 0.7009).
+Test is run once per final system only (R3 = 0.9229, level with the tree's hybrid 0.9227; unseen +6/938 = noise).
+- E1 (no code): option c1, reranker `-epochs 1` on `10-18-51` (epoch 2 loss 0.03 = memorized train lists). User:
+  `train_reranker.py -xmodel_path <10-18-51> -train_path datasets/BC5CDR/disease/train.pubtator -epochs 1`, then
+  dev `evaluate.py` with `-train_path train_plus_ctd -reranker_path <new> -rerank_w 0 0.1 0.25 0.5 1 inf`.
+  Compare per scope with R2b; key number = unseen at the chosen w.
+- E2 (code: `train_reranker.py -folds N -tree_train_path`): option c2, out-of-fold candidates. Split BC5CDR train
+  docs (PMIDs) into N folds (5); per fold train a tree on train_plus_ctd minus that fold's docs (config from the
+  saved tree; SapBERT cache hits), candidates for the fold's rows from it; gold missing from the fold top K -> row
+  dropped (count printed). The reranker still records `10-18-51` (eval tree). Cost ~5 extra tree trainings.
+  Synthetic test: no row's candidates come from a tree that saw its doc. User: train + dev eval as E1.
+  Pick the best of {R, c1, c2} on dev; test once only if it beats R2b on dev.
+- E3 (code, no runs; tree-changing changes batched): #8 candidate-only kNN products (`scoring.py`; result
+  identical: test = full kNN at random rows); #9 no `fused_scores`/`label_embeddings` in saved nodes (format change);
+  abbreviations: first an offline analysis of `u3_errors.tsv` `abbrev` rows + the reader's expansion (missed SFs:
+  oab, edds, ptld) -> a fix plan for the user to approve -> code.
+- E4 (user run): BC5CDR retrain with E3 -> dev eval (w 0 vs `10-18-51`: abbreviation effect; #8/#9 are
+  result-neutral) -> retrain the winning reranker recipe on the new tree -> dev sweep -> test once.
+- E5 (user run; maybe code: `train_reranker.py -max_rows`): MedMentions st21pv, generality check. New tree (base
+  config; pre-C2 trees do not load), reranker with the winning recipe (122,241 train rows: 1 epoch ~4.3 h at 79
+  pairs/s; `-max_rows` sample if too slow), dev eval (40,884 rows, ~27 min of pairs) with the scope/w sweep, also the
+  BC5CDR choice (`not seen 1`, w 0.25) unre-tuned; test once.
 
 **R3 result (2026-10-09, `r3_test_eval.log`, test 4399/4410 rows).** Tree w 0: acc@1 0.9177 / MRR 0.9408 / seen 1
 0.9851 / seen >1 0.7184 / unseen 0.7186 / hybrid 0.9227. `not seen 1` w 0.25: **0.9229** / MRR 0.9443 / seen >1 0.8161
