@@ -1,0 +1,10 @@
+{
+  "name": "nlm_chem_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/nlm_chem/test.pubtator",
+      "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator"
+    }
+  ]
+}

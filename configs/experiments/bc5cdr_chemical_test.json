@@ -1,0 +1,10 @@
+{
+  "name": "bc5cdr_chemical_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/BC5CDR/chemical/test.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator"
+    }
+  ]
+}

@@ -16,7 +16,8 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | Script | Purpose |
 | --- | --- |
 | `split_pubtator.py` | Preprocessing: split a PubTator corpus by PMID. |
-| `dict_to_pubtator.py` | Preprocessing: CTD vocabulary (MEDIC/chemicals) -> PubTator pseudo-documents. |
+| `dict_to_pubtator.py` | Preprocessing: CTD vocabulary (MEDIC/chemicals) -> PubTator pseudo-documents (`-omim` keeps OMIM-id diseases). |
+| `to_pubtator.py` | Preprocessing: PubTator entity-type filter + id normalisation (NCBI-disease, BioRED, BC5CDR-chemical); BioC XML -> PubTator (NLM-Chem). |
 | `train.py` | Group texts by label, encode features, build label embeddings and a hierarchy, then train matchers and save the model. |
 | `evaluate.py` | Traverse a saved tree and report ranking metrics and candidate recall. |
 | `run_experiment.py` | One tracked run from a spec (`configs/experiments/`): train (or `-xmodel_path`: reuse a tree), evaluate each split, write `outputs/runs/<timestamp>_<name>/` (spec, config, git commit/diff/untracked, input sha256 + package versions, log, `metrics_<split>.json`, `status.json`). Checks the spec (search values, input files, model config) before any work; an eval with no in-vocabulary row fails the run. |
@@ -27,6 +28,7 @@ Replace the example corpus paths and `<run>` with your local files and saved tre
 | `experiments/screen_leaf_scorer.py` | Fit and compare leaf scorers with oracle routing using exported tree features. |
 | `experiments/beam_sweep.py` | Repeat evaluation for beam sizes in steps of five. |
 | `baselines/pecos_compare.py` | Export aligned training/dev features and score PECOS predictions. |
+| `baselines/nn_baselines.py` | SapBERT and char TF-IDF 1-NN over a saved tree's training rows, on `evaluate_tree`'s rows and metrics. |
 | `baselines/pecos_run.py` | Train PECOS XR-Linear on exported inputs and save predictions. |
 
 ## Split PubTator inputs
@@ -53,6 +55,25 @@ Writes `corpus_pubtator_train.txt`, `corpus_pubtator_dev.txt`, and
 
 Each name/synonym becomes a one-mention PubTator pseudo-document; only `MESH:` ids are kept
 (prefix stripped). Append the output to a PubTator training file to train on dictionary names.
+
+## Plan G datasets (made 2026-10-09; `datasets/` is not in git)
+
+```bash
+P=.venv/bin/python; T=scripts/to_pubtator.py
+N=datasets/ncbi_disease; for s in train:trainset dev:developset test:testset; do $P $T filter -input $N/NCBI_pubtator/NCBI${s#*:}_corpus.txt -out $N/${s%%:*}.pubtator -types SpecificDisease DiseaseClass Modifier CompositeMention; done
+B=datasets/BioRED; mkdir -p $B/disease $B/chemical; for s in train:Train dev:Dev test:Test; do $P $T filter -input $B/BioRED/${s#*:}.PubTator -out $B/disease/${s%%:*}.pubtator -types DiseaseOrPhenotypicFeature; $P $T filter -input $B/BioRED/${s#*:}.PubTator -out $B/chemical/${s%%:*}.pubtator -types ChemicalEntity; done
+C=datasets/BC5CDR; mkdir -p $C/chemical; for s in train:TrainingSet dev:DevelopmentSet test:TestSet; do $P $T filter -input $C/CDR_Data/CDR.Corpus.v010516/CDR_${s#*:}.PubTator.txt -out $C/chemical/${s%%:*}.pubtator -types Chemical; done
+L=datasets/nlm_chem; for s in train dev test; do $P $T bioc -input_dir $L/FINAL_v1/ALL -pmcids $L/FINAL_v1/pmcids_$s.txt -out $L/$s.pubtator; done
+$P scripts/dict_to_pubtator.py -ctd_path datasets/CTD/CTD_diseases.tsv.gz -out datasets/CTD/ctd_disease_omim.pubtator -type Disease -omim
+$P scripts/dict_to_pubtator.py -ctd_path datasets/CTD/CTD_chemicals.tsv.gz -out datasets/CTD/ctd_chemical.pubtator -type Chemical
+cat $N/train.pubtator datasets/CTD/ctd_disease_omim.pubtator > $N/train_plus_ctd.pubtator
+cat $B/disease/train.pubtator datasets/CTD/ctd_disease_omim.pubtator > $B/disease/train_plus_ctd.pubtator
+for d in $B/chemical $C/chemical $L; do cat $d/train.pubtator datasets/CTD/ctd_chemical.pubtator > $d/train_plus_ctd.pubtator; done
+```
+
+Sources: NCBI-disease PubTator release (`NCBI{train,develop,test}set_corpus.zip`, ncbi.nlm.nih.gov/CBBresearch/Dogan/DISEASE),
+NLM-Chem (`ftp.ncbi.nlm.nih.gov/pub/lu/NLMChem/NLM-Chem-corpus.zip`), CTD (`ctdbase.org/reports/CTD_chemicals.tsv.gz`).
+Specs: `configs/experiments/<set>.json` (train + dev) and `<set>_test.json` (eval-only).
 
 ## Train
 

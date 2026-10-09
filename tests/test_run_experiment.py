@@ -76,6 +76,7 @@ def test_run_experiment(tmp_path):
     beam1 = json.loads((run_dir / "metrics_dev_beam1.json").read_text())
     assert beam1["search"]["beam_size"] == 1 and beam1["search"]["knn_beta"] == 2 and "strings" not in beam1
     assert dev["rows"] == dev["rows_total"] == 40 and dev["strings"]["all"]["n"] == 40
+    assert dev["acc@1_all"] == dev["acc@1"] and dev["hybrid_all"] == dev["hybrid"]  # every row in vocabulary
     assert "acc@1" in (run_dir / "run.log").read_text(), "eval report in the log"
 
     # metrics = evaluate.py's function on the saved tree, minus timings

@@ -1,0 +1,10 @@
+{
+  "name": "biored_disease_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/BioRED/disease/test.pubtator",
+      "train_path": "datasets/BioRED/disease/train_plus_ctd.pubtator"
+    }
+  ]
+}

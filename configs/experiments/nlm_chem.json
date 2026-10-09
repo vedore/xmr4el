@@ -1,0 +1,12 @@
+{
+  "name": "nlm_chem",
+  "model_config": "configs/xmr4el_bc5cdr_config.json",
+  "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/nlm_chem/dev.pubtator",
+      "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "ncbi_disease",
+  "model_config": "configs/xmr4el_bc5cdr_config.json",
+  "train_path": "datasets/ncbi_disease/train_plus_ctd.pubtator",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/ncbi_disease/dev.pubtator",
+      "train_path": "datasets/ncbi_disease/train_plus_ctd.pubtator"
+    }
+  ]
+}

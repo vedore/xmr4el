@@ -1,0 +1,10 @@
+{
+  "name": "biored_chemical_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/BioRED/chemical/test.pubtator",
+      "train_path": "datasets/BioRED/chemical/train_plus_ctd.pubtator"
+    }
+  ]
+}

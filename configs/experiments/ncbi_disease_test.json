@@ -1,0 +1,10 @@
+{
+  "name": "ncbi_disease_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/ncbi_disease/test.pubtator",
+      "train_path": "datasets/ncbi_disease/train_plus_ctd.pubtator"
+    }
+  ]
+}

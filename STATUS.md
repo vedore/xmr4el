@@ -6,9 +6,9 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (plan H items 1-4 done, uncommitted; then plan G, step G0).
+Last updated 2026-10-09 (plan H committed `8168203`; G0 code + data done; next = G1 server runs by the user).
 
-**Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, uncommitted):
+**Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
 config); empty eval fails the run (`status.json` failed, `evaluate.py` exit 1), search validated even then;
 `git.json` dirty counts untracked files (+ list); `provenance.json` (input sha256, packages, platform, torch device);
@@ -21,9 +21,37 @@ Thesis vs code (checked 2026-10-09): per-label OvR rankers, curriculum hard-nega
 nDCG/Hit@k suite and Hybrid X-Linker integration are not in this repo (removed or out of scope); the thesis's
 "exactly repeatable runs" does not hold on GPU (same-code retrains move ~10-20 rows; seeds are fixed).
 
-**NEXT after H: G0 (Claude, code only, no user runs): for NCBI-disease, BioRED, NLM-Chem check the PubTator reader loads
-them (conversion needs, row/label counts, dictionary choice), write their specs, plan baselines 3-4 (one script over
-`evaluate_tree`'s rows) and 5 (scispaCy, own env). Bring plan + counts to the user before coding. Plan G below.**
+**G0 counts (2026-10-09, scratch `g0_counts.py`; NCBI-disease (PubTator with ids), NLM-Chem (BioC) and
+CTD_chemicals downloaded to the session scratchpad, not yet in `datasets/`).** usable = single id, not "-";
+coverage = dev/test usable rows whose id is in train / train + CTD (MESH only).
+| dataset | train rows / labels | dev usable | test usable | multi-id dropped (tr/dev/test) | dev cov train / +dict | test cov train / +dict |
+|---|---|---|---|---|---|---|
+| NCBI-disease | 5030 / 613 | 757 | 945 | 115/30/15 | 0.881 / 0.962 | 0.828 / 0.971 |
+| BC5CDR-disease (ref) | 4055 / 645 | 4130 | 4300 | composites split by reader | 0.838 / 1.000 | 0.848 / 0.997 |
+| BC5CDR-chemical | 5156 / 663 | 5302 | 5343 | 3/2/12 | 0.734 / 0.976 | 0.707 / 0.965 |
+| BioRED disease | 3595 / 566 | 961 | 904 | 50/16/12 | 0.682 / 0.990 | 0.591 / 1.000 |
+| BioRED chemical | 2830 / 483 | 809 | 741 | 7/2/4 | 0.595 / 0.963 | 0.632 / 0.982 |
+| NLM-Chem (80/20/50 full texts) | 19536 / 1207 | 4945 | 11200 | 1508/350/460 | 0.686 / 0.992 | 0.619 / 0.985 |
+Findings: NCBI's missing coverage is OMIM ids (dev 26 of 28, test 23 of 25; 24/23 exist in CTD MEDIC, which
+`dict_to_pubtator` drops). Bug: `dict_to_pubtator` takes column 8 as synonyms = CTD_chemicals `Definition`
+(chemical synonyms are columns 12-13). CTD chemicals = 179,669 ids / ~470k names (MEDIC 11.7k ids / 86k names).
+Formats: NCBI and BioRED are PubTator ("|" / "+" / "," multi ids, NCBI " D..." id spaces, BioRED "-" = no id);
+NLM-Chem is BioC XML, ids "MESH:..." or ","-joined, splits in `pmcids_{train,dev,test}.txt`.
+G0 done (user approved all 2026-10-09: add BC5CDR-chemical + BioRED disease/chemical, drop multi-id rows, full CTD
+chemicals, downloads into `datasets/`). Code: `dict_to_pubtator` synonym columns by header (+ `-omim`; disease output
+byte-identical to the old `ctd_disease.pubtator`), `scripts/to_pubtator.py` (filter / bioc), `evaluate_tree`
+`acc@1_all` / `hybrid_all` (out-of-vocabulary = miss), `scripts/baselines/nn_baselines.py` (SapBERT / char TF-IDF 1-NN
+on the tree's training rows and eval rows), 10 specs `configs/experiments/{ncbi_disease,biored_disease,biored_chemical,
+bc5cdr_chemical,nlm_chem}[_test].json`, all with `xmr4el_bc5cdr_config.json` unchanged; pytest 54. Data recipe in
+`scripts/README.md` § Plan G datasets; reader counts = the G0 table (NLM-Chem train 1 text mismatch skipped).
+NCBI dictionary = `ctd_disease_omim.pubtator` (BioRED disease too); chemical sets = `ctd_chemical.pubtator`
+(469,694 names, 179,7xx labels with train).
+
+**NEXT: G1 (user, server; `datasets/` is not in git: copy the new files first).** Per set: train + dev
+(`run_experiment.py`), then baselines 3-4 on dev with that tree. Order: ncbi_disease, biored_disease (BC5CDR-scale),
+then bc5cdr_chemical = the 180k-label scale probe (watch RAM, train time, tree size before the other chemical sets).
+Paste per run: the `Eval dev` block, `status.json`, train time, and the nn_baselines lines. Test once per set after
+dev is read. PECOS (baseline 2) per set after that; scispaCy (5) later, own env.
 Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.

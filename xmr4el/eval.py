@@ -105,6 +105,7 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
     ranks = np.array([gold_rank(scores.getrow(qi), label_to_idx[g]) for qi, g in enumerate(gold)], dtype=int)
     m.update({k: float(v) for k, v in ranking_metrics(ranks, ks=RECALL_KS).items()})
     m["R@cand"] = float(np.mean(ranks > 0))
+    m["acc@1_all"] = m["acc@1"] * len(gold) / len(test["labels"])  # all loaded rows, out-of-vocabulary gold = miss
     m["candidates_per_query"] = scores.nnz / max(scores.shape[0], 1)
     train_pairs = None
     if train_path:
@@ -114,6 +115,7 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
                 for r in (scores.getrow(i) for i in range(scores.shape[0]))]
         b = string_breakdown(texts, gold, top1, train_pairs)
         m["hybrid"] = float(b.pop("hybrid"))
+        m["hybrid_all"] = m["hybrid"] * len(gold) / len(test["labels"])
         m["strings"] = {k: dict(zip(("n", "tree", "dict", "either"), (int(v[0]), *map(float, v[1:]))))
                         for k, v in b.items()}
     state = {"scores": scores, "texts": texts, "gold": gold, "ranks": ranks, "train_pairs": train_pairs}
@@ -131,7 +133,8 @@ def format_metrics(m):
     s = m["search"]
     lines += [f"search   beam {s['beam_size']}, topk {s['topk']}, knn beta {s['knn_beta']:g}, "
               f"{m['candidates_per_query']:.0f} candidates/query", "",
-              f"acc@1    {m['acc@1']:.4f}", f"MRR      {m['MRR']:.4f}",
+              f"acc@1    {m['acc@1']:.4f}   (all {m['rows_total']} rows, out-of-vocabulary = miss: {m['acc@1_all']:.4f})",
+              f"MRR      {m['MRR']:.4f}",
               "recall   " + "  ".join(f"@{k} {m[f'R@{k}']:.4f}" for k in RECALL_KS),
               f"         @cand {m['R@cand']:.4f}  (gold among the candidates: the cap for every metric)"]
     if "strings" in m:
@@ -139,7 +142,7 @@ def format_metrics(m):
                   f"  {'':16s} {'n':>6s} {'share':>6s} {'tree':>7s} {'dict':>7s} {'either':>7s}"]
         lines += [f"  {k:16s} {g['n']:6d} {g['n'] / n:6.3f} {g['tree']:7.4f} {g['dict']:7.4f} {g['either']:7.4f}"
                   for k, g in m["strings"].items()]
-        lines.append(f"  hybrid (dict if string seen, else tree): {m['hybrid']:.4f}")
+        lines.append(f"  hybrid (dict if string seen, else tree): {m['hybrid']:.4f}   (all rows: {m['hybrid_all']:.4f})")
     return "\n".join(lines)
 
 
