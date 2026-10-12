@@ -50,6 +50,12 @@ NCBI dictionary = `ctd_disease_omim.pubtator` (BioRED disease too); chemical set
 **G1 runner (2026-10-12, user asked for one script): `scripts/run_g1.sh` does all 5 sets (train + dev, test on the
 same tree, nn baselines dev + test, peak RAM per step) and packs `outputs/g1.tar.gz` (no trees) for scp back.
 It runs test with dev (frozen config, no tuning between). Pasted/scp'd results: read dev first, then test.**
+**IN FLIGHT (2026-10-12): user launched `nohup bash scripts/run_g1.sh > outputs/g1_main.log 2>&1 &` on the server
+(code `0d777ef`). Code frozen for judging. When done the user copies `outputs/g1.tar.gz` here
+(`scp <server>:<repo>/outputs/g1.tar.gz outputs/ && tar xzf outputs/g1.tar.gz`). Then: read
+`outputs/g1/peak_rss.tsv`, each run's `status.json` + `metrics_{dev,test}.json` + train time in `run.log`, and
+`outputs/g1/<set>_<split>_nn.json`; compare XMR4EL vs the 1-NN baselines on dev per set, then test; valid numbers
+to `docs/results.md`; next PECOS per set. Failure: `outputs/g1_main.log` tail + that run's `status.json`.**
 **NEXT: G1 (user, server; `datasets/` is not in git: copy the new files first).** Per set: train + dev
 (`run_experiment.py`), then baselines 3-4 on dev with that tree. Order: ncbi_disease, biored_disease (BC5CDR-scale),
 then bc5cdr_chemical = the 180k-label scale probe (watch RAM, train time, tree size before the other chemical sets).
