@@ -103,6 +103,12 @@ default = the five G1 sets (retrained on CUDA-leaf code: new trees, the G1/G2 ro
 MedMentions. run_g2 now resolves every run_g1 set to its latest run's tree (TREE map keeps only bc5cdr) and clears
 the export dir before exporting. Command: `bash scripts/run_g.sh`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
 then add rows to the G1/G2 tables.
+**run_g resume (2026-10-13): MedMentions files were missing on the server (copied); the resume was still running
+(PECOS on MedMentions) when the user downloaded the bundles. MedMentions G1 part read (tree `2026-10-13_15-38-51`):**
+dev acc@1 0.741 (31564/40884 rows in vocabulary, cov x acc 0.572) vs SapBERT 1-NN 0.617 / TF-IDF 0.593; test 0.744 vs
+0.615 / 0.594. Seen 1 0.932 vs 0.933, seen >1 0.763 vs 0.429, unseen 0.480 vs 0.454. Train 510 s (encoding 405 s,
+not cached; root 75 s; 128 leaves 20 s). Peak 29.3 GB train+dev (dev predict 221 s, 31.5k rows). WAIT for the full
+g1/g2 bundles, then write all rows at once.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
