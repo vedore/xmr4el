@@ -69,9 +69,11 @@ Exports + PECOS models on the server: `outputs/pecos/g2/` (large; delete once th
 19-119 s each) + encoding 505 s (SapBERT cache hit: char/context TF-IDF + SVD) + root clustering ~480 s + root matcher
 ~110 s + 63 GPU leaves 185 s (2-7 s each). Cause: `GPU_MIN_ENTRIES` 5M (`xmr4el/learning/classifiers.py`, measured on
 MPS) sends 1404-label leaves with < 3562 rows to CPU L-BFGS, ~30x slower than CUDA. Diseases (~104 labels/leaf) are
-all CPU and fast (leaves 122 s total). Proposed fix (not done, ask): lower the threshold on CUDA; numerics-only change
-(float32 on GPU vs CPU), so results move at retrain-noise level; matters for MedMentions train time.
-**Deletion (user OK 2026-10-13):** server `outputs/pecos/g2/`, tree `10-18-51`, old `g1/g2.tar.gz`. Local candidates:
+all CPU and fast (leaves 122 s total). **Fixed (user 2026-10-13: always CUDA if it fits):** `JointOvRLogistic.fit` runs
+every fit on CUDA, refits on CPU on CUDA OOM (warning logged); MPS keeps the 5M threshold; CPU-only unchanged. Test
+`test_joint_ovr_logistic_cuda_oom_falls_back_to_cpu`; pytest 55. Numerics-only for disease-scale trees (their leaves move
+CPU -> CUDA float32): G1 trees stay the G1 systems (no retrain); first use = MedMentions (check leaf times in its log).
+**Deletion (user OK 2026-10-13: every tree except the keep list, plus PECOS exports and rerankers):** server `outputs/pecos/g2/`, tree `10-18-51`, old `g1/g2.tar.gz`. Local candidates:
 tree `xmodel_2026-10-08_17-28-02` (C2, 1.6 GB, superseded), `outputs/pecos/{bc5cdr_dev,bc5cdr_dict_dev,bc5cdr_dict_test}`
 (1.5 GB, exports of deleted trees, rows already in results.md), `outputs/g{1,2}.tar.gz` (extracted). Keep: tree
 `14-12-26` + the 5 G1 trees (server), `outputs/runs/`, `outputs/cache/` (encoding cache).

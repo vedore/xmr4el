@@ -108,15 +108,15 @@ class ClassifierModel(metaclass=ClassifierMeta):
 # ---------------------------
 # Joint one-vs-rest L2 logistic regression
 # ---------------------------
-# Fits with n * L >= this run on `torch_device()`. MPS per L-BFGS iteration: 89929x128 0.20 -> 0.12 s, 20000x128
+# CUDA runs every fit (CPU only if it runs out of memory): on the G1 server CPU L-BFGS took 19-119 s per 1404-label
+# leaf vs 2-7 s on CUDA. MPS runs fits with n * L >= this: per L-BFGS iteration 89929x128 0.20 -> 0.12 s, 20000x128
 # break-even, 2064x92 leaves 2x slower (transfer and launch overhead).
-# ponytail: threshold measured on MPS only; re-measure on a CUDA box, where the break-even is likely lower.
 GPU_MIN_ENTRIES = 5_000_000
 
 
 class JointOvRLogistic:
-    """Every one-vs-rest L2 logistic problem of a node solved at once by torch L-BFGS (float32; CPU, or
-    `torch_device()` if n * L >= GPU_MIN_ENTRIES).
+    """Every one-vs-rest L2 logistic problem of a node solved at once by torch L-BFGS (float32; on CUDA if available,
+    else CPU on CUDA out-of-memory; on MPS if n * L >= GPU_MIN_ENTRIES; else CPU).
 
     Per label the objective is liblinear's (`LogisticRegression(solver="liblinear")`): 0.5 ||w||^2 + C sum_i c_i
     log(1 + exp(-y_i w.x_i)), the bias a regularised constant-1 feature, c_i from `class_weight` "balanced" or 1.
@@ -162,7 +162,22 @@ class JointOvRLogistic:
         # 6000x2304x734 leaf fit; torch runs both multithreaded (4x faster, 0.999 top-1 agreement). Stops when the
         # max |gradient| <= tol, scipy's gtol rule. The objective is divided by n (sklearn's lbfgs scaling, same
         # minimizer): unscaled, the gradient never reached tol and every fit ran to the float32 loss stall.
-        dev = torch_device() if n * L >= GPU_MIN_ENTRIES else torch.device("cpu")
+        dev = torch_device()
+        if dev.type == "mps" and n * L < GPU_MIN_ENTRIES:
+            dev = torch.device("cpu")
+        try:
+            self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, dev)
+        except torch.cuda.OutOfMemoryError:
+            logger.warning("JointOvRLogistic: CUDA out of memory (n=%d, L=%d), fitting on CPU", n, L)
+            torch.cuda.empty_cache()
+            self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, torch.device("cpu"))
+        if self.n_iter_ >= self.max_iter:
+            logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, L=%d)",
+                           self.max_iter, self.tol, n, L)
+        return self
+
+    def _lbfgs(self, Xb, S, cw, dev):
+        n, L = S.shape
         Xt, St, cwt = (torch.from_numpy(a).to(dev) for a in (Xb, S, cw))
         W = torch.zeros(Xb.shape[1], L, device=dev)
         opt = torch.optim.LBFGS([W], lr=1, max_iter=self.max_iter, tolerance_grad=self.tol, tolerance_change=1e-9,
@@ -175,11 +190,7 @@ class JointOvRLogistic:
 
         with torch.no_grad():
             opt.step(closure)
-        self.W_, self.n_iter_ = W.cpu().numpy(), opt.state[W]["n_iter"]
-        if self.n_iter_ >= self.max_iter:
-            logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, L=%d)",
-                           self.max_iter, self.tol, n, L)
-        return self
+        return W.cpu().numpy(), opt.state[W]["n_iter"]
 
     def decision_function(self, X):
         return self._dense(X) @ self.W_

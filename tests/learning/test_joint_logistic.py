@@ -6,6 +6,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.preprocessing import normalize
 
+import torch
+
+from xmr4el.learning import classifiers
 from xmr4el.learning.classifiers import ClassifierModel, JointOvRLogistic
 
 
@@ -42,3 +45,23 @@ def test_joint_ovr_logistic():
     assert (m.predict(X) == y).mean() > 0.8 and list(m.classes_) == list(range(L))
     print("ok")
 
+
+
+def test_joint_ovr_logistic_cuda_oom_falls_back_to_cpu(monkeypatch):
+    """CUDA is tried for every fit; out of memory refits on CPU with the same result."""
+    rng = np.random.default_rng(1)
+    X, y = rng.normal(size=(40, 6)), np.arange(40) % 4
+    ref = JointOvRLogistic().fit(X, y)
+    real, devices = JointOvRLogistic._lbfgs, []
+
+    def lbfgs(self, Xb, S, cw, dev):
+        devices.append(dev.type)
+        if dev.type == "cuda":
+            raise torch.cuda.OutOfMemoryError("test")
+        return real(self, Xb, S, cw, dev)
+
+    monkeypatch.setattr(classifiers, "torch_device", lambda: torch.device("cuda"))
+    monkeypatch.setattr(JointOvRLogistic, "_lbfgs", lbfgs)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    m = JointOvRLogistic().fit(X, y)  # 40 x 4 entries: far below GPU_MIN_ENTRIES, still tried on CUDA
+    assert devices == ["cuda", "cpu"] and np.array_equal(m.W_, ref.W_)
