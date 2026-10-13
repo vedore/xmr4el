@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ bundle downloaded, unread).
+Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -87,11 +87,15 @@ chain + agree on tfidf trees (routing on/off), identical pred -> agree 1.0. pyte
 class_weight null (`configs/experiments/eq_c_config.json`), D = C + routing_features false (+ PECOS eps 0.001). Expected:
 D close to identical (solver tolerance only); each step's change in agreement = that component's effect. Speed: PECOS
 `rankers` time (chain given = solver only) vs the tree's node times in C/D run.log (CUDA leaves since `0189936`).
-**EQ ran on the server; `outputs/eq.tar.gz` is on the Mac (2026-10-13), not yet extracted or read. NEXT (Claude): `tar xzf outputs/eq.tar.gz`, read as below, add an EQ section to `docs/results.md`.** Launch was: `nohup bash scripts/run_eq.sh > outputs/eq_main.log 2>&1 &`
-(~15 min: two NCBI trains + PECOS), scp `outputs/eq.tar.gz` back. Read `outputs/eq/{a,c,d}_agree.log` first, then
-`*_score.log`, `*_pecos_*.log` (train / rankers time), run dirs (`metrics_dev*.json`, node times in run.log).
+**EQ result (2026-10-13, read; section in results.md).** At the same chain, objective, negatives and score (D), the tree
+is close to PECOS but not identical: top-1 agree 0.964, acc@1 0.863 vs 0.866 with knn off. PECOS eps 0.001 changes
+nothing, so the residual is the tree's float32 L-BFGS. With knn off, PECOS's default solver on our chain gives 0.904, above
+tree A at 0.890. The XMR4EL lead over PECOS is knn re-scoring (+3.5 pt), plus balanced weights + routing features
+(+2.7 pt over D, not separated). Routing features without class weights cost -7.1 pt (C). Train, CUDA: matchers 21-23 s
+vs PECOS rankers 52 s. The rest is encoding (90 s) + clustering (20 s), which PECOS's time leaves out.
+Open, if wanted: tree B (balanced, routing off) to separate A's two components.
 BC5CDR-disease 1-NN + PECOS done (2026-10-13, rows in the G1/G2 tables of results.md: XMR4EL +58 / +57 rows vs
-SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). After EQ, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
+SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). Next, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
 script), literature rows.
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.

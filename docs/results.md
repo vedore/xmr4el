@@ -729,6 +729,60 @@ Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-2
   level (0.978 / 0.985), seen >1 +0.18 / +0.24 (context), unseen +0.019 / +0.015; hybrid 0.904 / 0.925 vs 0.899 / 0.922.
   PECOS -4.9 / -5.8 pt (train 33 s vs 309 s, peak 3.4 GB).
 
+## 2026-10-13: equivalence test, XMR4EL tree vs PECOS XR-Linear (NCBI-disease dev)
+
+`bash scripts/run_eq.sh` on the server (code `6f98d9c`, CUDA leaves since `0189936`). NCBI-disease dev, 729/757 rows,
+13,385 labels, beam 10, top 100. PECOS gets the tree's exported features and rows. `-chain` = the tree's own hierarchy
+(128 -> labels, from `pecos_compare.py export`). `agree` compares the two systems row by row with knn off. Logs are in
+`outputs/eq/`, run dirs in `outputs/runs/2026-10-13_*_ncbi_eq_{a,c,d}`. The three trees have the same chain: PECOS
+on each export gives the same predictions to every digit.
+
+- A: G1 tree `15-32-01`, `class_weight` balanced, routing features on.
+- C: new tree `11-25-58`, `class_weight` null (PECOS's objective).
+- D: new tree `11-28-44`, C plus `routing_features` false (leaves see the root's X, as PECOS does).
+- PECOS lr: `L2R_LR_DUAL` + `sigmoid` = the same logistic objective (C 1, bias as a regularised constant 1), the same
+  negatives (rows of the parent cluster) and the same path product.
+
+| tree | PECOS variant | acc@1 tree (knn 0) | acc@1 PECOS | top-1 agree | top-10 overlap | mean / max score diff | tree acc@1, knn 10 |
+|---|---|---|---|---|---|---|---|
+| A | own hierarchy, default (sq. hinge, l3-hinge) | 0.890 | 0.894 | 0.892 | 0.306 | 0.326 / 0.920 | 0.925 |
+| A | tree chain, default | 0.890 | 0.904 | 0.912 | 0.420 | 0.323 / 0.920 | 0.925 |
+| A | tree chain, lr | 0.890 | 0.866 | 0.878 | 0.542 | 0.280 / 0.846 | 0.925 |
+| C | tree chain, lr | 0.792 | 0.866 | 0.893 | 0.651 | 0.044 / 0.489 | 0.885 |
+| D | tree chain, lr | 0.863 | 0.866 | 0.964 | 0.839 | 0.024 / 0.349 | 0.899 |
+| D | tree chain, lr, eps 0.001 | 0.863 | 0.866 | 0.964 | 0.839 | 0.024 / 0.349 | 0.899 |
+
+R@cand: A 0.988, C and D 0.977.
+
+Train time on the server (CUDA leaves):
+
+| step | XMR4EL C / D | PECOS |
+|---|---|---|
+| encoding | 90 s | not counted (gets the features) |
+| label embeddings | 5 s | - |
+| root clustering | 19-21 s | not counted (gets the chain) |
+| root matcher | 11-13 s | - |
+| 128 leaves | 9-10 s | - |
+| total | 137-138 s | - |
+| rankers | - | 51-52 s (CPU; eps 0.001: 77 s) |
+
+The tree's own matchers (root + leaves) take 21-23 s.
+
+- At the same hierarchy, objective, negatives and score, the tree is close to PECOS but not identical (D). The two
+  agree on 96.4 % of top-1 predictions and differ by 2 correct rows (0.863 vs 0.866). Mean score difference is 0.024.
+  Tightening PECOS's tolerance (eps 0.1 -> 0.001) changes nothing, so PECOS has converged. The rest is on the tree's
+  side: L-BFGS in float32 at tol 1e-3.
+- Routing features on, without class weights (C), cost 7.1 pt against D (0.792 vs 0.863, knn off).
+- A (balanced weights + routing features) is +2.7 pt over D with knn off (0.890 vs 0.863). It also has higher R@cand
+  (0.988 vs 0.977). These runs do not separate the two components: there is no "balanced, routing off" tree.
+- knn beta 10 adds 3.5 pt on A (0.890 -> 0.925) and 3.6 pt on D. PECOS has no such step.
+- With knn off, PECOS's default squared hinge on the tree's chain (0.904) beats tree A (0.890) and PECOS's own
+  hierarchy (0.894). The XMR4EL lead in the G2 tables (0.925 vs 0.894) is therefore knn re-scoring, not the matchers.
+- Speed: the CUDA matchers (21-23 s) are faster than PECOS's CPU rankers (52 s) on the same chain. XMR4EL's training
+  time is mostly feature encoding (90 s) plus clustering (20 s), which PECOS's time does not include. The G1 disease
+  trains (239-247 s) predate the CUDA fix. This is at 13k labels; at 180k labels (1404 labels per leaf) it is not yet
+  measured.
+
 ## Commands
 
 ```bash
