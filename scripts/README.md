@@ -226,6 +226,7 @@ same texts. Prediction files are named `pred_<features>_b<beam>.npz`.
 scispaCy (MedMentions only: its KBs are keyed by UMLS CUIs): `docker build --platform linux/amd64 -f scispacy.dockerfile
 -t xmr4el-scispacy .`, then `bash scripts/run_scispacy.sh medmentions_st21pv` after run_g2_pecos.sh; writes
 `pred_scispacy_umls.npz` into the same exports (`scripts/baselines/scispacy_run.py`).
+`scripts/run_g.sh [set ...]` (host) chains run_g1 -> run_g2_pecos -> run_scispacy; default = the five G1 sets + MedMentions.
 Equivalence test (`scripts/run_eq.sh`, NCBI dev): export also writes the tree's hierarchy (`chain_<i>.npz`);
 `pecos_run.py -chain -solver L2R_LR_DUAL -post sigmoid` trains PECOS on it with the tree's loss and path product;
 `pecos_compare.py agree` compares the tree's scores (knn off) with each `pred_*.npz` row by row.

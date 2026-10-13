@@ -6,9 +6,7 @@
 # (exports and PECOS models stay in outputs/pecos/g2/). Usage: bash scripts/run_g2_pecos.sh [set ...]
 set -euo pipefail
 SETS=${*:-ncbi_disease biored_disease bc5cdr_chemical biored_chemical nlm_chem}
-declare -A TREE=([ncbi_disease]=2026-10-12_15-32-01 [biored_disease]=2026-10-12_15-37-54
-                 [bc5cdr_chemical]=2026-10-12_17-18-43 [biored_chemical]=2026-10-12_19-13-38
-                 [nlm_chem]=2026-10-12_21-00-37 [bc5cdr]=2026-10-09_14-12-26)  # G1 trees + F3 BC5CDR-disease
+declare -A TREE=([bc5cdr]=2026-10-09_14-12-26)  # F3 BC5CDR-disease; run_g1 sets use their latest run's tree
 OUT=outputs/g2; EXP=outputs/pecos/g2; mkdir -p "$OUT" "$EXP" "$HOME/.cache/huggingface"
 RUN=(docker run --rm --init --user "$(id -u):$(id -g)" --mount "type=bind,src=$PWD,dst=/app" -w /app)
 XMR=("${RUN[@]}" --gpus all --mount "type=bind,src=$HOME/.cache/huggingface,dst=/cache/huggingface"
@@ -23,9 +21,10 @@ path() { python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d
 
 for s in $SETS; do
   if [ -n "${TREE[$s]:-}" ]; then tree=outputs/saved_trees/xmodel_${TREE[$s]}
-  else tree=$(path "$(ls -td outputs/runs/*_"$s" | head -1)/tree.json" xmodel_path); fi  # set not in TREE: latest run_g1 tree
+  else tree=$(path "$(ls -d outputs/runs/*_"$s" | sort | tail -1)/tree.json" xmodel_path); fi  # set not in TREE: latest run_g1 tree
   for split in dev test; do
     spec=configs/experiments/$s.json; [ "$split" = test ] && spec=configs/experiments/${s}_test.json
+    rm -rf "$EXP/${s}_$split"  # export refuses a non-empty dir; a rerun replaces the old export
     "${XMR[@]}" python3 -c "$PEAK" "$OUT/peak_rss.tsv" "$s export $split" python3 scripts/baselines/pecos_compare.py \
       export -xmodel_path "$tree" -train_path "$(path "$spec" train_path)" -test_path "$(path "$spec" test_path)" \
       -out "$EXP/${s}_$split" 2>&1 | tee "$OUT/${s}_${split}_export.log"

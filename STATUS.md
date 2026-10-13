@@ -98,8 +98,10 @@ BC5CDR-disease 1-NN + PECOS done (2026-10-13, rows in the G1/G2 tables of result
 SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). Next, per plan G (user 2026-10-13: "test all datasets vs the other models"):
 **G-MM (code ready, not run):** MedMentions st21pv (18,520 train CUIs, 122k train rows, no dictionary), frozen config,
 specs `configs/experiments/medmentions_st21pv[_test].json`. `run_g2_pecos.sh` takes the latest run_g1 tree for a set
-not in its TREE map. Command handed to the user: `run_g1.sh medmentions_st21pv` in the xmr4el container, then host
-`run_g2_pecos.sh medmentions_st21pv` + `run_scispacy.sh medmentions_st21pv`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
+not in its TREE map. User asked (2026-10-13) for one script: `scripts/run_g.sh` (host) = run_g1 -> run_g2_pecos -> run_scispacy,
+default = the five G1 sets (retrained on CUDA-leaf code: new trees, the G1/G2 rows in results.md get replaced) +
+MedMentions. run_g2 now resolves every run_g1 set to its latest run's tree (TREE map keeps only bc5cdr) and clears
+the export dir before exporting. Command: `bash scripts/run_g.sh`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
 then add rows to the G1/G2 tables.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
