@@ -1,0 +1,34 @@
+{
+  "name": "i1_bc5cdr_chemical",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator"
+    },
+    {
+      "split": "dev_knn0",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "knn_beta": 0
+    },
+    {
+      "split": "dev_b20",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "beam_size": 20
+    },
+    {
+      "split": "dev_b50",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "beam_size": 50
+    },
+    {
+      "split": "dev_b128",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "beam_size": 128
+    }
+  ]
+}

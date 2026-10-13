@@ -337,13 +337,18 @@ class XModel:
         knn_beta > 0 multiplies each candidate's score by exp(knn_beta * knn), knn = max cosine of the query's
         mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). The candidates
         stay the tree's; rows are re-sorted by the fused score before topk."""
-        cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
-        knn_beta = cfg["knn_beta"]
+        self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)  # bad settings fail before encoding
         time_start_encoding = time.perf_counter()
         X_query = self.text_encoder.predict(X_text)
         self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
                          X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
+        return self.predict_encoded(X_query, beam_size=beam_size, topk=topk, knn_beta=knn_beta)
 
+    def predict_encoded(self, X_query, beam_size: Optional[int] = None, topk: Optional[int] = None,
+                        knn_beta: Optional[float] = None):
+        """`predict` on already encoded queries (`text_encoder.predict` rows): search + knn only."""
+        cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+        knn_beta = cfg["knn_beta"]
         # knn changes the order: rank all of the tree's candidates, then cut to topk
         scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=0 if knn_beta else cfg["topk"])
         if knn_beta:

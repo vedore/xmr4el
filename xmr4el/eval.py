@@ -98,6 +98,7 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
     start = time.perf_counter()
     scores = xm.predict(texts, **m["search"])
     m["predict_seconds"] = round(time.perf_counter() - start, 1)
+    m["ms_per_query"] = round(1000 * m["predict_seconds"] / len(gold), 2)  # batch predict incl. encoding
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
     # Rank of the gold label in each query's score row. 0 = never retrieved.
     # Single gold CUI per mention (Preprocessor.load_pubtator_file -> one-hot Y), so acc@1 / MRR /
@@ -118,6 +119,11 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
         m["hybrid_all"] = m["hybrid"] * len(gold) / len(test["labels"])
         m["strings"] = {k: dict(zip(("n", "tree", "dict", "either"), (int(v[0]), *map(float, v[1:]))))
                         for k, v in b.items()}
+        # routed = gold among the candidates; a group's misses = (1 - routed) lost in routing + the rest ranked wrong
+        n_lab = np.array([len(c) for c in train_string_labels(texts, train_pairs)])
+        for k, g in {"all": n_lab >= 0, "seen, 1 label": n_lab == 1, "seen, >1 label": n_lab > 1,
+                     "unseen string": n_lab == 0}.items():
+            m["strings"][k]["routed"] = float((ranks[g] > 0).mean()) if g.any() else 0.0
     state = {"scores": scores, "texts": texts, "gold": gold, "ranks": ranks, "train_pairs": train_pairs}
     return m, state
 
@@ -139,9 +145,9 @@ def format_metrics(m):
               f"         @cand {m['R@cand']:.4f}  (gold among the candidates: the cap for every metric)"]
     if "strings" in m:
         lines += ["", "acc@1 by mention string (dict = most frequent train label for the exact string)",
-                  f"  {'':16s} {'n':>6s} {'share':>6s} {'tree':>7s} {'dict':>7s} {'either':>7s}"]
+                  f"  {'':16s} {'n':>6s} {'share':>6s} {'tree':>7s} {'dict':>7s} {'either':>7s} {'routed':>7s}"]
         lines += [f"  {k:16s} {g['n']:6d} {g['n'] / n:6.3f} {g['tree']:7.4f} {g['dict']:7.4f} {g['either']:7.4f}"
-                  for k, g in m["strings"].items()]
+                  f" {g['routed']:7.4f}" for k, g in m["strings"].items()]
         lines.append(f"  hybrid (dict if string seen, else tree): {m['hybrid']:.4f}   (all rows: {m['hybrid_all']:.4f})")
     return "\n".join(lines)
 

@@ -227,6 +227,7 @@ scispaCy (MedMentions only: its KBs are keyed by UMLS CUIs): `docker build --pla
 -t xmr4el-scispacy .`, then `bash scripts/run_scispacy.sh medmentions_st21pv` after run_g2_pecos.sh; writes
 `pred_scispacy_umls.npz` into the same exports (`scripts/baselines/scispacy_run.py`).
 `scripts/run_g.sh [set ...]` (host) chains run_g1 -> run_g2_pecos -> run_scispacy; default = the five G1 sets + MedMentions.
+`scripts/run_i.sh` (host, after run_g.sh): plan I eval-only (`i1_*` specs: knn on/off, beam curve) and `bench_latency.py` (latency / memory vs SapBERT and TF-IDF 1-NN).
 Equivalence test (`scripts/run_eq.sh`, NCBI dev): export also writes the tree's hierarchy (`chain_<i>.npz`);
 `pecos_run.py -chain -solver L2R_LR_DUAL -post sigmoid` trains PECOS on it with the tree's loss and path product;
 `pecos_compare.py agree` compares the tree's scores (knn off) with each `pred_*.npz` row by row.
