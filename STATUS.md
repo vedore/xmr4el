@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 read, results in `docs/results.md`; G2 PECOS runner ready, next = user launches it).
+Last updated 2026-10-13 (G1 + G2 PECOS read, results in `docs/results.md`; next = user picks the remaining plan G item).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -61,11 +61,12 @@ frozen comparison).** `scripts/run_g2_pecos.sh` (host, Docker: xmr4el exports de
 xmr4el-pecos trains once on the dev export, `-features ours -nr_splits 16 -max_leaf_size 100 -threshold 0 -beams 10`, as
 the BC5CDR-disease PECOS rows; test predicted with that model via new `pecos_run.py -model`). Bundle `outputs/g2.tar.gz`
 (logs + `peak_rss.tsv`; exports/models stay in `outputs/pecos/g2/` on the server).
-**NEXT: user launches on the server (host shell, repo root) after push + pull:** `nohup bash scripts/run_g2_pecos.sh >
-outputs/g2_main.log 2>&1 &`. Then scp `outputs/g2.tar.gz` here and untar. Read: per set `<set>_<split>_score.log`
-(acc@1, MRR, R@k, groups, hybrid), rows/total from `<set>_<split>_export.log` (cov x acc = acc@1 x rows / total), PECOS
-train/predict time from `<set>_dev_pecos.log`, `peak_rss.tsv`; add PECOS rows to the G1 tables in `docs/results.md`.
-Failure: `outputs/g2_main.log` tail. Untested on PECOS itself (no macOS wheel; `-model` checked with a stub).
+**G2 result (2026-10-13, read; all 10 steps done, same rows as G1; `docs/results.md` G1/G2 section).** PECOS < XMR4EL
+on every set/split (diseases -3 to -7 pt, chemicals -12 to -19; misses exact training names at 180k labels, seen 1
+0.80-0.85). PECOS has no knn re-scoring (noted in results.md). PECOS train 28-30 s / 274-292 s, peak 4 / 28 GB.
+Exports + PECOS models on the server: `outputs/pecos/g2/` (large; delete once the user agrees).
+**NEXT (user picks):** remaining plan G items: BC5CDR-disease 1-NN rows on `14-12-26` (one nn_baselines call per
+split); scispaCy (baseline 5, own env); MedMentions st21pv (last dataset, base config); literature rows (context only).
 Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.

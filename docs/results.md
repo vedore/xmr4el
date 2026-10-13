@@ -630,7 +630,7 @@ XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 
-## 2026-10-12: plan G1, five datasets, XMR4EL vs 1-NN baselines (dev, then test once)
+## 2026-10-12: plan G1/G2, five datasets, XMR4EL vs 1-NN baselines and PECOS (dev, then test once)
 
 `bash scripts/run_g1.sh` on the server, commit `0d777ef` (clean), `configs/xmr4el_bc5cdr_config.json` unchanged for
 every set, no tuning between dev and test. One tree per set, trained on its train + CTD dictionary (diseases: CTD MEDIC + OMIM,
@@ -639,6 +639,9 @@ every set, no tuning between dev and test. One tree per set, trained on its trai
 1-NN over the tree's training rows, same rows and vocabulary as XMR4EL). XMR4EL search = config defaults (beam 10,
 topk 0, knn beta 10). Multi-id rows dropped by the converters. `cov x acc` = `acc@1_all` (out-of-vocabulary rows count as misses).
 Group n = seen 1 / seen >1 / unseen.
+PECOS rows (G2, 2026-10-13): `bash scripts/run_g2_pecos.sh` (code `d91edec`: `pecos_run.py -model`), XR-Linear on the
+tree's exported features (`pecos_compare.py export`, same rows), `-nr_splits 16 -max_leaf_size 100 -threshold 0`, beam 10,
+top 100; trained once on the dev export, test predicted with that model. Logs `outputs/g2/`.
 
 dev:
 
@@ -647,18 +650,23 @@ dev:
 | NCBI-disease (13,385, 729/757; n 537/17/175) | XMR4EL (`15-32-01`) | 0.925 | 0.890 | 0.946 | 0.974 | 0.968 | 0.941 | 0.789 | 0.929 |
 |  | SapBERT 1-NN | 0.905 | 0.872 | 0.937 | 0.984 | 0.972 | 0.294 | 0.760 | 0.922 |
 |  | char TF-IDF 1-NN | 0.868 | 0.836 | 0.911 | 0.973 | 0.972 | 0.176 | 0.617 | 0.888 |
+|  | PECOS XR-Linear, our features | 0.894 | 0.861 | 0.916 | 0.947 | 0.946 | 0.882 | 0.737 | 0.916 |
 | BioRED disease (13,325, 956/961; n 605/23/328) | XMR4EL (`15-37-54`) | 0.897 | 0.893 | 0.921 | 0.962 | 0.979 | 0.957 | 0.744 | 0.894 |
 |  | SapBERT 1-NN | 0.878 | 0.873 | 0.911 | 0.970 | 0.979 | 0.739 | 0.701 | 0.880 |
 |  | char TF-IDF 1-NN | 0.847 | 0.843 | 0.889 | 0.957 | 0.979 | 0.826 | 0.607 | 0.847 |
+|  | PECOS XR-Linear, our features | 0.844 | 0.840 | 0.879 | 0.935 | 0.931 | 0.739 | 0.692 | 0.877 |
 | BC5CDR-chemical (179,709, 5181/5307; n 4465/68/648) | XMR4EL (`17-18-43`) | 0.945 | 0.922 | 0.953 | 0.965 | 0.976 | 0.676 | 0.756 | 0.966 |
 |  | SapBERT 1-NN | 0.965 | 0.942 | 0.974 | 0.986 | 0.996 | 0.324 | 0.821 | 0.974 |
 |  | char TF-IDF 1-NN | 0.961 | 0.939 | 0.970 | 0.983 | 0.996 | 0.559 | 0.765 | 0.967 |
+|  | PECOS XR-Linear, our features | 0.827 | 0.807 | 0.859 | 0.911 | 0.853 | 0.559 | 0.677 | 0.956 |
 | BioRED chemical (179,702, 779/809; n 629/22/128) | XMR4EL (`19-13-38`) | 0.874 | 0.842 | 0.899 | 0.947 | 0.973 | 0.955 | 0.375 | 0.892 |
 |  | SapBERT 1-NN | 0.905 | 0.871 | 0.930 | 0.969 | 0.998 | 0.318 | 0.547 | 0.920 |
 |  | char TF-IDF 1-NN | 0.929 | 0.895 | 0.937 | 0.951 | 0.998 | 0.864 | 0.602 | 0.929 |
+|  | PECOS XR-Linear, our features | 0.739 | 0.712 | 0.792 | 0.875 | 0.822 | 0.409 | 0.391 | 0.897 |
 | NLM-Chem (179,696, 4907/4945; n 3168/173/1566) | XMR4EL (`21-00-37`) | 0.877 | 0.870 | 0.894 | 0.916 | 0.962 | 0.647 | 0.729 | 0.877 |
 |  | SapBERT 1-NN | 0.845 | 0.839 | 0.893 | 0.959 | 0.975 | 0.225 | 0.652 | 0.852 |
 |  | char TF-IDF 1-NN | 0.872 | 0.865 | 0.898 | 0.941 | 0.975 | 0.202 | 0.738 | 0.880 |
+|  | PECOS XR-Linear, our features | 0.689 | 0.684 | 0.751 | 0.841 | 0.807 | 0.526 | 0.471 | 0.795 |
 
 test:
 
@@ -667,18 +675,23 @@ test:
 | NCBI-disease (13,385, 923/945; n 633/33/257) | XMR4EL (`15-32-01`) | 0.901 | 0.880 | 0.924 | 0.960 | 0.978 | 0.848 | 0.720 | 0.904 |
 |  | SapBERT 1-NN | 0.885 | 0.865 | 0.916 | 0.966 | 0.976 | 0.576 | 0.700 | 0.898 |
 |  | char TF-IDF 1-NN | 0.826 | 0.806 | 0.874 | 0.946 | 0.976 | 0.394 | 0.510 | 0.845 |
+|  | PECOS XR-Linear, our features | 0.829 | 0.810 | 0.875 | 0.939 | 0.913 | 0.879 | 0.615 | 0.874 |
 | BioRED disease (13,325, 904/904; n 549/18/337) | XMR4EL (`15-37-54`) | 0.879 | 0.879 | 0.911 | 0.963 | 0.971 | 0.556 | 0.748 | 0.886 |
 |  | SapBERT 1-NN | 0.874 | 0.874 | 0.908 | 0.969 | 0.973 | 0.444 | 0.736 | 0.882 |
 |  | char TF-IDF 1-NN | 0.840 | 0.840 | 0.878 | 0.961 | 0.973 | 0.500 | 0.641 | 0.846 |
+|  | PECOS XR-Linear, our features | 0.829 | 0.829 | 0.868 | 0.935 | 0.920 | 0.556 | 0.694 | 0.866 |
 | BC5CDR-chemical (179,709, 5167/5352; n 4330/111/726) | XMR4EL (`17-18-43`) | 0.933 | 0.901 | 0.944 | 0.961 | 0.965 | 0.757 | 0.771 | 0.956 |
 |  | SapBERT 1-NN | 0.944 | 0.911 | 0.960 | 0.983 | 0.989 | 0.297 | 0.773 | 0.957 |
 |  | char TF-IDF 1-NN | 0.961 | 0.928 | 0.969 | 0.983 | 0.989 | 0.649 | 0.837 | 0.966 |
+|  | PECOS XR-Linear, our features | 0.811 | 0.783 | 0.846 | 0.899 | 0.848 | 0.514 | 0.640 | 0.938 |
 | BioRED chemical (179,702, 728/741; n 559/27/142) | XMR4EL (`19-13-38`) | 0.913 | 0.897 | 0.927 | 0.940 | 0.962 | 0.667 | 0.768 | 0.927 |
 |  | SapBERT 1-NN | 0.920 | 0.904 | 0.950 | 0.989 | 0.996 | 0.185 | 0.761 | 0.926 |
 |  | char TF-IDF 1-NN | 0.919 | 0.903 | 0.947 | 0.979 | 0.996 | 0.185 | 0.754 | 0.924 |
+|  | PECOS XR-Linear, our features | 0.786 | 0.772 | 0.836 | 0.902 | 0.839 | 0.296 | 0.669 | 0.908 |
 | NLM-Chem (179,696, 11029/11200; n 6751/941/3337) | XMR4EL (`21-00-37`) | 0.840 | 0.827 | 0.869 | 0.907 | 0.934 | 0.781 | 0.667 | 0.870 |
 |  | SapBERT 1-NN | 0.861 | 0.848 | 0.900 | 0.949 | 0.980 | 0.513 | 0.719 | 0.886 |
 |  | char TF-IDF 1-NN | 0.843 | 0.830 | 0.880 | 0.931 | 0.980 | 0.438 | 0.678 | 0.873 |
+|  | PECOS XR-Linear, our features | 0.723 | 0.712 | 0.772 | 0.843 | 0.805 | 0.762 | 0.547 | 0.835 |
 
 Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-247 s, train+dev 6.2 GB; chemical sets
 (~180k labels) train 5929-6175 s, train+dev 28.6-29.8 GB, test eval 18-20 GB, predict 19-95 s. 1-NN baselines 3.3-3.4 GB
@@ -695,6 +708,12 @@ Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-2
   test (NCBI 0.929 / 0.904 vs 0.922 / 0.898, BioRED 0.894 / 0.886 vs 0.880 / 0.882); chemicals below except BioRED
   chemical test (BC5CDR-chemical 0.966 / 0.957 vs 0.974 / 0.966, BioRED chemical 0.892 / 0.927 vs 0.929 / 0.926,
   NLM-Chem 0.877 / 0.870 vs 0.880 / 0.886).
+- PECOS is below XMR4EL on every set and split: diseases -3.1 / -5.3 pt (dev, NCBI / BioRED) and -7.2 / -5.0 (test);
+  chemicals -11.7 to -18.8 pt. On chemicals it misses exact training names (seen 1 0.80-0.85 vs 0.93-0.98); the hybrid
+  lifts it to 0.80-0.96. Same features and rows, but PECOS has no knn re-scoring (beta 10 was +4.3 pt on BC5CDR-disease
+  test, 2026-10-08), so this is XR-Linear vs tree + leaf matcher + knn; the 2026-10-06 tie predates knn.
+- PECOS cost: train 28-30 s (diseases, hierarchy 16 -> 256 -> labels) / 274-292 s (chemicals, 8 -> 128 -> 2048 -> labels)
+  vs XMR4EL 239-247 / 5929-6175 s; peak 3.8-3.9 / 27-28 GB (`outputs/g2/peak_rss.tsv`); predict 0.3-8.6 s.
 - BC5CDR-disease (the F1 tree `14-12-26`, 2026-10-07 section) has no 1-NN rows yet.
 
 ## Commands
