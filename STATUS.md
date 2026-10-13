@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read).
+Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read; MedMentions code ready).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -95,8 +95,18 @@ tree A at 0.890. The XMR4EL lead over PECOS is knn re-scoring (+3.5 pt), plus ba
 vs PECOS rankers 52 s. The rest is encoding (90 s) + clustering (20 s), which PECOS's time leaves out.
 Open, if wanted: tree B (balanced, routing off) to separate A's two components.
 BC5CDR-disease 1-NN + PECOS done (2026-10-13, rows in the G1/G2 tables of results.md: XMR4EL +58 / +57 rows vs
-SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). Next, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
-script), literature rows.
+SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). Next, per plan G (user 2026-10-13: "test all datasets vs the other models"):
+**G-MM (code ready, not run):** MedMentions st21pv (18,520 train CUIs, 122k train rows, no dictionary), frozen config,
+specs `configs/experiments/medmentions_st21pv[_test].json`. `run_g2_pecos.sh` takes the latest run_g1 tree for a set
+not in its TREE map. Command handed to the user: `run_g1.sh medmentions_st21pv` in the xmr4el container, then host
+`run_g2_pecos.sh medmentions_st21pv`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
+then add rows to the G1/G2 tables.
+**scispaCy blocker (asked the user):** its "mesh" KB (`umls_mesh_2022.jsonl`) is keyed by UMLS CUIs, not MeSH ids.
+The six MeSH sets need a CUI -> MeSH map: UMLS MRCONSO (out of scope) or a name bridge via CTD (lossy). MedMentions
+CUIs map directly via the "umls" KB (2022AB vs the corpus's 2017AA). The scispaCy linker is char-3gram TF-IDF ANN over
+KB aliases: the same method as our char TF-IDF 1-NN, on a different vocabulary. Plan: script reads the export's
+texts.json and writes pred_scispacy_<kb>.npz, so `pecos_compare.py score` scores it unchanged.
+Literature rows: numbers must be checked against the papers (web) before writing.
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 

@@ -19,10 +19,11 @@ PEAK='import resource, subprocess, sys
 r = subprocess.run(sys.argv[3:]).returncode
 gb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1e6
 open(sys.argv[1], "a").write(f"{sys.argv[2]}\t{gb:.1f}\n"); sys.exit(r)'
-path() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["evals"][0][sys.argv[2]])' "$1" "$2"; }
+path() { python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["evals"][0][sys.argv[2]] if "evals" in d else d[sys.argv[2]])' "$1" "$2"; }
 
 for s in $SETS; do
-  tree=outputs/saved_trees/xmodel_${TREE[$s]}
+  if [ -n "${TREE[$s]:-}" ]; then tree=outputs/saved_trees/xmodel_${TREE[$s]}
+  else tree=$(path "$(ls -td outputs/runs/*_"$s" | head -1)/tree.json" xmodel_path); fi  # set not in TREE: latest run_g1 tree
   for split in dev test; do
     spec=configs/experiments/$s.json; [ "$split" = test ] && spec=configs/experiments/${s}_test.json
     "${XMR[@]}" python3 -c "$PEAK" "$OUT/peak_rss.tsv" "$s export $split" python3 scripts/baselines/pecos_compare.py \

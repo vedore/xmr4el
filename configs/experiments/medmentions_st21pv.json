@@ -1,0 +1,12 @@
+{
+  "name": "medmentions_st21pv",
+  "model_config": "configs/xmr4el_bc5cdr_config.json",
+  "train_path": "datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt",
+      "train_path": "datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt"
+    }
+  ]
+}

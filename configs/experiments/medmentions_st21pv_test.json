@@ -1,0 +1,10 @@
+{
+  "name": "medmentions_st21pv_test",
+  "evals": [
+    {
+      "split": "test",
+      "test_path": "datasets/MedMentions/st21pv/data/corpus_pubtator_test.txt",
+      "train_path": "datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt"
+    }
+  ]
+}
