@@ -77,7 +77,20 @@ CPU -> CUDA float32): G1 trees stay the G1 systems (no retrain); first use = Med
 tree `xmodel_2026-10-08_17-28-02` (C2, 1.6 GB, superseded), `outputs/pecos/{bc5cdr_dev,bc5cdr_dict_dev,bc5cdr_dict_test}`
 (1.5 GB, exports of deleted trees, rows already in results.md), `outputs/g{1,2}.tar.gz` (extracted). Keep: tree
 `14-12-26` + the 5 G1 trees (server), `outputs/runs/`, `outputs/cache/` (encoding cache).
-**NEXT (user, server, host shell):** BC5CDR-disease 1-NN + PECOS on `14-12-26` (`run_g2_pecos.sh bc5cdr`, nn json into
+**EQ = equivalence test XMR4EL vs PECOS (user 2026-10-13: "can someone just use PECOS, it trains faster?").** Code:
+`routing_features` (tree + XModel config, default true = old behavior; false = leaves see the root's X, as PECOS),
+`pecos_compare.py export` writes the tree's hierarchy as PECOS chain (`chain_<i>.npz`), `pecos_run.py -chain -solver
+-post -eps -tag` (PECOS on our hierarchy, `shallow=True`; API checked against PECOS source, not run: no macOS wheel),
+`pecos_compare.py agree` (row-by-row: acc@1 both, top-1 agreement, top-10 overlap, |score diff|). Synthetic check: export +
+chain + agree on tfidf trees (routing on/off), identical pred -> agree 1.0. pytest 55. Runner `scripts/run_eq.sh`
+(NCBI dev only): A = G1 tree `15-32-01` (PECOS own hierarchy / our chain / + logistic + sigmoid), C = new tree
+class_weight null (`configs/experiments/eq_c_config.json`), D = C + routing_features false (+ PECOS eps 0.001). Expected:
+D close to identical (solver tolerance only); each step's change in agreement = that component's effect. Speed: PECOS
+`rankers` time (chain given = solver only) vs the tree's node times in C/D run.log (CUDA leaves since `0189936`).
+**NEXT (user, server, host shell, after push + pull):** `nohup bash scripts/run_eq.sh > outputs/eq_main.log 2>&1 &`
+(~15 min: two NCBI trains + PECOS), scp `outputs/eq.tar.gz` back. Read `outputs/eq/{a,c,d}_agree.log` first, then
+`*_score.log`, `*_pecos_*.log` (train / rankers time), run dirs (`metrics_dev*.json`, node times in run.log).
+Still pending: BC5CDR-disease 1-NN + PECOS on `14-12-26` (`run_g2_pecos.sh bc5cdr`, nn json into
 `outputs/g2/`), then add both rows to the BC5CDR-disease part of results.md (new rows in the G1/G2 tables, n from the
 nn json). After that, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
 script), literature rows.

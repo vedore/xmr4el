@@ -59,7 +59,8 @@ class HierarchicalMLModel():
                  matcher_config=None, 
                  min_leaf_size=20,
                  cut_half_cluster=False,
-                 layer=1):
+                 layer=1,
+                 routing_features=True):
         
         self.logger = logging.getLogger(__name__)
         
@@ -67,6 +68,9 @@ class HierarchicalMLModel():
         self.matcher_config = matcher_config
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
+        # Append [parent cluster prob, sum, max] to a child's rows (train and predict); False = the parent's X as is
+        # (PECOS XR-Linear, for the equivalence test)
+        self.routing_features = routing_features
         
         self.hmodel = []  # hmodel[layer][node] = MLModel, in training order
         self.layers = layer
@@ -198,7 +202,7 @@ class HierarchicalMLModel():
             feat_sum = fused_c.sum(axis=1).ravel()
             feat_max = fused_c.max(axis=1).ravel()
             
-            X_aug = augment_features(X_node, feat_c, feat_sum, feat_max)
+            X_aug = augment_features(X_node, feat_c, feat_sum, feat_max) if self.routing_features else X_node
 
             Z_node = normalize(Z[local_idxs, :], norm="l2", axis=1)
             children.append((c, NodeInput(X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next)))
@@ -348,7 +352,7 @@ class HierarchicalMLModel():
                     rows.append(row); selected.append(p_child); total.append(sum_cs); maximum.append(max_cs)
             if not beam:
                 break
-            X_beam = augment_features(X_beam[rows], selected, total, maximum)
+            X_beam = augment_features(X_beam[rows], selected, total, maximum) if self.routing_features else X_beam[rows]
 
         time_start_ranking = time.perf_counter()
         leaves = asarray([e[1] for e in beam], dtype=int)

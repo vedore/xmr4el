@@ -14,7 +14,7 @@ def test_prepare_layer():
     Z = normalize(rs.rand(L, D))
     C = csr_matrix((np.ones(L), (np.arange(L), np.arange(L) % K)), shape=(L, K))
     fused = rs.rand(n, K)
-    children = HierarchicalMLModel.prepare_layer(None, X, Y, Z, C, fused, np.arange(L))
+    children = HierarchicalMLModel().prepare_layer(X, Y, Z, C, fused, np.arange(L))
     assert [c for c, _ in children] == list(range(K))
     for _, child in children:
         assert child.X.shape[1] == D + 3

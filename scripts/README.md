@@ -223,6 +223,9 @@ python3 scripts/baselines/pecos_run.py \
 same texts. Prediction files are named `pred_<features>_b<beam>.npz`.
 `-model <dev export>/model_ours` predicts another export (e.g. test) with that saved model, no training.
 `scripts/run_g2_pecos.sh` (host, both images) does this for every plan G set: export dev + test, train on dev, score.
+Equivalence test (`scripts/run_eq.sh`, NCBI dev): export also writes the tree's hierarchy (`chain_<i>.npz`);
+`pecos_run.py -chain -solver L2R_LR_DUAL -post sigmoid` trains PECOS on it with the tree's loss and path product;
+`pecos_compare.py agree` compares the tree's scores (knn off) with each `pred_*.npz` row by row.
 `-threshold` is XR-Linear weight pruning (default 0.1, PECOS's default); on BC5CDR dev the
 default alone cost PECOS 0.075 acc@1 (`docs/results.md`), so comparisons use `0`.
 `-nr_splits` (default 8) and `-max_leaf_size` (default 100) set PECOS's hierarchy.

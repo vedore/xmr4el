@@ -13,11 +13,11 @@ from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.hierarchy.tree import HierarchicalMLModel, augment_features
 
 
-def train(X, Y, Z, cfg, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False):
+def train(X, Y, Z, cfg, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False, routing_features=True):
     hml = HierarchicalMLModel(
         clustering_config={"type": "balancedkmeans", "kwargs": {"n_clusters": n_clusters, "iter_limit": 20}},
         matcher_config=cfg["matcher_config"], min_leaf_size=min_leaf_size,
-        cut_half_cluster=cut_half, layer=layer,
+        cut_half_cluster=cut_half, layer=layer, routing_features=routing_features,
     )
     L = Z.shape[0]
     caller_config = hml.clustering_config
@@ -62,6 +62,15 @@ def test_tree():
         Xa = augment_features(Xq, P[:, c], P.sum(axis=1), P.max(axis=1))
         expect[:, leaf.local_to_global_idx] = P[:, [c]] * leaf.matcher_model.predict_proba(Xa)
     assert np.allclose(hml.predict(Xq, beam_size=3).toarray(), expect)
+
+    # routing_features False: leaves see the root's X unchanged (PECOS XR-Linear), at train and predict
+    plain = train(X, Y, Z, cfg, routing_features=False)
+    P = np.asarray(plain.hmodel[0][0].matcher_model.predict_proba(Xq))
+    expect = np.zeros((L, L))
+    for c, child in plain.child_index_map[0][0].items():
+        leaf = plain.hmodel[1][child]
+        expect[:, leaf.local_to_global_idx] = P[:, [c]] * leaf.matcher_model.predict_proba(Xq)  # d columns, not d + 3
+    assert np.allclose(plain.predict(Xq, beam_size=3).toarray(), expect)
 
     # score matrix width is the label count, not the highest retrieved label + 1
     assert hml.predict(Xq[:1], beam_size=1, topk=1).shape == (1, L)

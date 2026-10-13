@@ -70,6 +70,7 @@ class XModel:
                  matcher_config: dict = None,
                  min_leaf_size: int = 20,
                  cut_half_cluster: bool = False,
+                 routing_features: bool = True,
                  depth: int = 1,
                  features: str = "sapbert_char_context",
                  predict_config: Optional[dict] = None,
@@ -100,6 +101,7 @@ class XModel:
         
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
+        self.routing_features = routing_features  # HierarchicalMLModel.routing_features
         if not (isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1):
             raise ValueError(f"depth must be an int >= 1, got {depth!r}")
         self.depth = depth
@@ -162,7 +164,8 @@ class XModel:
             f"XModel summary:",
             f"  logger: {logger_info}",
             f"  depth={self.depth}, features={self.features}, predict={self.predict_config}",
-            f"  cluster: min_leaf_size={self.min_leaf_size}, cut_half_cluster={self.cut_half_cluster}",
+            f"  cluster: min_leaf_size={self.min_leaf_size}, cut_half_cluster={self.cut_half_cluster}, "
+            f"routing_features={self.routing_features}",
             f"  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
@@ -310,6 +313,7 @@ class XModel:
             min_leaf_size=self.min_leaf_size,
             cut_half_cluster=self.cut_half_cluster,
             layer=self.depth,
+            routing_features=self.routing_features,
         )
 
         hml.train(
