@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 PECOS read, results in `docs/results.md`; next = user picks the remaining plan G item).
+Last updated 2026-10-13 (G1 + G2 read; EQ bundle downloaded, unread; BC5CDR-disease 1-NN + PECOS command handed to the user, not run).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -87,7 +87,7 @@ chain + agree on tfidf trees (routing on/off), identical pred -> agree 1.0. pyte
 class_weight null (`configs/experiments/eq_c_config.json`), D = C + routing_features false (+ PECOS eps 0.001). Expected:
 D close to identical (solver tolerance only); each step's change in agreement = that component's effect. Speed: PECOS
 `rankers` time (chain given = solver only) vs the tree's node times in C/D run.log (CUDA leaves since `0189936`).
-**NEXT (user, server, host shell, after push + pull):** `nohup bash scripts/run_eq.sh > outputs/eq_main.log 2>&1 &`
+**EQ ran on the server; `outputs/eq.tar.gz` is on the Mac (2026-10-13), not yet extracted or read. NEXT (Claude): `tar xzf outputs/eq.tar.gz`, read as below, add an EQ section to `docs/results.md`.** Launch was: `nohup bash scripts/run_eq.sh > outputs/eq_main.log 2>&1 &`
 (~15 min: two NCBI trains + PECOS), scp `outputs/eq.tar.gz` back. Read `outputs/eq/{a,c,d}_agree.log` first, then
 `*_score.log`, `*_pecos_*.log` (train / rankers time), run dirs (`metrics_dev*.json`, node times in run.log).
 Still pending: BC5CDR-disease 1-NN + PECOS on `14-12-26` (`run_g2_pecos.sh bc5cdr`, nn json into
