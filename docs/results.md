@@ -630,6 +630,73 @@ XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/
 - Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
   (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
 
+## 2026-10-12: plan G1, five datasets, XMR4EL vs 1-NN baselines (dev, then test once)
+
+`bash scripts/run_g1.sh` on the server, commit `0d777ef` (clean), `configs/xmr4el_bc5cdr_config.json` unchanged for
+every set, no tuning between dev and test. One tree per set, trained on its train + CTD dictionary (diseases: CTD MEDIC + OMIM,
+`ctd_disease_omim.pubtator`; chemicals: CTD chemicals, `ctd_chemical.pubtator`). Specs `configs/experiments/<set>[_test].json`, run dirs
+`outputs/runs/2026-10-12_*_<set>[_test]`, baselines `outputs/g1/<set>_<split>_nn.json` (`scripts/baselines/nn_baselines.py`:
+1-NN over the tree's training rows, same rows and vocabulary as XMR4EL). XMR4EL search = config defaults (beam 10,
+topk 0, knn beta 10). Multi-id rows dropped by the converters. `cov x acc` = `acc@1_all` (out-of-vocabulary rows count as misses).
+Group n = seen 1 / seen >1 / unseen.
+
+dev:
+
+| dataset (labels, rows) | system | acc@1 | cov x acc | MRR | R@10 | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|
+| NCBI-disease (13,385, 729/757; n 537/17/175) | XMR4EL (`15-32-01`) | 0.925 | 0.890 | 0.946 | 0.974 | 0.968 | 0.941 | 0.789 | 0.929 |
+|  | SapBERT 1-NN | 0.905 | 0.872 | 0.937 | 0.984 | 0.972 | 0.294 | 0.760 | 0.922 |
+|  | char TF-IDF 1-NN | 0.868 | 0.836 | 0.911 | 0.973 | 0.972 | 0.176 | 0.617 | 0.888 |
+| BioRED disease (13,325, 956/961; n 605/23/328) | XMR4EL (`15-37-54`) | 0.897 | 0.893 | 0.921 | 0.962 | 0.979 | 0.957 | 0.744 | 0.894 |
+|  | SapBERT 1-NN | 0.878 | 0.873 | 0.911 | 0.970 | 0.979 | 0.739 | 0.701 | 0.880 |
+|  | char TF-IDF 1-NN | 0.847 | 0.843 | 0.889 | 0.957 | 0.979 | 0.826 | 0.607 | 0.847 |
+| BC5CDR-chemical (179,709, 5181/5307; n 4465/68/648) | XMR4EL (`17-18-43`) | 0.945 | 0.922 | 0.953 | 0.965 | 0.976 | 0.676 | 0.756 | 0.966 |
+|  | SapBERT 1-NN | 0.965 | 0.942 | 0.974 | 0.986 | 0.996 | 0.324 | 0.821 | 0.974 |
+|  | char TF-IDF 1-NN | 0.961 | 0.939 | 0.970 | 0.983 | 0.996 | 0.559 | 0.765 | 0.967 |
+| BioRED chemical (179,702, 779/809; n 629/22/128) | XMR4EL (`19-13-38`) | 0.874 | 0.842 | 0.899 | 0.947 | 0.973 | 0.955 | 0.375 | 0.892 |
+|  | SapBERT 1-NN | 0.905 | 0.871 | 0.930 | 0.969 | 0.998 | 0.318 | 0.547 | 0.920 |
+|  | char TF-IDF 1-NN | 0.929 | 0.895 | 0.937 | 0.951 | 0.998 | 0.864 | 0.602 | 0.929 |
+| NLM-Chem (179,696, 4907/4945; n 3168/173/1566) | XMR4EL (`21-00-37`) | 0.877 | 0.870 | 0.894 | 0.916 | 0.962 | 0.647 | 0.729 | 0.877 |
+|  | SapBERT 1-NN | 0.845 | 0.839 | 0.893 | 0.959 | 0.975 | 0.225 | 0.652 | 0.852 |
+|  | char TF-IDF 1-NN | 0.872 | 0.865 | 0.898 | 0.941 | 0.975 | 0.202 | 0.738 | 0.880 |
+
+test:
+
+| dataset (labels, rows) | system | acc@1 | cov x acc | MRR | R@10 | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|
+| NCBI-disease (13,385, 923/945; n 633/33/257) | XMR4EL (`15-32-01`) | 0.901 | 0.880 | 0.924 | 0.960 | 0.978 | 0.848 | 0.720 | 0.904 |
+|  | SapBERT 1-NN | 0.885 | 0.865 | 0.916 | 0.966 | 0.976 | 0.576 | 0.700 | 0.898 |
+|  | char TF-IDF 1-NN | 0.826 | 0.806 | 0.874 | 0.946 | 0.976 | 0.394 | 0.510 | 0.845 |
+| BioRED disease (13,325, 904/904; n 549/18/337) | XMR4EL (`15-37-54`) | 0.879 | 0.879 | 0.911 | 0.963 | 0.971 | 0.556 | 0.748 | 0.886 |
+|  | SapBERT 1-NN | 0.874 | 0.874 | 0.908 | 0.969 | 0.973 | 0.444 | 0.736 | 0.882 |
+|  | char TF-IDF 1-NN | 0.840 | 0.840 | 0.878 | 0.961 | 0.973 | 0.500 | 0.641 | 0.846 |
+| BC5CDR-chemical (179,709, 5167/5352; n 4330/111/726) | XMR4EL (`17-18-43`) | 0.933 | 0.901 | 0.944 | 0.961 | 0.965 | 0.757 | 0.771 | 0.956 |
+|  | SapBERT 1-NN | 0.944 | 0.911 | 0.960 | 0.983 | 0.989 | 0.297 | 0.773 | 0.957 |
+|  | char TF-IDF 1-NN | 0.961 | 0.928 | 0.969 | 0.983 | 0.989 | 0.649 | 0.837 | 0.966 |
+| BioRED chemical (179,702, 728/741; n 559/27/142) | XMR4EL (`19-13-38`) | 0.913 | 0.897 | 0.927 | 0.940 | 0.962 | 0.667 | 0.768 | 0.927 |
+|  | SapBERT 1-NN | 0.920 | 0.904 | 0.950 | 0.989 | 0.996 | 0.185 | 0.761 | 0.926 |
+|  | char TF-IDF 1-NN | 0.919 | 0.903 | 0.947 | 0.979 | 0.996 | 0.185 | 0.754 | 0.924 |
+| NLM-Chem (179,696, 11029/11200; n 6751/941/3337) | XMR4EL (`21-00-37`) | 0.840 | 0.827 | 0.869 | 0.907 | 0.934 | 0.781 | 0.667 | 0.870 |
+|  | SapBERT 1-NN | 0.861 | 0.848 | 0.900 | 0.949 | 0.980 | 0.513 | 0.719 | 0.886 |
+|  | char TF-IDF 1-NN | 0.843 | 0.830 | 0.880 | 0.931 | 0.980 | 0.438 | 0.678 | 0.873 |
+
+Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-247 s, train+dev 6.2 GB; chemical sets
+(~180k labels) train 5929-6175 s, train+dev 28.6-29.8 GB, test eval 18-20 GB, predict 19-95 s. 1-NN baselines 3.3-3.4 GB
+(diseases), 15-17 GB (chemicals).
+
+- Diseases (13k labels): XMR4EL beats both baselines on dev and test (rows vs the best 1-NN: NCBI +14 / +15,
+  BioRED +19 / +5). The gain is seen >1 (context; NCBI dev 0.941 vs 0.294) and unseen strings; seen 1 is level.
+- Chemicals (180k labels): XMR4EL is below the best 1-NN on BC5CDR-chemical (dev -107, test -142 rows), BioRED
+  chemical (dev -43, test -5) and NLM-Chem test (-231); NLM-Chem dev +24. It still wins seen >1 everywhere (NLM-Chem
+  test +252 rows) but loses seen 1 (BC5CDR-chemical dev 0.976 vs 0.996, -89 rows; NLM-Chem test 0.934 vs 0.980,
+  -310) and most unseen groups. R@cand is 0.92-0.97 on chemicals vs 0.98-0.99 on diseases, so at least part of the
+  loss is routing (gold not among the 1000 candidates); not yet split per row.
+- Hybrid (exact train string -> its majority label, else the system) vs the best 1-NN hybrid: diseases above on dev and
+  test (NCBI 0.929 / 0.904 vs 0.922 / 0.898, BioRED 0.894 / 0.886 vs 0.880 / 0.882); chemicals below except BioRED
+  chemical test (BC5CDR-chemical 0.966 / 0.957 vs 0.974 / 0.966, BioRED chemical 0.892 / 0.927 vs 0.929 / 0.926,
+  NLM-Chem 0.877 / 0.870 vs 0.880 / 0.886).
+- BC5CDR-disease (the F1 tree `14-12-26`, 2026-10-07 section) has no 1-NN rows yet.
+
 ## Commands
 
 ```bash

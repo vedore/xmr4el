@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-09 (plan H committed `8168203`; G0 code + data done; next = G1 server runs by the user).
+Last updated 2026-10-13 (G1 read, results in `docs/results.md`; G2 PECOS runner ready, next = user launches it).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -47,20 +47,25 @@ bc5cdr_chemical,nlm_chem}[_test].json`, all with `xmr4el_bc5cdr_config.json` unc
 NCBI dictionary = `ctd_disease_omim.pubtator` (BioRED disease too); chemical sets = `ctd_chemical.pubtator`
 (469,694 names, 179,7xx labels with train).
 
-**G1 runner (2026-10-12, user asked for one script): `scripts/run_g1.sh` does all 5 sets (train + dev, test on the
-same tree, nn baselines dev + test, peak RAM per step) and packs `outputs/g1.tar.gz` (no trees) for scp back.
-It runs test with dev (frozen config, no tuning between). Pasted/scp'd results: read dev first, then test.**
-**IN FLIGHT (2026-10-12): user launched `nohup bash scripts/run_g1.sh > outputs/g1_main.log 2>&1 &` on the server
-(code `0d777ef`). Code frozen for judging. When done the user copies `outputs/g1.tar.gz` here
-(`scp <server>:<repo>/outputs/g1.tar.gz outputs/ && tar xzf outputs/g1.tar.gz`). Then: read
-`outputs/g1/peak_rss.tsv`, each run's `status.json` + `metrics_{dev,test}.json` + train time in `run.log`, and
-`outputs/g1/<set>_<split>_nn.json`; compare XMR4EL vs the 1-NN baselines on dev per set, then test; valid numbers
-to `docs/results.md`; next PECOS per set. Failure: `outputs/g1_main.log` tail + that run's `status.json`.**
-**NEXT: G1 (user, server; `datasets/` is not in git: copy the new files first).** Per set: train + dev
-(`run_experiment.py`), then baselines 3-4 on dev with that tree. Order: ncbi_disease, biored_disease (BC5CDR-scale),
-then bc5cdr_chemical = the 180k-label scale probe (watch RAM, train time, tree size before the other chemical sets).
-Paste per run: the `Eval dev` block, `status.json`, train time, and the nn_baselines lines. Test once per set after
-dev is read. PECOS (baseline 2) per set after that; scispaCy (5) later, own env.
+**G1 runner (2026-10-12): `scripts/run_g1.sh` (all 5 sets: train + dev, test on the same tree, nn baselines, peak RAM),
+bundle `outputs/g1.tar.gz`.**
+**G1 result (2026-10-13, read; server run at `0d777ef` clean, all 10 runs completed; `docs/results.md` 2026-10-12 section).**
+Trees on the server: ncbi `15-32-01`, biored_disease `15-37-54`, bc5cdr_chemical `17-18-43`, biored_chemical
+`19-13-38`, nlm_chem `21-00-37` (all `xmodel_2026-10-12_*`). Diseases (13k labels): XMR4EL > best 1-NN on dev and
+test (+5 to +19 rows; gain = seen >1 + unseen). Chemicals (180k labels): XMR4EL < best 1-NN except NLM-Chem dev
+(BC5CDR-chem -107 / -142, BioRED chem -43 / -5, NLM-Chem +24 / -231); seen >1 still wins, seen 1 loses (bc5cdr-chem dev
+0.976 vs 0.996; nlm test 0.934 vs 0.980), R@cand 0.92-0.97 (diseases 0.98-0.99) -> routing loses gold at 180k labels
+(not yet split per row). Cost: chemical train ~6000 s / ~30 GB peak (diseases 240 s / 6 GB).
+**G2 = PECOS per set (user chose (b) 2026-10-13; (a) diagnosis = tuning for 180k labels, not done: G1 stays the
+frozen comparison).** `scripts/run_g2_pecos.sh` (host, Docker: xmr4el exports dev + test from the G1 tree and scores;
+xmr4el-pecos trains once on the dev export, `-features ours -nr_splits 16 -max_leaf_size 100 -threshold 0 -beams 10`, as
+the BC5CDR-disease PECOS rows; test predicted with that model via new `pecos_run.py -model`). Bundle `outputs/g2.tar.gz`
+(logs + `peak_rss.tsv`; exports/models stay in `outputs/pecos/g2/` on the server).
+**NEXT: user launches on the server (host shell, repo root) after push + pull:** `nohup bash scripts/run_g2_pecos.sh >
+outputs/g2_main.log 2>&1 &`. Then scp `outputs/g2.tar.gz` here and untar. Read: per set `<set>_<split>_score.log`
+(acc@1, MRR, R@k, groups, hybrid), rows/total from `<set>_<split>_export.log` (cov x acc = acc@1 x rows / total), PECOS
+train/predict time from `<set>_dev_pecos.log`, `peak_rss.tsv`; add PECOS rows to the G1 tables in `docs/results.md`.
+Failure: `outputs/g2_main.log` tail. Untested on PECOS itself (no macOS wheel; `-model` checked with a stub).
 Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.

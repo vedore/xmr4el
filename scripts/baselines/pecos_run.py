@@ -5,6 +5,7 @@
 Hierarchy close to the tree: PIFA label embeddings, hierarchical k-means, nr_splits 8, max leaf 100 -> at 500
 labels 8 clusters -> labels (same depth as the tree's 6 -> labels). PECOS treats nr_splits as a power of 2:
 6 silently becomes binary splits over 3 levels. Writes <data>/pred_<features>_b<beam>.npz (top-k scores per dev row).
+-model <dir>     predict <data>'s rows with a saved model (e.g. the dev export's model_ours) instead of training
 """
 import json
 import os
@@ -29,7 +30,18 @@ def main():
     ap.add_argument("-topk", type=int, default=100)
     ap.add_argument("-threshold", type=float, default=0.1,
                     help="XR-Linear weight pruning (PECOS default 0.1); 0 keeps all weights")
+    ap.add_argument("-model", help="saved model_ours to predict with (no training; -features ours only)")
     args = ap.parse_args()
+    if args.model:
+        assert args.features == "ours", "-model predicts our features only (the TF-IDF preprocessor is not saved)"
+        X_dev = load_npz(os.path.join(args.data, "X_dev.npz")).tocsr().astype(np.float32)
+        xlm = XLinearModel.load(args.model)
+        for beam in map(int, args.beams.split(",")):
+            t0 = time.time()
+            P = xlm.predict(X_dev, beam_size=beam, only_topk=args.topk)
+            save_npz(os.path.join(args.data, f"pred_ours_b{beam}.npz"), P.tocsr())
+            print(f"[ours] model {args.model}: beam {beam}: predict {time.time() - t0:.1f}s")
+        return
 
     Y = load_npz(os.path.join(args.data, "Y_trn.npz")).tocsr().astype(np.float32)
     for feat in args.features.split(","):
