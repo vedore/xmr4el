@@ -642,6 +642,9 @@ Group n = seen 1 / seen >1 / unseen.
 PECOS rows (G2, 2026-10-13): `bash scripts/run_g2_pecos.sh` (code `d91edec`: `pecos_run.py -model`), XR-Linear on the
 tree's exported features (`pecos_compare.py export`, same rows), `-nr_splits 16 -max_leaf_size 100 -threshold 0`, beam 10,
 top 100; trained once on the dev export, test predicted with that model. Logs `outputs/g2/`.
+BC5CDR-disease rows: the F1 tree `14-12-26` (commit `eeeb668`, same config, train + CTD MEDIC; run
+`outputs/runs/2026-10-09_14-07-17_bc5cdr`, test eval-only, 2026-10-07 section); its 1-NN + PECOS rows (2026-10-13,
+`outputs/g2/bc5cdr_<split>_{nn.json,pecos.log,score.log}`) as above. Hierarchy for PECOS 8 -> 128 -> labels.
 
 dev:
 
@@ -667,6 +670,10 @@ dev:
 |  | SapBERT 1-NN | 0.845 | 0.839 | 0.893 | 0.959 | 0.975 | 0.225 | 0.652 | 0.852 |
 |  | char TF-IDF 1-NN | 0.872 | 0.865 | 0.898 | 0.941 | 0.975 | 0.202 | 0.738 | 0.880 |
 |  | PECOS XR-Linear, our features | 0.689 | 0.684 | 0.751 | 0.841 | 0.807 | 0.526 | 0.471 | 0.795 |
+| BC5CDR-disease (11,744, 4305/4306; n 3140/212/953) | XMR4EL (`14-12-26`) | 0.900 | 0.900 | 0.931 | 0.973 | 0.978 | 0.778 | 0.669 | 0.904 |
+|  | SapBERT 1-NN | 0.887 | 0.886 | 0.924 | 0.978 | 0.978 | 0.594 | 0.650 | 0.899 |
+|  | char TF-IDF 1-NN | 0.874 | 0.874 | 0.908 | 0.957 | 0.978 | 0.618 | 0.589 | 0.886 |
+|  | PECOS XR-Linear, our features | 0.852 | 0.851 | 0.889 | 0.944 | 0.934 | 0.769 | 0.597 | 0.887 |
 
 test:
 
@@ -692,6 +699,10 @@ test:
 |  | SapBERT 1-NN | 0.861 | 0.848 | 0.900 | 0.949 | 0.980 | 0.513 | 0.719 | 0.886 |
 |  | char TF-IDF 1-NN | 0.843 | 0.830 | 0.880 | 0.931 | 0.980 | 0.438 | 0.678 | 0.873 |
 |  | PECOS XR-Linear, our features | 0.723 | 0.712 | 0.772 | 0.843 | 0.805 | 0.762 | 0.547 | 0.835 |
+| BC5CDR-disease (11,744, 4399/4410; n 3284/174/941) | XMR4EL (`14-12-26`) | 0.922 | 0.920 | 0.943 | 0.976 | 0.985 | 0.770 | 0.732 | 0.925 |
+|  | SapBERT 1-NN | 0.910 | 0.907 | 0.937 | 0.978 | 0.984 | 0.534 | 0.717 | 0.922 |
+|  | char TF-IDF 1-NN | 0.892 | 0.889 | 0.921 | 0.968 | 0.984 | 0.603 | 0.621 | 0.902 |
+|  | PECOS XR-Linear, our features | 0.865 | 0.863 | 0.901 | 0.955 | 0.931 | 0.718 | 0.661 | 0.910 |
 
 Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-247 s, train+dev 6.2 GB; chemical sets
 (~180k labels) train 5929-6175 s, train+dev 28.6-29.8 GB, test eval 18-20 GB, predict 19-95 s. 1-NN baselines 3.3-3.4 GB
@@ -714,7 +725,9 @@ Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`): disease sets train 239-2
   test, 2026-10-08), so this is XR-Linear vs tree + leaf matcher + knn; the 2026-10-06 tie predates knn.
 - PECOS cost: train 28-30 s (diseases, hierarchy 16 -> 256 -> labels) / 274-292 s (chemicals, 8 -> 128 -> 2048 -> labels)
   vs XMR4EL 239-247 / 5929-6175 s; peak 3.8-3.9 / 27-28 GB (`outputs/g2/peak_rss.tsv`); predict 0.3-8.6 s.
-- BC5CDR-disease (the F1 tree `14-12-26`, 2026-10-07 section) has no 1-NN rows yet.
+- BC5CDR-disease (11.7k labels) follows the other disease sets: XMR4EL vs SapBERT 1-NN +58 rows dev, +57 test; seen 1
+  level (0.978 / 0.985), seen >1 +0.18 / +0.24 (context), unseen +0.019 / +0.015; hybrid 0.904 / 0.925 vs 0.899 / 0.922.
+  PECOS -4.9 / -5.8 pt (train 33 s vs 309 s, peak 3.4 GB).
 
 ## Commands
 

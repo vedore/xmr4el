@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 read; EQ bundle downloaded, unread; BC5CDR-disease 1-NN + PECOS command handed to the user, not run).
+Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ bundle downloaded, unread).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -90,9 +90,8 @@ D close to identical (solver tolerance only); each step's change in agreement = 
 **EQ ran on the server; `outputs/eq.tar.gz` is on the Mac (2026-10-13), not yet extracted or read. NEXT (Claude): `tar xzf outputs/eq.tar.gz`, read as below, add an EQ section to `docs/results.md`.** Launch was: `nohup bash scripts/run_eq.sh > outputs/eq_main.log 2>&1 &`
 (~15 min: two NCBI trains + PECOS), scp `outputs/eq.tar.gz` back. Read `outputs/eq/{a,c,d}_agree.log` first, then
 `*_score.log`, `*_pecos_*.log` (train / rankers time), run dirs (`metrics_dev*.json`, node times in run.log).
-Still pending: BC5CDR-disease 1-NN + PECOS on `14-12-26` (`run_g2_pecos.sh bc5cdr`, nn json into
-`outputs/g2/`), then add both rows to the BC5CDR-disease part of results.md (new rows in the G1/G2 tables, n from the
-nn json). After that, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
+BC5CDR-disease 1-NN + PECOS done (2026-10-13, rows in the G1/G2 tables of results.md: XMR4EL +58 / +57 rows vs
+SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). After EQ, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
 script), literature rows.
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
