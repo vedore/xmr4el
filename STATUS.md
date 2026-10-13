@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read; MedMentions code ready).
+Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read; run_g.sh running on the server; plan I proposed).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -180,6 +180,19 @@ outputs/saved_trees/xmodel_2026-10-09_14-12-26`; report retrain noise with it. S
 retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 moved -11 rows). Check the log's
 `Knn re-scoring completed ... elapsed` (F1b) and the tree size vs `10-18-51` (F1c). Test once after the user agrees.
 
+
+**I. Plan after the run_g.sh rerun (PROPOSED 2026-10-13, not approved).** Research question (user 2026-10-13): do the
+context and scoring gains survive at large vocabularies, with latency and memory competitive with simple retrieval?
+- I0 Read run_g: replace the G1/G2 rows (new trees, CUDA leaves), add MedMentions + scispaCy rows, CUDA train times.
+- I1 Diagnose 180k loss (eval-only, 3 chemical trees, dev): per row, gold lost in routing vs ranked wrong in the leaf
+  (and per string group); knn on vs off (scoring gain at 180k).
+- I2 Beam curve (eval-only, BC5CDR-chemical dev): beam 10/20/50/128 -> R@cand, acc@1, ms/query. If routing is the
+  loss, this is the accuracy/latency trade-off. A structure change (root clusters, depth 3) only if the beam can't fix it.
+- I3 Efficiency benchmark (new script): XMR4EL vs SapBERT 1-NN (GPU brute force, standalone index) vs TF-IDF 1-NN.
+  Measures: ms/query (batch 1, batch 1024, encoding separate), peak RAM / VRAM, size on disk, at 13k / 18.5k / 180k
+  labels (scaling curve).
+- I4 Test once for any config changed in I2; literature rows (numbers checked against the papers); write-up.
+- Ceiling: 180k labels is the largest vocabulary without UMLS (out of scope). Full UMLS (~3M) is not reachable here.
 
 **F. Plan (decided 2026-10-09; order F1 -> F2 -> F3 -> F4). Main system = tree + knn (reranker dropped).**
 - F1 = E3, code only (tree-changing changes batched into one retrain, F3). Pytest + selfchecks after each part.
