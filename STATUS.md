@@ -99,13 +99,14 @@ SapBERT 1-NN dev / test, PECOS -4.9 / -5.8 pt). Next, per plan G (user 2026-10-1
 **G-MM (code ready, not run):** MedMentions st21pv (18,520 train CUIs, 122k train rows, no dictionary), frozen config,
 specs `configs/experiments/medmentions_st21pv[_test].json`. `run_g2_pecos.sh` takes the latest run_g1 tree for a set
 not in its TREE map. Command handed to the user: `run_g1.sh medmentions_st21pv` in the xmr4el container, then host
-`run_g2_pecos.sh medmentions_st21pv`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
+`run_g2_pecos.sh medmentions_st21pv` + `run_scispacy.sh medmentions_st21pv`. Read: `outputs/g1/medmentions_st21pv_*` + `outputs/g2/medmentions_st21pv_*`,
 then add rows to the G1/G2 tables.
-**scispaCy blocker (asked the user):** its "mesh" KB (`umls_mesh_2022.jsonl`) is keyed by UMLS CUIs, not MeSH ids.
-The six MeSH sets need a CUI -> MeSH map: UMLS MRCONSO (out of scope) or a name bridge via CTD (lossy). MedMentions
-CUIs map directly via the "umls" KB (2022AB vs the corpus's 2017AA). The scispaCy linker is char-3gram TF-IDF ANN over
-KB aliases: the same method as our char TF-IDF 1-NN, on a different vocabulary. Plan: script reads the export's
-texts.json and writes pred_scispacy_<kb>.npz, so `pecos_compare.py score` scores it unchanged.
+**G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
+(the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
+(CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
+the share of rows whose unrestricted top-1 is outside the label set), `scripts/run_scispacy.sh` (on run_g2's exports,
+re-scores, re-bundles g2.tar.gz). Stub check of `to_matrix` only (no local scispaCy). KB 2022AB vs MedMentions
+2017AA: retired CUIs get no candidate. Read `outputs/g2/medmentions_st21pv_*_{scispacy,score}.log`.
 Literature rows: numbers must be checked against the papers (web) before writing.
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
