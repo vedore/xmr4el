@@ -6,8 +6,9 @@
 # (exports and PECOS models stay in outputs/pecos/g2/). Usage: bash scripts/run_g2_pecos.sh [set ...]
 set -euo pipefail
 SETS=${*:-ncbi_disease biored_disease bc5cdr_chemical biored_chemical nlm_chem}
-declare -A TREE=([ncbi_disease]=15-32-01 [biored_disease]=15-37-54 [bc5cdr_chemical]=17-18-43
-                 [biored_chemical]=19-13-38 [nlm_chem]=21-00-37)  # G1 trees, xmodel_2026-10-12_<time>
+declare -A TREE=([ncbi_disease]=2026-10-12_15-32-01 [biored_disease]=2026-10-12_15-37-54
+                 [bc5cdr_chemical]=2026-10-12_17-18-43 [biored_chemical]=2026-10-12_19-13-38
+                 [nlm_chem]=2026-10-12_21-00-37 [bc5cdr]=2026-10-09_14-12-26)  # G1 trees + F3 BC5CDR-disease
 OUT=outputs/g2; EXP=outputs/pecos/g2; mkdir -p "$OUT" "$EXP" "$HOME/.cache/huggingface"
 RUN=(docker run --rm --init --user "$(id -u):$(id -g)" --mount "type=bind,src=$PWD,dst=/app" -w /app)
 XMR=("${RUN[@]}" --gpus all --mount "type=bind,src=$HOME/.cache/huggingface,dst=/cache/huggingface"
@@ -21,7 +22,7 @@ open(sys.argv[1], "a").write(f"{sys.argv[2]}\t{gb:.1f}\n"); sys.exit(r)'
 path() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["evals"][0][sys.argv[2]])' "$1" "$2"; }
 
 for s in $SETS; do
-  tree=outputs/saved_trees/xmodel_2026-10-12_${TREE[$s]}
+  tree=outputs/saved_trees/xmodel_${TREE[$s]}
   for split in dev test; do
     spec=configs/experiments/$s.json; [ "$split" = test ] && spec=configs/experiments/${s}_test.json
     "${XMR[@]}" python3 -c "$PEAK" "$OUT/peak_rss.tsv" "$s export $split" python3 scripts/baselines/pecos_compare.py \

@@ -65,9 +65,20 @@ the BC5CDR-disease PECOS rows; test predicted with that model via new `pecos_run
 on every set/split (diseases -3 to -7 pt, chemicals -12 to -19; misses exact training names at 180k labels, seen 1
 0.80-0.85). PECOS has no knn re-scoring (noted in results.md). PECOS train 28-30 s / 274-292 s, peak 4 / 28 GB.
 Exports + PECOS models on the server: `outputs/pecos/g2/` (large; delete once the user agrees).
-**NEXT (user picks):** remaining plan G items: BC5CDR-disease 1-NN rows on `14-12-26` (one nn_baselines call per
-split); scispaCy (baseline 5, own env); MedMentions st21pv (last dataset, base config); literature rows (context only).
-Open question for the user: delete tree `10-18-51` on the server (superseded by `14-12-26`)?
+**Train time (2026-10-13, from the G1 run logs):** chemical trees ~6000 s = leaf matchers 4604 s on CPU (65 leaves,
+19-119 s each) + encoding 505 s (SapBERT cache hit: char/context TF-IDF + SVD) + root clustering ~480 s + root matcher
+~110 s + 63 GPU leaves 185 s (2-7 s each). Cause: `GPU_MIN_ENTRIES` 5M (`xmr4el/learning/classifiers.py`, measured on
+MPS) sends 1404-label leaves with < 3562 rows to CPU L-BFGS, ~30x slower than CUDA. Diseases (~104 labels/leaf) are
+all CPU and fast (leaves 122 s total). Proposed fix (not done, ask): lower the threshold on CUDA; numerics-only change
+(float32 on GPU vs CPU), so results move at retrain-noise level; matters for MedMentions train time.
+**Deletion (user OK 2026-10-13):** server `outputs/pecos/g2/`, tree `10-18-51`, old `g1/g2.tar.gz`. Local candidates:
+tree `xmodel_2026-10-08_17-28-02` (C2, 1.6 GB, superseded), `outputs/pecos/{bc5cdr_dev,bc5cdr_dict_dev,bc5cdr_dict_test}`
+(1.5 GB, exports of deleted trees, rows already in results.md), `outputs/g{1,2}.tar.gz` (extracted). Keep: tree
+`14-12-26` + the 5 G1 trees (server), `outputs/runs/`, `outputs/cache/` (encoding cache).
+**NEXT (user, server, host shell):** BC5CDR-disease 1-NN + PECOS on `14-12-26` (`run_g2_pecos.sh bc5cdr`, nn json into
+`outputs/g2/`), then add both rows to the BC5CDR-disease part of results.md (new rows in the G1/G2 tables, n from the
+nn json). After that, per plan G: MedMentions st21pv (needs a spec; GPU threshold decision first), scispaCy (own env, new
+script), literature rows.
 Local commits are unpushed: user pushes before the next server run. `docs/experiment_management.md` is the user's untracked design
 report: leave it untracked and unedited unless asked.
 
