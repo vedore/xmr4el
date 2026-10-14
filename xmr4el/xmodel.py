@@ -17,7 +17,7 @@ from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
 from xmr4el.hierarchy.tree import HierarchicalMLModel, rank_rows
-from xmr4el.learning.scoring import label_max_cos
+from xmr4el.learning.scoring import knn_index, label_max_cos
 
 
 
@@ -117,6 +117,7 @@ class XModel:
         self.X = None  # train features, n x d (row i = i-th text after Preprocessor.prepare_data)
         self.Y = None  # train labels, n x L (sparse, one label per row)
         self.Z = None  # PIFA label embeddings, L x d
+        self.knn_index = None  # knn_index of X's mention block, built on the first knn predict, never saved
         
     
     def __str__(self) -> str:
@@ -206,7 +207,7 @@ class XModel:
                 save_dir, n = f"{base}_{n}", n + 1
     
         state = self.__dict__.copy()
-        state.pop("model"), state.pop("text_encoder")
+        state.pop("model"), state.pop("text_encoder"), state.pop("knn_index", None)
         for name, part in parts.items():
             if part is not None:
                 part.save(os.path.join(save_dir, name))
@@ -299,6 +300,7 @@ class XModel:
         self.model = None  # a failed (re)train leaves no tree, never an old tree with the new encoder/labels
 
         self.X, self.Y, self.Z = self._fit(X_text=X_text, Y_text=Y_text)
+        self.knn_index = None
 
         n_labels = self.Z.shape[0]
         local_to_global = np.arange(n_labels, dtype=int)
@@ -356,9 +358,11 @@ class XModel:
             Y = self.Y.tocsr()
             assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
             block = self.mention_block()
+            if self.knn_index is None:  # sorting + normalising X's rows costs O(train rows) per call otherwise
+                self.knn_index = knn_index(self.X[:, block], Y.indices)
             rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
-            knn = label_max_cos(X_query[:, block], self.X[:, block], Y.indices, scores.shape[1],
-                                rows=rows, cols=scores.indices)
+            knn = label_max_cos(X_query[:, block], None, None, scores.shape[1], rows=rows, cols=scores.indices,
+                                index=self.knn_index)
             vals = scores.data * np.exp(knn_beta * knn.astype(np.float64))
             scores = rank_rows(rows, scores.indices, vals, scores.shape, cfg["topk"])
             self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,

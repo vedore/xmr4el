@@ -6,6 +6,7 @@ import time
 import torch
 import numpy as np
 
+from functools import lru_cache
 from gc import collect
 from numpy import array
 from torch import no_grad
@@ -37,6 +38,7 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path
                          "outputs", "cache", "transformers")
 
 
+@lru_cache(maxsize=2)  # loaded once per process: a per-call load costs ~1-2 s per predict
 def sentence_model(model_name, device="cpu", pooling=None, max_seq_length=None, revision=None):
     """Load the encoder used for every transformer embedding (training, prediction, screening).
     pooling "cls" | "mean" | ... builds [transformer, pooling] explicitly; None = the checkpoint's own

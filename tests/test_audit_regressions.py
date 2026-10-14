@@ -16,7 +16,7 @@ import pytest
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
 from xmr4el.learning.classifiers import JointOvRLogistic
-from xmr4el.learning.scoring import label_max_cos, label_rows
+from xmr4el.learning.scoring import knn_index, label_max_cos, label_rows
 from xmr4el.xmodel import XModel
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +113,8 @@ def test_candidate_knn_equals_full_knn():
     one = np.isin(rows, [7, 300, 599])  # a few random queries: chunks with few candidate labels
     few = label_max_cos(Q, B, b_labels, 12, chunk=64, rows=rows[one], cols=cols[one])
     assert np.allclose(few, full[rows[one], cols[one]])
+    cached = label_max_cos(Q, None, None, 12, chunk=64, rows=rows, cols=cols, index=knn_index(B, b_labels))
+    assert np.array_equal(cached, pairs)  # XModel's cached training side gives the same scores
     # candidate mode multiplies only the candidate labels' B rows: groups 1 and 3 of rows [0, 2), [2, 5), [5, 6), [6, 9)
     idx, local = label_rows(np.array([0, 2, 5, 6]), 9, np.array([1, 3]))
     assert list(idx) == [2, 3, 4, 6, 7, 8] and list(local) == [0, 3]
@@ -162,11 +164,13 @@ def test_split_cli_partial_and_ratios(tmp_path):
 # C3: xmodel.json mirrors the pickled state's keys
 
 def test_xmodel_json(xm, tmp_path):
+    xm.predict(["concept1 synonym9 group0"], knn_beta=10)  # builds knn_index, which save must leave out
+    assert xm.knn_index is not None
     xm.save(str(tmp_path))
     (saved,) = tmp_path.iterdir()
     state = pickle.loads((saved / "xmodel.pkl").read_bytes())
     view = json.loads((saved / "xmodel.json").read_text())
-    assert view.keys() == state.keys()
+    assert view.keys() == state.keys() and "knn_index" not in state
     assert view["initial_labels"] == {"type": "list", "len": 8, "first": "L0"}
     assert view["Z"]["shape"] == list(xm.Z.shape) and view["Y"]["nnz"] == xm.Y.nnz
     assert view["predict_config"] == xm.predict_config

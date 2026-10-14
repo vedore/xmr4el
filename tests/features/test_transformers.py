@@ -25,7 +25,7 @@ def test_embedding_row_order():
     for oom_at in (None, "4"):  # "4": third batch OOMs once, then the batch size shrinks
         fake = Fake()
         fake.oom_at = oom_at
-        with patch("xmr4el.features.transformers.SentenceTransformer", lambda name: fake):
+        with patch("xmr4el.features.transformers.sentence_model", return_value=fake):
             emb = Transformer._predict("fake", texts, batch_size=2)
         assert emb[:, 0].tolist() == list(range(23)), (oom_at, emb[:, 0].tolist())
         assert fake.oom_at is None, "OOM path was not exercised"
@@ -37,7 +37,7 @@ def test_embedding_row_order():
                 raise OutOfMemoryError("fake")
             return [[float(t)] for t in batch]
 
-    with patch("xmr4el.features.transformers.SentenceTransformer", lambda name: Big()):
+    with patch("xmr4el.features.transformers.sentence_model", return_value=Big()):
         emb = Transformer._predict("fake", texts, batch_size=8, max_oom_retries=3)
     assert emb[:, 0].tolist() == list(range(23))
     print("embedding row order ok")

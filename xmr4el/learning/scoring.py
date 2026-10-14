@@ -3,16 +3,22 @@ import numpy as np
 from sklearn.preprocessing import normalize
 
 
-def label_max_cos(Q, B, b_labels, n_labels, chunk=256, rows=None, cols=None):
+def knn_index(B, b_labels):
+    """`label_max_cos`'s training side: (B rows sorted by label and L2-normalised, labels present, start row of each)."""
+    order = np.argsort(b_labels, kind="stable")
+    present, starts = np.unique(b_labels[order], return_index=True)
+    B = normalize(np.asarray(B[order].toarray() if hasattr(B, "toarray") else B[order], dtype=np.float32))
+    return B, present, starts
+
+
+def label_max_cos(Q, B, b_labels, n_labels, chunk=256, rows=None, cols=None, index=None):
     """(n_Q, n_labels): max cosine of each Q row to the B rows of each label (nearest-synonym score, as SapBERT
     links mentions); -1 for labels with no B row.
 
     With `rows`, `cols` (query and label index per pair, `rows` ascending, e.g. CSR order): only those pairs, as a
     1-D array, so the (n_Q, n_labels) matrix is never built; each Q chunk is multiplied only with the B rows of
-    the labels its pairs name (`label_rows`)."""
-    order = np.argsort(b_labels, kind="stable")
-    present, starts = np.unique(b_labels[order], return_index=True)
-    B = normalize(np.asarray(B[order].toarray() if hasattr(B, "toarray") else B[order], dtype=np.float32))
+    the labels its pairs name (`label_rows`). `index` = `knn_index(B, b_labels)` built once (B, b_labels unused)."""
+    B, present, starts = index if index is not None else knn_index(B, b_labels)
     if rows is None:
         out = np.full((Q.shape[0], n_labels), -1.0, dtype=np.float32)
     else:

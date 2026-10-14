@@ -810,6 +810,35 @@ The tree's own matchers (root + leaves) take 21-23 s.
   trains (239-247 s) predate the CUDA fix. This is at 13k labels; at 180k labels (1404 labels per leaf) it is not yet
   measured.
 
+## 2026-10-14: plan I1/I2, where the 180k-label loss comes from (chemical sets, dev, eval-only)
+
+`bash scripts/run_i.sh` on the server, commit `e470f62` (clean), the 2026-10-13 chemical trees (`13-52-04`, `14-27-36`,
+`14-58-54`), specs `configs/experiments/i1_<set>.json`, run dirs `outputs/runs/2026-10-14_*_i1_<set>`. Same rows as the
+2026-10-13 dev rows. Not routed = gold not among the candidates (beam x 100 leaf labels: each visited leaf gives its 100
+labels with the highest matcher probability, `LEAF_CANDIDATES`); ranked wrong = gold among the candidates, not top-1.
+Rows: not routed / ranked wrong per group (seen 1 / seen >1 / unseen).
+
+| set | search | acc@1 | R@cand | errors | not routed | ranked wrong | not routed by group | ranked wrong by group |
+|---|---|---|---|---|---|---|---|---|
+| BC5CDR-chemical (5181) | beam 10, knn 10 | 0.945 | 0.968 | 287 | 164 | 123 | 83 / 2 / 79 | 24 / 20 / 79 |
+|  | beam 10, knn 0 | 0.582 | 0.968 | 2165 | 164 | 2001 | 83 / 2 / 79 | 1656 / 26 / 319 |
+|  | beam 20, knn 10 | 0.951 | 0.981 | 253 | 100 | 153 | 57 / 1 / 42 | 27 / 21 / 105 |
+|  | beam 50, knn 10 | 0.951 | 0.983 | 253 | 86 | 167 | 56 / 0 / 30 | 28 / 22 / 117 |
+|  | beam 128 (all leaves), knn 10 | 0.951 | 0.983 | 253 | 86 | 167 | 56 / 0 / 30 | 28 / 22 / 117 |
+| BioRED chemical (779) | beam 10, knn 10 | 0.874 | 0.962 | 98 | 30 | 68 | 16 / 0 / 14 | 1 / 1 / 66 |
+|  | beam 10, knn 0 | 0.502 | 0.962 | 388 | 30 | 358 | 16 / 0 / 14 | 262 / 15 / 81 |
+| NLM-Chem (4907) | beam 10, knn 10 | 0.877 | 0.928 | 604 | 354 | 250 | 42 / 17 / 295 | 77 / 44 / 129 |
+|  | beam 10, knn 0 | 0.621 | 0.928 | 1861 | 354 | 1507 | 42 / 17 / 295 | 889 / 73 / 545 |
+
+- knn re-scoring carries the 180k-label trees: +36.3 / +37.2 / +25.6 pt (knn 0 -> 10). Without it the leaf matchers
+  rank an exact training string's label first for only 0.61 / 0.56 / 0.71 of the seen-1 rows.
+- At beam 10, routing loses 57% of the BC5CDR-chemical errors and 59% of NLM-Chem's (mostly unseen strings there: 295 of
+  354); BioRED chemical's loss is ranking of unseen strings (66 of 98 errors).
+- Beam 20 recovers 34 rows on BC5CDR-chemical (0.945 -> 0.951); beam 50 and 128 add candidates but no top-1 row. At beam
+  128 every leaf is visited and 86 golds (56 seen 1) are still not candidates: the cap is the leaf's top 100, not the beam.
+- vs SapBERT 1-NN (0.965, 5000 rows): beam 20 is still -72 rows, of them seen 1 -66 (4381 vs 4447); 57 of beam 20's 84
+  seen-1 errors are golds outside their leaf's top 100.
+
 ## Commands
 
 ```bash

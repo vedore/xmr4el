@@ -73,6 +73,7 @@ def main():
     m["single_ms"]["encode"] = single_ms(lambda i: xm.text_encoder.predict(texts[i:i + 1]), n1)
     Xq, m["batch_s"]["encode"] = timed(lambda: xm.text_encoder.predict(texts))
     Xq = Xq.tocsr()
+    _, m["first_call_s"] = timed(lambda: xm.predict_encoded(Xq[:1]))  # one-off: builds the knn index
 
     m["single_ms"]["xmr4el"] = single_ms(lambda i: xm.predict_encoded(Xq[i:i + 1]), n1)
     _, m["batch_s"]["xmr4el"] = timed(lambda: xm.predict_encoded(Xq))

@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-14 (I0 done: run_g read into results.md; NEXT = user runs `scripts/run_i.sh` on the server).
+Last updated 2026-10-14 (I1/I2 read into results.md; I3 invalid (per-call overhead), fixed; NEXT = user reruns I3: `bash scripts/run_i.sh i3`).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -121,6 +121,20 @@ test: XMR4EL 0.741 / 0.744, SapBERT 1-NN 0.617 / 0.615, PECOS 0.688 / 0.694, sci
 NEXT (user, server, after pushing local commits): `git pull --ff-only && bash scripts/run_i.sh`; bring back `outputs/i.tar.gz`.
 Read: I1 `routed` column per string group + knn on/off (3 chemical sets dev), I2 beam curve (BC5CDR-chemical), I3
 `outputs/i3/<set>.json`.
+**I1/I2/I3 (2026-10-14, `outputs/i.tar.gz` read, commit `e470f62`; results.md section "2026-10-14: plan I1/I2").**
+I1: knn = +26 to +37 pt at 180k (leaf matchers alone rank seen-1 gold first for 0.56-0.71). BC5CDR-chem / NLM-Chem errors
+57% / 59% routing at beam 10; BioRED-chem = unseen ranking. I2: beam 20 +34 rows (0.945 -> 0.951), beam 50/128 no top-1 gain;
+at beam 128 (all leaves) 86 golds still outside the candidates = `LEAF_CANDIDATES` 100 cap (tree.py), 56 of them seen 1.
+Still -72 rows vs SapBERT 1-NN (seen 1 -66).
+I3 INVALID (not written to results.md): batch-1 latency 1.3 / 2.2 / 6.7 / 6.9 s per query grew with train rows because each
+`predict_encoded` call re-sorted + re-normalised + column-sliced the whole training X (csr, dense content) for knn, and each
+encode call reloaded SapBERT. Fixed (pytest 55): `scoring.knn_index` built once per XModel (`XModel.knn_index`, not saved,
+reset by train), `sentence_model` lru_cache; bench records `first_call_s` (index build). Results unchanged (same numerics).
+Valid from the bad run, kept here only: SapBERT 1-NN GPU 0.05-0.19 ms/q batch, index 0.29-1.5 GB, VRAM 0.6-3.5 GB; tree dir
+1.7 / 2.9 / 10.2 / 10.5 GB (ncbi / MM / bc5cdr-chem / nlm); TF-IDF 1-NN CPU 3.3-18 ms/q.
+NEXT (user, server, after push): `git pull --ff-only && bash scripts/run_i.sh i3` -> `outputs/i3.tar.gz`; then write I3.
+OPEN (ask user): close the seen-1 gap via (a) `leaf_candidates` as a predict_config key (eval-only 100 / 300 / all at beam
+20 on BC5CDR-chem dev), or (b) beam 20 as the chemical default only (I4: test once). Not started.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
