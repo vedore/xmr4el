@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-14 (run_g complete: g1/g2 bundles + run_g_resume.log on the Mac, not yet read; then run_i.sh).
+Last updated 2026-10-14 (I0 done: run_g read into results.md; NEXT = user runs `scripts/run_i.sh` on the server).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -109,13 +109,18 @@ dev acc@1 0.741 (31564/40884 rows in vocabulary, cov x acc 0.572) vs SapBERT 1-N
 0.615 / 0.594. Seen 1 0.932 vs 0.933, seen >1 0.763 vs 0.429, unseen 0.480 vs 0.454. Train 510 s (encoding 405 s,
 not cached; root 75 s; 128 leaves 20 s). Peak 29.3 GB train+dev (dev predict 221 s, 31.5k rows). WAIT for the full
 g1/g2 bundles, then write all rows at once.
-**2026-10-14: full bundles on the Mac, NOT YET READ** (`outputs/g1.tar.gz` 12 run dirs, `outputs/g2.tar.gz` incl.
-MedMentions + scispaCy logs, `outputs/run_g_resume.log`, no error in it). NEXT (Claude): `tar xzf` both; replace the G1/G2
-rows in results.md 2026-10-12 section with the new trees (retrained on CUDA-leaf code; old rows deleted, not marked;
-compare to the old rows only as retrain noise), add MedMentions rows (XMR4EL, 2 x 1-NN, PECOS, scispaCy; scispaCy log
-has the share of top-1 outside the label set), train times per set from run.log (CUDA leaves), peak RSS
-(`outputs/g1/peak_rss.tsv` has duplicate MedMentions rows from the failed first attempt: use the last). Then hand over
-`git pull --ff-only && bash scripts/run_i.sh` (after the user pushes) for plan I1-I3.
+**I0 done (2026-10-14): run_g read, bundles extracted into `outputs/` (12 run dirs `2026-10-13_*`, commit `2c3d6b1`
+clean). results.md section renamed "2026-10-13: plan G1/G2, six datasets ..." (G1/G2 rows replaced, MedMentions + scispaCy
+added).** Retrain on CUDA leaves = same acc@1 / R@cand / group counts row for row on all five sets (MRR <= 2e-4 apart),
+PECOS logs identical; train chemicals 6000 -> 1395-1435 s, diseases 240 -> 136-141 s. New trees: ncbi `13-22-39`,
+biored_disease `13-26-50`, bc5cdr_chemical `13-52-04`, biored_chemical `14-27-36`, nlm_chem `14-58-54`, MedMentions `15-38-51`
+(all `xmodel_2026-10-13_*`, server); the 2026-10-12 trees are superseded (deletable once the user agrees). MedMentions dev /
+test: XMR4EL 0.741 / 0.744, SapBERT 1-NN 0.617 / 0.615, PECOS 0.688 / 0.694, scispaCy 0.683 / 0.681 (scispaCy better on unseen
+0.509 vs 0.480 and hybrid 0.752 vs 0.743; its unrestricted top-1 is outside the label set for 24% of rows). MedMentions predict
+221 s / 31.5k rows (knn 115 s): a latency point for I3.
+NEXT (user, server, after pushing local commits): `git pull --ff-only && bash scripts/run_i.sh`; bring back `outputs/i.tar.gz`.
+Read: I1 `routed` column per string group + knn on/off (3 chemical sets dev), I2 beam curve (BC5CDR-chemical), I3
+`outputs/i3/<set>.json`.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
@@ -196,7 +201,7 @@ retrain adds F1a's train-side text (26 rows) + k-means/encoding noise (C2 -> R1 
 
 **I. Plan after the run_g.sh rerun (APPROVED by the user 2026-10-13; after I4: code review, then a TUI for the project).** Research question (user 2026-10-13): do the
 context and scoring gains survive at large vocabularies, with latency and memory competitive with simple retrieval?
-- I0 Read run_g: replace the G1/G2 rows (new trees, CUDA leaves), add MedMentions + scispaCy rows, CUDA train times.
+- I0 (done 2026-10-14) Read run_g: replace the G1/G2 rows (new trees, CUDA leaves), add MedMentions + scispaCy rows, CUDA train times.
 - I1 Diagnose 180k loss (eval-only, 3 chemical trees, dev): per row, gold lost in routing vs ranked wrong in the leaf
   (and per string group); knn on vs off (scoring gain at 180k).
 - I2 Beam curve (eval-only, BC5CDR-chemical dev): beam 10/20/50/128 -> R@cand, acc@1, ms/query. If routing is the
