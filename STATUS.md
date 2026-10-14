@@ -133,8 +133,9 @@ reset by train), `sentence_model` lru_cache; bench records `first_call_s` (index
 Valid from the bad run, kept here only: SapBERT 1-NN GPU 0.05-0.19 ms/q batch, index 0.29-1.5 GB, VRAM 0.6-3.5 GB; tree dir
 1.7 / 2.9 / 10.2 / 10.5 GB (ncbi / MM / bc5cdr-chem / nlm); TF-IDF 1-NN CPU 3.3-18 ms/q.
 NEXT (user, server, after push): `git pull --ff-only && bash scripts/run_i.sh i3` -> `outputs/i3.tar.gz`; then write I3.
-OPEN (ask user): close the seen-1 gap via (a) `leaf_candidates` as a predict_config key (eval-only 100 / 300 / all at beam
-20 on BC5CDR-chem dev), or (b) beam 20 as the chemical default only (I4: test once). Not started.
+Rule (user 2026-10-14): no eval with beam > 15 (too slow; less time beats a few rows). Beam 20 default dropped; beam 10
+stays. Only open accuracy option: `leaf_candidates` (> 100) at beam 10, judged against its ms/query from the I3 rerun;
+not started, ask after I3.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
