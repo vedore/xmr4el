@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-13 (G1 + G2 read, incl. BC5CDR-disease 1-NN + PECOS; EQ read; run_g.sh running on the server; plan I approved, I1-I3 code ready; next command `bash scripts/run_i.sh` after run_g).
+Last updated 2026-10-14 (run_g complete: g1/g2 bundles + run_g_resume.log on the Mac, not yet read; then run_i.sh).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -109,6 +109,13 @@ dev acc@1 0.741 (31564/40884 rows in vocabulary, cov x acc 0.572) vs SapBERT 1-N
 0.615 / 0.594. Seen 1 0.932 vs 0.933, seen >1 0.763 vs 0.429, unseen 0.480 vs 0.454. Train 510 s (encoding 405 s,
 not cached; root 75 s; 128 leaves 20 s). Peak 29.3 GB train+dev (dev predict 221 s, 31.5k rows). WAIT for the full
 g1/g2 bundles, then write all rows at once.
+**2026-10-14: full bundles on the Mac, NOT YET READ** (`outputs/g1.tar.gz` 12 run dirs, `outputs/g2.tar.gz` incl.
+MedMentions + scispaCy logs, `outputs/run_g_resume.log`, no error in it). NEXT (Claude): `tar xzf` both; replace the G1/G2
+rows in results.md 2026-10-12 section with the new trees (retrained on CUDA-leaf code; old rows deleted, not marked;
+compare to the old rows only as retrain noise), add MedMentions rows (XMR4EL, 2 x 1-NN, PECOS, scispaCy; scispaCy log
+has the share of top-1 outside the label set), train times per set from run.log (CUDA leaves), peak RSS
+(`outputs/g1/peak_rss.tsv` has duplicate MedMentions rows from the failed first attempt: use the last). Then hand over
+`git pull --ff-only && bash scripts/run_i.sh` (after the user pushes) for plan I1-I3.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
