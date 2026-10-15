@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-15 (I3 rerun read into results.md; single-row encode fix in `reduction.py`; NEXT = user decides on `leaf_candidates`, see I3 block).
+Last updated 2026-10-15 (I3 rerun read into results.md; single-row encode fix in `reduction.py`; NEXT = start `leaf_candidates` (> 100) at beam 10: user approved 2026-10-15, begin next session; see I3 block).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -139,7 +139,7 @@ smaller than the tree. Single-row encode 149-1575 ms was `TruncatedSVD.transform
 `tests/features/test_reduction.py`, pytest 56). Optional rerun `bash scripts/run_i.sh i3` gives single encode ms.
 Rule (user 2026-10-14): no eval with beam > 15 (too slow; less time beats a few rows). Beam 20 default dropped; beam 10
 stays. Only open accuracy option: `leaf_candidates` (> 100) at beam 10, judged against its ms/query from the I3 rerun;
-not started, asked the user 2026-10-15.
+not started; user 2026-10-15: start it next session (code + minimal eval-only commands, judged vs I3 ms/query).
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
