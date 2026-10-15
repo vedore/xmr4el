@@ -839,6 +839,29 @@ Rows: not routed / ranked wrong per group (seen 1 / seen >1 / unseen).
 - vs SapBERT 1-NN (0.965, 5000 rows): beam 20 is still -72 rows, of them seen 1 -66 (4381 vs 4447); 57 of beam 20's 84
   seen-1 errors are golds outside their leaf's top 100.
 
+## 2026-10-15: plan I3, latency and memory (dev, server GPU, beam 10, knn 10)
+
+`bash scripts/run_i.sh i3` on the server (`scripts/bench_latency.py`, code with the once-per-XModel knn index,
+`abc2176`), bundle `outputs/i3.tar.gz`. Trees: NCBI `13-22-39`, MedMentions `15-38-51`, BC5CDR-chemical `13-52-04`,
+NLM-Chem `14-58-54` (all `xmodel_2026-10-13_*`). Batch = all dev rows, ms/query; single = one row per call, median over
+100 rows. Search = from encoded queries (XMR4EL `predict_encoded`; SapBERT 1-NN = GPU brute force on the tree's
+training rows' SapBERT block, query embeddings precomputed); TF-IDF 1-NN = char TF-IDF on CPU, incl. vectorizing.
+Encode = XMR4EL query features (SapBERT + 2 TF-IDF/SVD blocks), batch; single-row encode was slowed by the SVD
+projection (fixed 2026-10-15 in `reduction.py`), not reported. RSS = process after loading the tree / after XMR4EL predict.
+
+| set | labels | train rows | dev rows | encode batch ms/q | XMR4EL search batch ms/q / single ms | SapBERT 1-NN batch / single ms | TF-IDF 1-NN batch / single ms | tree dir GB | RSS GB | SapBERT index GB / VRAM GB | knn index build s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| NCBI-disease | 13,385 | 95,831 | 729 | 0.36 | 4.4 / 19.3 | 0.05 / 1.3 | 4.8 / 5.6 | 1.7 | 2.4 / 2.8 | 0.29 / 0.58 | 1.8 |
+| MedMentions st21pv | 18,520 | 122,241 | 31,564 | 0.23 | 6.3 / 24.6 | 0.04 / 1.6 | 3.3 / 4.0 | 2.9 | 3.6 / 5.8 | 0.38 / 0.98 | 2.5 |
+| BC5CDR-chemical | 179,709 | 474,854 | 5,181 | 0.32 | 6.1 / 25.0 | 0.17 / 5.7 | 19.2 / 21.6 | 10.2 | 10.9 / 12.7 | 1.46 / 3.43 | 6.8 |
+| NLM-Chem | 179,696 | 489,229 | 4,907 | 0.52 | 6.9 / 26.0 | 0.17 / 5.9 | 17.1 / 17.2 | 10.5 | 11.2 / 12.9 | 1.50 / 3.53 | 11.5 |
+
+- XMR4EL search is nearly flat in the label count: 13k -> 180k labels = 4.4 -> 6.9 ms/q batch, 19 -> 26 ms single.
+- SapBERT 1-NN search on GPU is ~35-150x faster in batch and 4-15x faster single, with a 7x smaller index (1.5 vs
+  10.2-10.5 GB tree). XMR4EL has no speed or memory advantage over it at these scales; it beats CPU TF-IDF 1-NN only
+  at 180k labels (6.1 / 6.9 vs 19.2 / 17.1 ms/q).
+- Tree load 2-14 s (BC5CDR-chemical 93 s: cold disk, the same 10 GB size as NLM-Chem's 14 s).
+
 ## Commands
 
 ```bash

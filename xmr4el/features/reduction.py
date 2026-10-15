@@ -5,6 +5,7 @@ import logging
 import numpy as np
 from abc import ABCMeta
 from copy import deepcopy
+from scipy.sparse import csr_matrix, issparse
 from sklearn.decomposition import TruncatedSVD
 
 
@@ -213,5 +214,10 @@ class SklearnTruncatedSVD(DimensionModel):
         
         if self.model is None:
             return corpus
-        
-        return self.model.transform(corpus)
+        if not issparse(corpus):
+            return self.model.transform(corpus)
+        # = model.transform (bit-identical) on the used columns only: csr @ components_.T copies the whole
+        # n_components x d matrix per call (~0.4-1.5 s for one query at 150k+ char n-grams)
+        X = csr_matrix(corpus)
+        cols = np.unique(X.indices)
+        return X[:, cols] @ self.model.components_[:, cols].T

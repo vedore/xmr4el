@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-14 (I1/I2 read into results.md; I3 invalid (per-call overhead), fixed; NEXT = user reruns I3: `bash scripts/run_i.sh i3`).
+Last updated 2026-10-15 (I3 rerun read into results.md; single-row encode fix in `reduction.py`; NEXT = user decides on `leaf_candidates`, see I3 block).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -132,10 +132,14 @@ encode call reloaded SapBERT. Fixed (pytest 55): `scoring.knn_index` built once 
 reset by train), `sentence_model` lru_cache; bench records `first_call_s` (index build). Results unchanged (same numerics).
 Valid from the bad run, kept here only: SapBERT 1-NN GPU 0.05-0.19 ms/q batch, index 0.29-1.5 GB, VRAM 0.6-3.5 GB; tree dir
 1.7 / 2.9 / 10.2 / 10.5 GB (ncbi / MM / bc5cdr-chem / nlm); TF-IDF 1-NN CPU 3.3-18 ms/q.
-NEXT (user, server, after push): `git pull --ff-only && bash scripts/run_i.sh i3` -> `outputs/i3.tar.gz`; then write I3.
+I3 rerun (2026-10-15, `outputs/i3.tar.gz` read; results.md "2026-10-15: plan I3"). XMR4EL search 4.4-6.9 ms/q batch,
+19-26 ms single, nearly flat 13k -> 180k labels; SapBERT 1-NN GPU search 35-150x faster batch, 4-15x single, index 7x
+smaller than the tree. Single-row encode 149-1575 ms was `TruncatedSVD.transform` (csr @ components_.T copies the whole
+768 x vocab matrix per call); fixed: `SklearnTruncatedSVD.transform` projects on the used columns only (bit-identical,
+`tests/features/test_reduction.py`, pytest 56). Optional rerun `bash scripts/run_i.sh i3` gives single encode ms.
 Rule (user 2026-10-14): no eval with beam > 15 (too slow; less time beats a few rows). Beam 20 default dropped; beam 10
 stays. Only open accuracy option: `leaf_candidates` (> 100) at beam 10, judged against its ms/query from the I3 rerun;
-not started, ask after I3.
+not started, asked the user 2026-10-15.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
