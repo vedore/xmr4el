@@ -114,6 +114,9 @@ class ClassifierModel(metaclass=ClassifierMeta):
 # leaf vs 2-7 s on CUDA. MPS runs fits with n * L >= this: per L-BFGS iteration 89929x128 0.20 -> 0.12 s, 20000x128
 # break-even, 2064x92 leaves 2x slower (transfer and launch overhead).
 GPU_MIN_ENTRIES = 5_000_000
+# Labels per fit block: n * labels <= this (512 MB per float32 (n, labels) matrix). The largest G1 fit, a chemical
+# root (~475k rows x 128 clusters, ~61M), is one block.
+LABEL_BLOCK_ENTRIES = 2 ** 27
 
 
 class JointOvRLogistic:
@@ -123,8 +126,9 @@ class JointOvRLogistic:
     Per label the objective is liblinear's (`LogisticRegression(solver="liblinear")`): 0.5 ||w||^2 + C sum_i c_i
     log(1 + exp(-y_i w.x_i)), the bias a regularised constant-1 feature, c_i from `class_weight` "balanced" or 1.
     The labels share X, so all of them are one (d+1, L) problem; on a 167-label leaf this matched liblinear's top-1 on
-    every dev row at 1/8 of the time. `predict_proba` returns per-label sigmoids, (n, L), like a multilabel
-    OneVsRestClassifier (what the matcher trains on its 0/1 indicator matrix).
+    every dev row at 1/8 of the time. Nodes above LABEL_BLOCK_ENTRIES are fit in label blocks. `predict_proba`
+    returns per-label sigmoids, (n, L), like a multilabel OneVsRestClassifier (what the matcher trains on its 0/1
+    indicator matrix).
     """
 
     def __init__(self, C=1.0, class_weight="balanced", tol=1e-3, max_iter=500):
@@ -145,30 +149,51 @@ class JointOvRLogistic:
     def fit(self, X, y):
         if self.class_weight not in (None, "balanced"):
             raise ValueError("JointOvRLogistic class_weight must be None or 'balanced'")
-        y = y.toarray() if hasattr(y, "toarray") else np.asarray(y)
+        y = y.tocsc() if hasattr(y, "tocsc") else np.asarray(y)
         if y.ndim == 1:  # class labels -> indicator over sorted classes
             self.classes_, idx = np.unique(y, return_inverse=True)
-            y = np.eye(len(self.classes_), dtype=np.float32)[idx]
         else:
             self.classes_ = np.arange(y.shape[1])
-        Xb, n, L = self._dense(X), y.shape[0], y.shape[1]
-        S = np.where(y > 0, 1.0, -1.0).astype(np.float32)
-        if self.class_weight == "balanced":
-            npos = (y > 0).sum(axis=0)
-            cw = np.where(y > 0, n / (2.0 * np.maximum(npos, 1)), n / (2.0 * np.maximum(n - npos, 1)))
-        else:
-            cw = np.ones_like(S)
-        cw = (cw * self.C).astype(np.float32)
+        Xb, L = self._dense(X), len(self.classes_)
+        n = Xb.shape[0]
+        # The per-label problems are independent: label blocks keep every (n, labels) matrix at <= LABEL_BLOCK_ENTRIES
+        # entries. A node with fewer entries is one block (the joint fit); more blocks reach the same per-label
+        # optimum by a different L-BFGS path (each block has its own line search and stopping test).
+        block = max(1, LABEL_BLOCK_ENTRIES // n)
+        W, self.n_iter_ = [], 0
+        for a in range(0, L, block):
+            b = min(a + block, L)
+            if y.ndim == 1:
+                pos = idx[:, None] == np.arange(a, b)
+            else:
+                yb = y[:, a:b]
+                pos = (yb.toarray() if hasattr(yb, "toarray") else yb) > 0
+            S = np.where(pos, 1.0, -1.0).astype(np.float32)
+            if self.class_weight == "balanced":
+                npos = pos.sum(axis=0)
+                cw = np.where(pos, n / (2.0 * np.maximum(npos, 1)), n / (2.0 * np.maximum(n - npos, 1)))
+            else:
+                cw = np.ones_like(S)
+            Wb, it = self._fit_block(Xb, S, (cw * self.C).astype(np.float32))
+            if it >= self.max_iter:
+                logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, labels "
+                               "%d-%d of %d)", self.max_iter, self.tol, n, a, b, L)
+            W.append(Wb)
+            self.n_iter_ = max(self.n_iter_, it)
+        self.W_ = W[0] if len(W) == 1 else np.hstack(W)
+        return self
 
+    def _fit_block(self, Xb, S, cw):
         # torch L-BFGS on CPU: scipy's L-BFGS-B step and numpy's single-threaded logaddexp/expit were ~95% of a
         # 6000x2304x734 leaf fit; torch runs both multithreaded (4x faster, 0.999 top-1 agreement). Stops when the
         # max |gradient| <= tol, scipy's gtol rule. The objective is divided by n (sklearn's lbfgs scaling, same
         # minimizer): unscaled, the gradient never reached tol and every fit ran to the float32 loss stall.
+        n, L = S.shape
         dev = torch_device()
         if dev.type == "mps" and n * L < GPU_MIN_ENTRIES:
             dev = torch.device("cpu")
         try:
-            self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, dev)
+            return self._lbfgs(Xb, S, cw, dev)
         except RuntimeError as oom:  # torch.cuda.OutOfMemoryError subclasses RuntimeError; MPS raises a plain one
             if not isinstance(oom, torch.cuda.OutOfMemoryError) and "MPS backend out of memory" not in str(oom):
                 raise
@@ -177,11 +202,7 @@ class JointOvRLogistic:
                 torch.mps.empty_cache()
             else:
                 torch.cuda.empty_cache()
-            self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, torch.device("cpu"))
-        if self.n_iter_ >= self.max_iter:
-            logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, L=%d)",
-                           self.max_iter, self.tol, n, L)
-        return self
+            return self._lbfgs(Xb, S, cw, torch.device("cpu"))
 
     def _lbfgs(self, Xb, S, cw, dev):
         n, L = S.shape

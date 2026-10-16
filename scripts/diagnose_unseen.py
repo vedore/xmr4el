@@ -69,7 +69,7 @@ def main():
     args = ap.parse_args()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
-    xm = XModel.load(args.xmodel_path)
+    xm = XModel.load(args.xmodel_path, research=True)
     labels = np.array(xm.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
 

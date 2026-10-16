@@ -39,6 +39,8 @@ def _json_state(state):
     return out
 
 
+# Training-only state, saved to research.pkl and loaded only by `XModel.load(..., research=True)`
+RESEARCH_STATE = ("training_set", "X", "Y", "Z")
 PREDICT_DEFAULTS = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, "leaf_candidates": 100}
 KNN_BETA_MAX = 100  # fusion multiplies by exp(beta * cos): exp(100) keeps every score finite (overflow near 709)
 
@@ -136,7 +138,9 @@ class XModel:
         self.X = None  # train features, n x d (row i = i-th text after Preprocessor.prepare_data)
         self.Y = None  # train labels, n x L (sparse, one label per row)
         self.Z = None  # PIFA label embeddings, L x d
-        self.knn_index = None  # knn_index of X's mention block, built on the first knn predict, never saved
+        # knn_index of X's mention block: built on the first knn predict, or at save when predict_config knn_beta > 0
+        # (saved then, so knn needs no X / Y at load)
+        self.knn_index = None
         
     
     def __str__(self) -> str:
@@ -225,14 +229,21 @@ class XModel:
             except FileExistsError:
                 save_dir, n = f"{base}_{n}", n + 1
     
+        if self.knn_index is None and self.predict_config["knn_beta"] and self.X is not None:
+            self.knn_index = self._knn_index()
         state = self.__dict__.copy()
-        state.pop("model"), state.pop("text_encoder"), state.pop("knn_index", None)
+        state.pop("model"), state.pop("text_encoder"), state.pop("research_path", None)
+        if not self.predict_config["knn_beta"]:
+            state["knn_index"] = None  # saved only for trees whose default search uses knn
+        research = {key: state.pop(key) for key in RESEARCH_STATE}
         for name, part in parts.items():
             if part is not None:
                 part.save(os.path.join(save_dir, name))
 
         with open(os.path.join(save_dir, "xmodel.json"), "w") as fout:  # readable view, never loaded
-            json.dump(_json_state(state), fout, indent=2, default=repr)
+            json.dump(_json_state({**state, **research}), fout, indent=2, default=repr)
+        with open(os.path.join(save_dir, "research.pkl"), "wb") as fout:
+            pickle.dump(research, fout)
         # written last, then renamed: xmodel.pkl exists only in a completely saved tree (load requires it)
         with open(os.path.join(save_dir, "xmodel.pkl.tmp"), "wb") as fout:
             pickle.dump(state, fout)
@@ -241,25 +252,38 @@ class XModel:
         return save_dir
     
     @classmethod
-    def load(cls, load_dir):
+    def load(cls, load_dir, research=False):
+        """Inference state (tree, encoder, labels, search defaults, saved knn index). research=True also loads
+        RESEARCH_STATE (training texts, X, Y, Z: diagnostics, baselines, rerankers); otherwise those stay None
+        until a knn predict on a tree saved without its knn index loads them."""
         xmodel_path = os.path.join(load_dir, "xmodel.pkl")
         if not os.path.exists(xmodel_path):
             raise FileNotFoundError(f"XModel path {xmodel_path} does not exist")
         
         with open(xmodel_path, "rb") as fin:
             model_data = pickle.load(fin)
-            
+
         model = cls()
         model.__dict__.update(model_data)
-        # Label index j is row j of Z: refuse a label list that does not match it
-        if model.Z is not None and len(model.initial_labels) != model.Z.shape[0]:
-            raise ValueError(f"{len(model.initial_labels)} labels vs {model.Z.shape[0]} Z rows")
-        
+        model.research_path = os.path.join(load_dir, "research.pkl")
         model.model = HierarchicalMLModel.load(os.path.join(load_dir, "hml"))
+        # Label index j is root label j and row j of Z: refuse a label list that does not match them
+        n_root = len(model.model.hmodel[0][0].local_to_global_idx)
+        if len(model.initial_labels) != n_root:
+            raise ValueError(f"{len(model.initial_labels)} labels vs {n_root} root labels")
+        if research:
+            model.load_research()
         model.text_encoder = TextEncoder.load(os.path.join(load_dir, "text_encoder"))
         
         return model
     
+    def load_research(self):
+        """RESEARCH_STATE from the loaded tree's research.pkl."""
+        with open(self.research_path, "rb") as fin:
+            self.__dict__.update(pickle.load(fin))
+        if len(self.initial_labels) != self.Z.shape[0]:
+            raise ValueError(f"{len(self.initial_labels)} labels vs {self.Z.shape[0]} Z rows")
+
     @classmethod
     def load_config(cls, path: str | Path) -> object:
         path = Path(path)
@@ -295,6 +319,7 @@ class XModel:
         self.text_encoder = text_encoder
         
         X_emb = text_encoder.encode(X_processed)
+        self.transformer_config = text_encoder.transformer_config  # revision resolved to the commit
         self.logger.info("Encoding completed: shape=%s elapsed=%.1fs", X_emb.shape, time.perf_counter() - start)
 
         start = time.perf_counter()
@@ -377,11 +402,11 @@ class XModel:
                                     leaf_candidates=cfg["leaf_candidates"])
         if knn_beta:
             time_start_knn = time.perf_counter()
-            Y = self.Y.tocsr()
-            assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
             block = self.mention_block()
             if self.knn_index is None:  # sorting + normalising X's rows costs O(train rows) per call otherwise
-                self.knn_index = knn_index(self.X[:, block], Y.indices)
+                if self.X is None:  # loaded tree saved without its knn index (predict_config knn_beta 0)
+                    self.load_research()
+                self.knn_index = self._knn_index()
             rows = np.repeat(np.arange(scores.shape[0]), np.diff(scores.indptr))
             knn = label_max_cos(X_query[:, block], None, None, scores.shape[1], rows=rows, cols=scores.indices,
                                 index=self.knn_index)
@@ -390,6 +415,11 @@ class XModel:
             self.logger.info("Knn re-scoring completed: beta=%s elapsed=%.1fs", knn_beta,
                              time.perf_counter() - time_start_knn)
         return scores
+
+    def _knn_index(self):
+        Y = self.Y.tocsr()
+        assert (Y.getnnz(axis=1) == 1).all(), "knn needs exactly one label per training row"
+        return knn_index(self.X[:, self.mention_block()], Y.indices)
 
     def resolve_predict_config(self, **overrides):
         """`predict_config` with the non-None overrides applied (keys it lacks take PREDICT_DEFAULTS)."""

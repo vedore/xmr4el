@@ -50,7 +50,7 @@ def main():
     print(f"evaluating {args.xmodel_path} on {args.test_path} ...",
           flush=True)
 
-    trained_xtree = XModel.load(args.xmodel_path)
+    trained_xtree = XModel.load(args.xmodel_path, research=bool(args.reranker_path))  # label_texts needs it
     tree = os.path.basename(os.path.normpath(args.xmodel_path))
     m, state = evaluate_tree(trained_xtree, tree, args.test_path, train_path=args.train_path,
                              beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta,

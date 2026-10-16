@@ -23,9 +23,19 @@ dependencies = [
   "scikit-learn",
   "transformers",
   "sentence-transformers",
+  "huggingface-hub",
 
-  "torch>=2.8.0"
+  "torch>=2.13.0"
 ]
+
+# Linux: CUDA 12.6 build (PyPI's Linux torch 2.14 is CUDA 13, driver >= 580; the server has 570)
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [dependency-groups]
 dev = [

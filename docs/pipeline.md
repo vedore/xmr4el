@@ -7,12 +7,12 @@ Moved out of `STATUS.md` (2026-10-06).
 
 | Area | Current behavior | Evidence |
 |---|---|---|
-| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets | `HierarchicalMLModel.load`, `xmr4el/hierarchy/tree.py` |
-| Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load raises `ValueError` unless label count equals `Z` rows | `XModel._fit/load`, `xmr4el/xmodel.py` |
+| Model loading | Numeric `ml_<n>` order; guard checks parent/child label sets (sparse cluster columns). `xmodel.pkl` = inference state (+ knn index when `predict_config` knn_beta > 0); training texts, `X`, `Y`, `Z` in `research.pkl`, loaded by `load(..., research=True)` or by the first knn predict of a tree without a saved index | `HierarchicalMLModel.load`, `XModel.save/load` |
+| Label mapping | Training keeps `MultiLabelBinarizer.classes_` (empty label groups have no column); load raises `ValueError` unless label count equals the root's labels (and `Z` rows when research state is loaded) | `XModel._fit/load`, `xmr4el/xmodel.py` |
 | Evaluation | Hierarchy scores via `XModel.predict` (beam search, optional knn); acc@1, MRR, recall@k, candidate recall, vocabulary coverage | `scripts/evaluate.py` |
-| Features | `"tfidf"`: TF-IDF (-> dimension model) of the whole text (TSV). `"sapbert_char_context"`: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Other names raise | `TextEncoder._encode`, `features` in the config |
+| Features | `"tfidf"`: TF-IDF (-> dimension model) of the whole text (TSV). `"sapbert_char_context"` (transformer revision resolved to the Hub commit at training, kept by the saved encoder): [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Other names raise | `TextEncoder._encode`, `features` in the config |
 | Clustering | Seeded balanced spherical k-means (numpy): recursive balanced 2-means, then joint balanced refinement over all k clusters; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
-| Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`) | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
+| Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`; nodes with rows x labels > 2^27 fit in label blocks) | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
 | Leaf scoring | Each visited leaf contributes its `leaf_candidates` best labels by leaf matcher probability (search setting, default 100 = `LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear) | `HierarchicalMLModel.predict` |
 | Knn fusion | `-knn_beta b`: each candidate x exp(b * max cosine of the query's mention block to the label's training rows), computed for the candidate pairs only; BC5CDR uses 10, off by default | `XModel.predict`, `scoring.label_max_cos` |
 

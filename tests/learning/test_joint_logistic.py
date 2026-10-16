@@ -1,5 +1,7 @@
 """JointOvRLogistic solves liblinear's one-vs-rest L2 logistic objective for all labels at once: same probabilities as
 sklearn's liblinear OneVsRest on a 0/1 indicator target, same shapes through the ClassifierModel wrapper. Offline."""
+import tracemalloc
+
 import numpy as np
 import pytest
 from scipy.sparse import csr_matrix, csc_matrix
@@ -70,3 +72,29 @@ def test_joint_ovr_logistic_gpu_oom_falls_back_to_cpu(monkeypatch, accel, oom):
     monkeypatch.setattr(torch.mps, "empty_cache", lambda: None)
     m = JointOvRLogistic().fit(X, y)
     assert devices == [accel, "cpu"] and np.array_equal(m.W_, ref.W_)
+
+
+def test_joint_ovr_logistic_label_blocks(monkeypatch):
+    """Label blocks (2 labels each, last one ragged) reach the joint fit's optimum, for indicator and class targets,
+    and bound the numpy (n, labels) temporaries."""
+    rng = np.random.default_rng(0)
+    L, d, per = 7, 20, 25
+    y = np.repeat(np.arange(L), per)
+    X = normalize(rng.normal(size=(L, d))[y] + 0.8 * rng.normal(size=(len(y), d)))
+    Y = csr_matrix(np.eye(L)[y])
+    joint = [JointOvRLogistic(tol=1e-8, max_iter=2000).fit(X, t) for t in (Y, y)]
+    monkeypatch.setattr(classifiers, "LABEL_BLOCK_ENTRIES", 2 * len(y))
+    for ref, t in zip(joint, (Y, y)):
+        m = JointOvRLogistic(tol=1e-8, max_iter=2000).fit(X, t)
+        assert m.W_.shape == ref.W_.shape == (d + 1, L)
+        assert np.abs(m.predict_proba(X) - ref.predict_proba(X)).max() < 1e-3
+        assert (m.predict_proba(X).argmax(1) == ref.predict_proba(X).argmax(1)).all()
+
+    n, L = 4000, 400
+    X, y = rng.normal(size=(n, 3)).astype(np.float32), rng.integers(0, L, n)
+    monkeypatch.setattr(classifiers, "LABEL_BLOCK_ENTRIES", n * 20)
+    tracemalloc.start()
+    JointOvRLogistic(max_iter=2).fit(X, y)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < n * L * 4, peak  # one full float32 (n, L) matrix

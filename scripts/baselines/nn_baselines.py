@@ -54,7 +54,7 @@ def main():
     parser.add_argument("-out", help="write {baseline: metrics} to this JSON file")
     args = parser.parse_args()
 
-    xm = XModel.load(args.xmodel_path)
+    xm = XModel.load(args.xmodel_path, research=True)
     if "sapbert" in args.baselines and "mention" not in xm.feature_blocks():
         parser.error(f"baseline sapbert needs a tree with a mention encoder (features {xm.features!r}); "
                      "use -baselines tfidf")

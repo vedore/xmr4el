@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from xmr4el.learning.scoring import label_max_cos
-from xmr4el.xmodel import XModel
+from xmr4el.xmodel import RESEARCH_STATE, XModel
 
 
 def test_pipeline_persistence(caplog, capsys):
@@ -49,8 +49,17 @@ def test_pipeline_persistence(caplog, capsys):
         assert restored.initial_labels == sorted(labels)
         assert restored.predict_config == first.predict_config == \
             {"beam_size": 10, "topk": 0, "knn_beta": 0.0, "leaf_candidates": 100}
-        assert restored.training_set == first.training_set
         assert np.allclose(restored.predict(queries, beam_size=2).toarray(), expected)
+        # training-only state stays in research.pkl until knn on a knn_beta 0 tree (no saved index) needs it
+        assert all(getattr(restored, key) is None for key in RESEARCH_STATE) and restored.knn_index is None
+        assert np.allclose(restored.predict(queries, beam_size=2, knn_beta=2).toarray(), rescored)
+        assert restored.X is not None
+        assert XModel.load(saved, research=True).training_set == first.training_set
+        # a knn_beta > 0 tree saves its knn index: knn without research state
+        first.predict_config["knn_beta"], first.knn_index = 2, None
+        knn_tree = XModel.load(first.save(tmp))
+        assert knn_tree.X is None and knn_tree.knn_index is not None
+        assert np.allclose(knn_tree.predict(queries, beam_size=2).toarray(), rescored)
     assert capsys.readouterr().out == "", "library code must use logging, not stdout"
     messages = [record.getMessage() for record in caplog.records]
     assert any("Node started: layer=2 node=2/2" in message for message in messages)

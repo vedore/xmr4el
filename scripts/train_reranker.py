@@ -50,7 +50,7 @@ def main():
     set_verbosity(2 if args.verbose else 1)
     start = time.perf_counter()
 
-    xm = XModel.load(args.xmodel_path)
+    xm = XModel.load(args.xmodel_path, research=True)
     tree = os.path.basename(os.path.normpath(args.xmodel_path))
     data = Preprocessor.load_pubtator_file(args.train_path, window=xm.context_window, abbrev=xm.abbrev_expansion)
     label_to_idx = {lab: i for i, lab in enumerate(xm.initial_labels)}

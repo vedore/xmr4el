@@ -11,6 +11,7 @@ from gc import collect
 from numpy import array
 from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
+from huggingface_hub import HfApi, snapshot_download
 from sentence_transformers import SentenceTransformer
 from xmr4el import torch_device
 from sentence_transformers.sentence_transformer.modules import Pooling, Transformer as STTransformer
@@ -20,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Short config `type` names -> checkpoints (configs and saved trees use these). Any other model:
 # "kwargs": {"model_name": "<HF or sentence-transformers id>"}, optionally "pooling", "max_seq_length" and
-# "revision" (a Hub commit hash pins the checkpoint; None = the Hub's current main).
+# "revision" (a Hub branch, tag or commit; None = main). Training resolves it to the commit hash (`resolve_revision`),
+# which the saved encoder keeps: predictions use the checkpoint the tree was trained on.
 MODEL_NAMES = {
     "biobert": "dmis-lab/biobert-base-cased-v1.2",
     "sentencetbiobert": "pritamdeka/S-BioBert-snli-multinli-stsb",
@@ -32,10 +34,31 @@ MODEL_NAMES = {
 CLS_POOLED = {"cambridgeltl/SapBERT-from-PubMedBERT-fulltext": 25}
 
 # Embeddings of a frozen encoder depend only on (model, revision, pooling, max length, dtype, texts): `transform` saves
-# them here and reuses them on any later run with the same distinct texts. Without a pinned revision the key cannot see
-# a checkpoint update on the Hub: delete the directory then.
+# them here and reuses them on any later run with the same distinct texts. Training pins the revision (a local model
+# directory has none: delete the cache after changing its files).
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                          "outputs", "cache", "transformers")
+
+
+def resolve_revision(config):
+    """Copy of a transformer config with kwargs.revision = the Hub commit hash its revision (None = "main") points
+    at now; offline, the locally cached commit. Configs without a model name or with a local directory: unchanged."""
+    if config is None:
+        return None
+    kwargs = config.get("kwargs", {})
+    name = kwargs.get("model_name") or MODEL_NAMES.get(config.get("type"))
+    if not name or os.path.isdir(name):
+        return config
+    rev = kwargs.get("revision") or "main"
+    try:
+        sha = HfApi().model_info(name, revision=rev).sha
+    except Exception as e:  # offline or Hub unreachable: the snapshot the local cache holds for rev
+        try:
+            sha = os.path.basename(snapshot_download(name, revision=rev, local_files_only=True))
+        except Exception as local:
+            raise RuntimeError(f"cannot resolve revision {rev!r} of {name}: Hub ({e}), local cache ({local})") from e
+    logger.info("Transformer revision: model=%s revision=%s commit=%s", name, rev, sha)
+    return {**config, "kwargs": {**kwargs, "revision": sha}}
 
 
 @lru_cache(maxsize=2)  # loaded once per process: a per-call load costs ~1-2 s per predict
@@ -74,7 +97,7 @@ class Transformer:
             raise ValueError(f"batch_size must be an int >= 0 (0 = 400), got {kwargs['batch_size']!r}")
         # Mentions repeat (500 labels: 23512 rows, 5937 distinct strings): embed each distinct text once
         uniq, inv = np.unique(np.asarray(list(trn_corpus), dtype=object).astype(str), return_inverse=True)
-        # revision joins the key only when pinned, so unpinned configs keep their cached embeddings
+        # revision joins the key when set (always after training resolves it)
         rev = [f"revision={kwargs['revision']}"] if kwargs.get("revision") else []
         key = "\0".join([model_name, *rev, str(kwargs.get("pooling")), str(kwargs.get("max_seq_length")),
                          np.dtype(kwargs["dtype"]).name, *uniq.tolist()])

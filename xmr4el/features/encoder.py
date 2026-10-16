@@ -6,7 +6,7 @@ from scipy.sparse import csr_matrix, hstack
 from sklearn.preprocessing import normalize
 from xmr4el.features.vectorizers import Vectorizer
 from xmr4el.features.reduction import DimensionModel
-from xmr4el.features.transformers import Transformer
+from xmr4el.features.transformers import Transformer, resolve_revision
 
 
 FEATURES = ("tfidf", "sapbert_char_context")
@@ -177,6 +177,8 @@ class TextEncoder():
         if any("[SEP]" not in t for t in X_text):
             raise ValueError("features 'sapbert_char_context' needs 'mention [SEP] context' input")
         mentions, contexts = zip(*(t.split("[SEP]", 1) for t in X_text)) if X_text else ((), ())
+        if fit:  # the saved encoder keeps the commit it was fitted with
+            self.transformer_config = resolve_revision(self.transformer_config)
         blocks = [csr_matrix(self._encode_text_using_transformer(list(mentions), self.transformer_config)),
                   self._tfidf_block(list(mentions), "", fit),
                   self._tfidf_block(list(contexts), "context_", fit)]

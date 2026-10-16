@@ -81,7 +81,7 @@ def main():
     args = ap.parse_args()
     rng = np.random.default_rng(0)
 
-    xm = XModel.load(args.xmodel_path)
+    xm = XModel.load(args.xmodel_path, research=True)
     root = xm.model.hmodel[0][0]
     if root.is_last_layer:
         ap.error("one-layer tree: the root is a leaf, no routing to diagnose")

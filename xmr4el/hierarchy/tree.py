@@ -11,7 +11,7 @@ from copy import deepcopy
 from os.path import join as pjoin, exists as pexists, isdir as pisdir
 from os import makedirs as pmakedirs, listdir as plistdir
 from pickle import dump as pkl_dump, load as pkl_load
-from scipy.sparse import hstack as sp_hstack, vstack as sp_vstack, csr_matrix
+from scipy.sparse import hstack as sp_hstack, vstack as sp_vstack, csr_matrix, csc_matrix
 from numpy import (
     asarray, int32, log, vstack as np_vstack
 )
@@ -157,11 +157,10 @@ class HierarchicalMLModel():
                     continue   # the last layer's map points at a layer that does not exist
                 for parent_idx, cmap in enumerate(parent_maps or []):
                     parent = hmodel[layer][parent_idx]
-                    C_p = parent.cluster_model.c_node
-                    C_dense = C_p.toarray() if hasattr(C_p, "toarray") else np.asarray(C_p)
+                    C = csc_matrix(parent.cluster_model.c_node > 0)
                     l2g = np.asarray(parent.local_to_global_idx)
                     for c, child_idx in (cmap or {}).items():
-                        want = set(l2g[np.where(C_dense[:, int(c)] > 0)[0]].tolist())
+                        want = set(l2g[C.indices[C.indptr[int(c)]:C.indptr[int(c) + 1]]].tolist())
                         got = set(np.asarray(hmodel[layer + 1][child_idx].local_to_global_idx).tolist())
                         if want != got:
                             raise ValueError(

@@ -10,7 +10,7 @@ from pathlib import Path
 import runpy
 import subprocess
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
@@ -18,11 +18,12 @@ import pytest
 from xmr4el.data import splits
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
-from xmr4el.features.transformers import Transformer
+from xmr4el.features import transformers
+from xmr4el.features.transformers import Transformer, resolve_revision
 from xmr4el.learning.classifiers import JointOvRLogistic
 from xmr4el.learning.scoring import knn_index, label_max_cos, label_rows
 from xmr4el.rerank import out_of_fold_top_k
-from xmr4el.xmodel import XModel
+from xmr4el.xmodel import RESEARCH_STATE, XModel
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = dict(
@@ -170,13 +171,15 @@ def test_split_cli_partial_and_ratios(tmp_path):
 # C3: xmodel.json mirrors the pickled state's keys
 
 def test_xmodel_json(xm, tmp_path):
-    xm.predict(["concept1 synonym9 group0"], knn_beta=10)  # builds knn_index, which save must leave out
+    xm.predict(["concept1 synonym9 group0"], knn_beta=10)  # builds knn_index, which save leaves out (knn_beta 0)
     assert xm.knn_index is not None
     xm.save(str(tmp_path))
     (saved,) = tmp_path.iterdir()
     state = pickle.loads((saved / "xmodel.pkl").read_bytes())
+    research = pickle.loads((saved / "research.pkl").read_bytes())
     view = json.loads((saved / "xmodel.json").read_text())
-    assert view.keys() == state.keys() and "knn_index" not in state
+    assert view.keys() == state.keys() | research.keys() and state["knn_index"] is None
+    assert tuple(research) == RESEARCH_STATE and not state.keys() & research.keys()
     assert view["initial_labels"] == {"type": "list", "len": 8, "first": "L0"}
     assert view["Z"]["shape"] == list(xm.Z.shape) and view["Y"]["nnz"] == xm.Y.nnz
     assert view["predict_config"] == xm.predict_config
@@ -307,3 +310,24 @@ def test_split_cli_failure_keeps_old_splits(tmp_path):
             pytest.raises(OSError, match="disk full"):
         runpy.run_path(str(ROOT / "scripts/split_pubtator.py"), run_name="__main__")
     assert sorted(p.read_text() for p in out.iterdir()) == ["old"] * 3, "old splits kept, no temp files"
+
+
+# Second audit Phase C (2026-10-16)
+
+def test_resolve_revision_pins_commit(monkeypatch):
+    """#9: training resolves the transformer revision to a commit (Hub, else the local cache); the saved encoder
+    keeps it."""
+    cfg = {"type": "sapbert", "kwargs": {"batch_size": 7}}
+    monkeypatch.setattr(transformers, "HfApi", lambda: Mock(model_info=Mock(return_value=Mock(sha="a" * 40))))
+    assert resolve_revision(cfg) == {"type": "sapbert", "kwargs": {"batch_size": 7, "revision": "a" * 40}}
+    assert "revision" not in cfg["kwargs"], "caller's config unchanged"
+    monkeypatch.setattr(transformers, "HfApi", lambda: Mock(model_info=Mock(side_effect=OSError("offline"))))
+    monkeypatch.setattr(transformers, "snapshot_download", lambda *a, **k: f"/hub/snapshots/{'b' * 40}")
+    assert resolve_revision(cfg)["kwargs"]["revision"] == "b" * 40
+    assert resolve_revision({"type": "stub"}) == {"type": "stub"} and resolve_revision(None) is None
+    enc = TextEncoder(features="sapbert_char_context", transformer_config=cfg,
+                      vectorizer_config={"type": "tfidf", "kwargs": {}},
+                      context_vectorizer_config={"type": "tfidf", "kwargs": {}})
+    with patch.object(TextEncoder, "_encode_text_using_transformer", staticmethod(lambda t, c: np.ones((len(t), 2)))):
+        enc.encode(["aspirin [SEP] fever dose", "tumour [SEP] doc one"])
+    assert enc.transformer_config["kwargs"]["revision"] == "b" * 40

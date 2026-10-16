@@ -32,7 +32,7 @@ def main():
     ap.add_argument("-out", required=True)
     args = ap.parse_args()
 
-    xm = XModel.load(args.xmodel_path)
+    xm = XModel.load(args.xmodel_path, research=True)
     labels = np.array(xm.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
     test = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window, abbrev=xm.abbrev_expansion)

@@ -89,7 +89,7 @@ def main():
     args = ap.parse_args()
     m = {"tree": args.xmodel_path, "test_path": args.test_path, "rss_gb": {}, "bytes": {}, "batch_s": {}, "single_ms": {}}
 
-    xm, m["load_s"] = timed(lambda: XModel.load(args.xmodel_path))
+    xm, m["load_s"] = timed(lambda: XModel.load(args.xmodel_path, research=True))
     m["labels"], m["rss_gb"]["tree_loaded"] = len(xm.initial_labels), rss_gb()
     m["bytes"]["tree_dir"] = dir_bytes(args.xmodel_path)
     test = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window, abbrev=xm.abbrev_expansion)
