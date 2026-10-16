@@ -882,6 +882,35 @@ Rows correct / gold among the candidates per group (seen 1 n=4465 / seen >1 n=68
 - vs SapBERT 1-NN (5000 rows, 0.17 ms/q batch): lc 500 is still -69 rows, seen 1 -63 (4384 vs 4447). A larger leaf
   share does not close the gap: the remaining seen-1 loss is mostly ranking (33 routed, not first) plus 48 not routed.
 
+## 2026-10-16: where routing loses the gold (root vs leaf), and the empty-context dictionary rows (dev, eval-only)
+
+`bash scripts/run_ctx.sh` on the server (`scripts/diagnose_context.py`, commit `ccfea30`), bundle `outputs/ctx.tar.gz`.
+Trees: BC5CDR-chemical `13-52-04`, NLM-Chem `14-58-54` (`xmodel_2026-10-13_*`), NCBI-disease = latest plain run tree.
+Beam 10, leaf candidates 100, knn 10. Every error is counted once: root lost = gold cluster not in the root's top 10;
+leaf cut = gold cluster visited, gold not in that leaf's top 100; ranked wrong = gold a candidate, not top-1.
+
+| set (dev rows) | group (n) | root lost | leaf cut | ranked wrong | correct |
+|---|---|---|---|---|---|
+| BC5CDR-chemical (5181) | seen 1 (4465) | 29 | 54 | 24 | 4358 |
+|  | seen >1 (68) | 2 | 0 | 20 | 46 |
+|  | unseen (648) | 54 | 25 | 79 | 490 |
+| NLM-Chem (4907) | seen 1 (3168) | 34 | 8 | 77 | 3049 |
+|  | seen >1 (173) | 15 | 2 | 44 | 112 |
+|  | unseen (1566) | 245 | 50 | 129 | 1142 |
+| NCBI-disease (729) | seen 1 (537) | 0 | 0 | 17 | 520 |
+|  | seen >1 (17) | 0 | 0 | 1 | 16 |
+|  | unseen (175) | 9 | 0 | 28 | 138 |
+
+- Context shift (CTD rows have an empty context, so a zero context block: 98.9% of BC5CDR-chemical training rows) is not
+  the loss: 99 / 118 / 117 of 128 clusters hold a corpus row with context, and only 61 / 1 / 0 dev golds sit in a
+  dictionary-only cluster. Zeroing the dev context block (= a dictionary row of the same string) lifts those 61 to root
+  recall@10 1.000 (from 0.902) but lowers the full search: acc@1 0.9446 -> 0.9350 (BC5CDR-chem), 0.8769 -> 0.8767
+  (NLM-Chem), 0.9246 -> 0.9218 (NCBI).
+- BC5CDR-chemical seen 1 (the gap to SapBERT 1-NN): the root keeps the gold cluster for 4436 of 4465 (0.994); 78 of the
+  107 errors are inside the leaf (54 outside the leaf's top 100 of ~1400 labels, 24 ranked wrong).
+- NLM-Chem: the root is the loss, on unseen strings: 245 of 1566 (15.6%) never reach their cluster (root recall@1 0.68).
+- Root top-1 cluster accuracy is low on the chemical sets (0.765 / 0.771 vs NCBI 0.912); beam 10 hides it for seen strings.
+
 ## Commands
 
 ```bash

@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-16 (LC read; user: the loss is the routing model, not leaf_candidates. NEXT = user runs `scripts/run_ctx.sh`; see CTX block after LC).
+Last updated 2026-10-16 (CTX read into results.md "where routing loses the gold"; context shift rejected; NEXT = user picks leaf vs root matcher work; see CTX block).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -158,6 +158,10 @@ NEXT (user, server): `git pull --ff-only && nohup bash scripts/run_ctx.sh > outp
 `outputs/ctx.tar.gz`. Read: if ctx 0 raises dict-only recall@10 / acc@1 -> fix the feature shift (candidates: dict rows
 get the name as context, or drop/zero context in the root matcher, or train the root without context); if not ->
 root capacity (linear OvR on 2304 dense dims for 128 clusters of ~1400 labels; compare train-row recall).
+CTX result (2026-10-16, `outputs/ctx.tar.gz` read): context shift rejected (only 61 / 1 / 0 dev golds in dict-only
+clusters; zeroing context lowers acc@1). BC5CDR-chem seen 1: root keeps 0.994, 78 of 107 errors inside the leaf (54 leaf
+top-100 cut, 24 ranked). NLM-Chem: root loses 245 of 1566 unseen. Open: leaf matcher underfit or generalization?
+(eval-only check: leaf rank of training rows' own labels); root generalization on unseen (NLM-Chem).
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints
