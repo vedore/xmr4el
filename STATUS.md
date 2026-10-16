@@ -6,7 +6,17 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-16 (CTX read into results.md "where routing loses the gold"; context shift rejected; NEXT = user picks leaf vs root matcher work; see CTX block).
+Last updated 2026-10-16. NEXT SESSION = go through `docs/comprehensive_audit_2026-10-16.md` with the user (see SHIP block).
+
+**SHIP (user 2026-10-16): ship the model as is: no more training, no more model fixes.** Defaults stay (beam 10,
+`leaf_candidates` 100, knn 10). Next session: review `docs/comprehensive_audit_2026-10-16.md` (untracked, not written by
+this agent; 20 findings: 4 High = #1 failed dictionary conversion destroys output, #2 encoder config non-progressing loop,
+#3 saved models do not freeze the transformer checkpoint, #4 unbounded dense training allocations; 15 Medium, 1 Low;
+roadmap at the end). Verify each finding against the code first (audits can be stale), then the user decides per finding
+(fix / document / skip); nothing that changes results or needs a retrain. Check #5 (R@cand / routed include topk
+truncation) against the LC/CTX numbers: those ran with topk 0, so presumably unaffected. Also pending for shipping: merge
+`repeat` into `main`; README "Scope and limitations" (diseases: XMR4EL > 1-NN; chemicals 180k: SapBERT 1-NN better,
+faster, smaller; causes measured in results.md 2026-10-16) only if the user asks.
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
