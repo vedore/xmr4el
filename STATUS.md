@@ -12,9 +12,7 @@ Last updated 2026-10-16. NEXT SESSION = go through `docs/comprehensive_audit_202
 `leaf_candidates` 100, knn 10). Next session: review `docs/comprehensive_audit_2026-10-16.md` (untracked, not written by
 this agent; 20 findings: 4 High = #1 failed dictionary conversion destroys output, #2 encoder config non-progressing loop,
 #3 saved models do not freeze the transformer checkpoint, #4 unbounded dense training allocations; 15 Medium, 1 Low;
-roadmap at the end). Verify each finding against the code first (audits can be stale), then the user decides per finding
-(fix / document / skip); nothing that changes results or needs a retrain. Check #5 (R@cand / routed include topk
-truncation) against the LC/CTX numbers: those ran with topk 0, so presumably unaffected. Also pending for shipping: merge
+roadmap at the end). Verified 2026-10-16 (all 20 hold at HEAD `3b7b04d`; #5 does not affect recorded numbers: configs/specs use topk 0; JSONL (#8) has no consumer in the repo). Fixed (user 2026-10-16, uncommitted, pytest 61): #1 dict_to_pubtator write-then-rename; #2 XModel rejects unknown features, min_leaf_size < 0, transformer batch_size < 0 (also in Transformer.transform), null predict_config values, and runs check_search on predict_config; #6 split_pubtator rejects listed PMIDs missing from the corpus and NaN ratios (reports corpus docs in no list); #10 knn_beta in [0, 100]; #12 run_experiment SIGTERM -> failed status; #13 classifier MPS OOM -> CPU; #14 nn_baselines refuses sapbert on a tree without a mention encoder; #15 reranker seeds before from_pretrained (seed in meta); #20 README configs line + experiment_management.md post-baseline note. Open: doc notes for #3/#5/#8/#16/#17 (not yet asked); #4/#7/#9/#11/#18/#19 skipped. Rule: nothing that changes results or needs a retrain. Also pending for shipping: merge
 `repeat` into `main`; README "Scope and limitations" (diseases: XMR4EL > 1-NN; chemicals 180k: SapBERT 1-NN better,
 faster, smaller; causes measured in results.md 2026-10-16) only if the user asks.
 

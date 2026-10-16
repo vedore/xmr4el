@@ -18,7 +18,7 @@ def main():
     official = [args.train_pmids, args.dev_pmids, args.test_pmids]
     if any(official) and not all(official):
         parser.error("give all three of --train_pmids/--dev_pmids/--test_pmids or none")
-    if min(args.train_ratio, args.dev_ratio) < 0 or args.train_ratio + args.dev_ratio > 1:
+    if not (args.train_ratio >= 0 and args.dev_ratio >= 0 and args.train_ratio + args.dev_ratio <= 1):  # NaN fails
         parser.error("need train_ratio, dev_ratio >= 0 with train_ratio + dev_ratio <= 1")
 
     names = ["corpus_pubtator_%s.txt" % s for s in ("train", "dev", "test")]
@@ -45,6 +45,10 @@ def main():
                 if pmid in seen:
                     parser.error(f"PMID {pmid} listed in {seen[pmid]} and in {name}")
                 seen[pmid] = name
+        unknown = [p for p in seen if p not in pmid_blocks]
+        if unknown:
+            parser.error(f"{len(unknown)} listed PMIDs are not in {args.input} (first: {unknown[:5]})")
+        omitted = len(pmids) - len(seen)
     else:
         # Deterministic split
         for pmid in pmids:
@@ -65,6 +69,8 @@ def main():
 
     print("Done. Split sizes: train=%d dev=%d test=%d" %
           (len(splits["train"]), len(splits["dev"]), len(splits["test"])))
+    if all(official) and omitted:
+        print("%d corpus documents are in no PMID list (not written)" % omitted)
 
 if __name__ == "__main__":
     main()

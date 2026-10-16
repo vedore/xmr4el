@@ -91,9 +91,10 @@ class CrossEncoderReranker:
         self.model.to(self.device)
 
     @classmethod
-    def from_pretrained(cls, name, meta, max_length=96):
+    def from_pretrained(cls, name, meta, max_length=96, seed=0):
+        torch.manual_seed(seed)  # before the load: the classification head is initialised randomly
         model = AutoModelForSequenceClassification.from_pretrained(name, num_labels=1)
-        return cls(model, AutoTokenizer.from_pretrained(name), meta, max_length)
+        return cls(model, AutoTokenizer.from_pretrained(name), {**meta, "seed": seed}, max_length)
 
     def _logits(self, queries, labels):
         enc = self.tokenizer(queries, labels, padding=True, truncation=True, max_length=self.max_length,

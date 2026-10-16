@@ -10,6 +10,7 @@ Only MESH ids are kept (prefix stripped, matching BC5CDR); OMIM-only concepts ar
 import argparse
 import gzip
 import os
+import tempfile
 
 
 def convert(lines, entity_type, omim=False):
@@ -54,8 +55,15 @@ def main():
     args = parser.parse_args()
     if os.path.exists(args.out) and os.path.samefile(args.out, args.ctd_path):
         parser.error(f"output {args.out} is the input file")
-    with gzip.open(args.ctd_path, "rt", encoding="utf-8") as fin, open(args.out, "w", encoding="utf-8") as fout:
-        fout.writelines(convert(fin, args.type, omim=args.omim))
+    # write-then-rename: a failed conversion leaves an existing output untouched
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(args.out)), suffix=".tmp")
+    try:
+        with gzip.open(args.ctd_path, "rt", encoding="utf-8") as fin, os.fdopen(fd, "w", encoding="utf-8") as fout:
+            fout.writelines(convert(fin, args.type, omim=args.omim))
+        os.replace(tmp, args.out)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 if __name__ == "__main__":

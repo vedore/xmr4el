@@ -2,6 +2,11 @@
 
 Analysis baseline: local commit `7683b5dc5180d7f3f5c80008ab579d65ae9e8266`, inspected on 2026-10-09. The working tree was clean before this report. Only this fork informs the design; the upstream repository is outside scope.
 
+**Since that commit (Plan H, 2026-10-09):** `scripts/run_experiment.py` writes `status.json` (running / completed /
+failed), `spec.json`, `git.json` and `provenance.json` per run, and transformer configs accept `kwargs.revision`
+(pins the Hub checkpoint and joins the embedding cache key when set; the two main configs leave it unset). § A describes
+the code at the baseline commit, not these additions.
+
 **Recommendation:** build a small experiment management layer around the existing pipeline: JSON presets and batch specifications, Pydantic validation, a Python API, an argparse CLI, and local file tracking. Execute isolated worker processes sequentially first. Add bounded parallel execution next, and an optional Textual client last. Do not start with Hydra, MLflow, a distributed orchestrator, or a TUI containing training logic.
 
 The smaller first release is one validated run plus saved metrics and provenance. It should establish the same contracts that batches will use.

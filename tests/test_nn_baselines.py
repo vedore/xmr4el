@@ -56,10 +56,13 @@ def test_nn_baselines_script(tmp_path):
     xm = XModel(**CONFIG)
     xm.train(*Preprocessor.organize_pubtator_output(Preprocessor.load_pubtator_file(str(tmp_path / "train.pubtator"))))
     tree = xm.save(str(tmp_path / "trees"))
-    res = subprocess.run([sys.executable, str(SCRIPT), "-xmodel_path", tree, "-test_path", "train.pubtator",
-                          "-train_path", "train.pubtator", "-out", "nn.json"], cwd=tmp_path,
-                         capture_output=True, text=True)
+    run = lambda *a: subprocess.run([sys.executable, str(SCRIPT), "-xmodel_path", tree, "-test_path", "train.pubtator",
+                                     "-train_path", "train.pubtator", "-out", "nn.json", *a], cwd=tmp_path,
+                                    capture_output=True, text=True)
+    res = run()  # default baselines include sapbert: a tfidf tree has no mention encoder
+    assert res.returncode != 0 and "mention encoder" in res.stderr
+    res = run("-baselines", "tfidf")
     assert res.returncode == 0, res.stderr
     out = json.loads((tmp_path / "nn.json").read_text())
-    assert set(out) == {"sapbert", "tfidf"} and out["tfidf"]["rows"] == out["tfidf"]["rows_total"] == 120
+    assert set(out) == {"tfidf"} and out["tfidf"]["rows"] == out["tfidf"]["rows_total"] == 120
     assert out["tfidf"]["acc@1"] == 1.0 and out["tfidf"]["strings"]["all"]["n"] == 120

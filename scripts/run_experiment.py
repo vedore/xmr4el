@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -177,6 +178,8 @@ def main():
     args = parser.parse_args()
     with open(args.spec) as f:
         spec = json.load(f)
+    # SIGTERM (kill, docker stop) -> SystemExit, so run() marks the run failed; SIGKILL still leaves "running"
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     run(spec, args.xmodel_path)
 
 

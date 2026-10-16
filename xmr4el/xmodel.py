@@ -1,5 +1,4 @@
 import json
-import math
 import numbers
 import os
 import pickle
@@ -15,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
-from xmr4el.features.encoder import TextEncoder
+from xmr4el.features.encoder import FEATURES, TextEncoder
 from xmr4el.hierarchy.tree import HierarchicalMLModel, rank_rows
 from xmr4el.learning.scoring import knn_index, label_max_cos
 
@@ -41,11 +40,12 @@ def _json_state(state):
 
 
 PREDICT_DEFAULTS = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, "leaf_candidates": 100}
+KNN_BETA_MAX = 100  # fusion multiplies by exp(beta * cos): exp(100) keeps every score finite (overflow near 709)
 
 
 def check_search(cfg):
-    """Raise ValueError unless beam_size and leaf_candidates are ints >= 1, topk an int >= 0 and knn_beta a finite
-    number (keys left out or None are not checked)."""
+    """Raise ValueError unless beam_size and leaf_candidates are ints >= 1, topk an int >= 0 and knn_beta a number in
+    [0, KNN_BETA_MAX] (keys left out or None are not checked)."""
     is_int = lambda v: isinstance(v, numbers.Integral) and not isinstance(v, bool)
     bad = []
     if cfg.get("beam_size") is not None and not (is_int(cfg["beam_size"]) and cfg["beam_size"] >= 1):
@@ -55,8 +55,9 @@ def check_search(cfg):
     if cfg.get("topk") is not None and not (is_int(cfg["topk"]) and cfg["topk"] >= 0):
         bad.append(f"topk {cfg['topk']!r} (int >= 0)")
     beta = cfg.get("knn_beta")
-    if beta is not None and not (isinstance(beta, numbers.Real) and not isinstance(beta, bool) and math.isfinite(beta)):
-        bad.append(f"knn_beta {beta!r} (finite number)")
+    if beta is not None and not (isinstance(beta, numbers.Real) and not isinstance(beta, bool)
+                                 and 0 <= beta <= KNN_BETA_MAX):  # NaN fails too
+        bad.append(f"knn_beta {beta!r} (number in [0, {KNN_BETA_MAX}])")
     if bad:
         raise ValueError("search settings: " + ", ".join(bad))
 
@@ -110,9 +111,19 @@ class XModel:
         if not (isinstance(depth, numbers.Integral) and not isinstance(depth, bool) and depth >= 1):
             raise ValueError(f"depth must be an int >= 1, got {depth!r}")
         self.depth = depth
+        if features not in FEATURES:
+            raise ValueError(f"features must be one of {FEATURES}, got {features!r}")
         self.features = features
+        if not (isinstance(min_leaf_size, numbers.Integral) and not isinstance(min_leaf_size, bool) and min_leaf_size >= 0):
+            raise ValueError(f"min_leaf_size must be an int >= 0, got {min_leaf_size!r}")
+        batch = (transformer_config or {}).get("kwargs", {}).get("batch_size", 0)
+        if not (isinstance(batch, numbers.Integral) and not isinstance(batch, bool) and batch >= 0):
+            raise ValueError(f"transformer batch_size must be an int >= 0 (0 = default), got {batch!r}")
         # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
+        if None in (predict_config or {}).values():
+            raise ValueError(f"predict_config {predict_config}: leave a key out instead of null")
         self.predict_config = {**PREDICT_DEFAULTS, **(predict_config or {})}
+        check_search(self.predict_config)
         
         self.text_encoder = None
         self.model = None  # HierarchicalMLModel

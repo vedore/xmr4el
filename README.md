@@ -40,8 +40,8 @@ The Linux x86-64 lock includes large CUDA packages, so the first build can take 
 space even when running on CPU.
 
 Copy your datasets into the checkout's `datasets/` or `data/` directory on the server;
-Git does not include them. Git tracks only `configs/xmr4el_base_config.json` (MedMentions) and
-`configs/xmr4el_bc5cdr_config.json`; copy any other local experiment config separately. First check the mounted code:
+Git does not include them. Git tracks the model configs `configs/xmr4el_base_config.json` (MedMentions) and
+`configs/xmr4el_bc5cdr_config.json` plus the run specs in `configs/experiments/`; copy any other local config separately. First check the mounted code:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" \

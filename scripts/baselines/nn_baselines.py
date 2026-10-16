@@ -55,6 +55,9 @@ def main():
     args = parser.parse_args()
 
     xm = XModel.load(args.xmodel_path)
+    if "sapbert" in args.baselines and "mention" not in xm.feature_blocks():
+        parser.error(f"baseline sapbert needs a tree with a mention encoder (features {xm.features!r}); "
+                     "use -baselines tfidf")
     labels = np.array(xm.initial_labels)
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
     test = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window, abbrev=xm.abbrev_expansion)

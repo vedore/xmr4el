@@ -1,6 +1,7 @@
 """JointOvRLogistic solves liblinear's one-vs-rest L2 logistic objective for all labels at once: same probabilities as
 sklearn's liblinear OneVsRest on a 0/1 indicator target, same shapes through the ClassifierModel wrapper. Offline."""
 import numpy as np
+import pytest
 from scipy.sparse import csr_matrix, csc_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
@@ -47,8 +48,10 @@ def test_joint_ovr_logistic():
 
 
 
-def test_joint_ovr_logistic_cuda_oom_falls_back_to_cpu(monkeypatch):
-    """CUDA is tried for every fit; out of memory refits on CPU with the same result."""
+@pytest.mark.parametrize("accel, oom", [("cuda", torch.cuda.OutOfMemoryError("test")),
+                                         ("mps", RuntimeError("MPS backend out of memory (test)"))])
+def test_joint_ovr_logistic_gpu_oom_falls_back_to_cpu(monkeypatch, accel, oom):
+    """CUDA / MPS out of memory refits on CPU with the same result."""
     rng = np.random.default_rng(1)
     X, y = rng.normal(size=(40, 6)), np.arange(40) % 4
     ref = JointOvRLogistic().fit(X, y)
@@ -56,12 +59,14 @@ def test_joint_ovr_logistic_cuda_oom_falls_back_to_cpu(monkeypatch):
 
     def lbfgs(self, Xb, S, cw, dev):
         devices.append(dev.type)
-        if dev.type == "cuda":
-            raise torch.cuda.OutOfMemoryError("test")
+        if dev.type == accel:
+            raise oom
         return real(self, Xb, S, cw, dev)
 
-    monkeypatch.setattr(classifiers, "torch_device", lambda: torch.device("cuda"))
+    monkeypatch.setattr(classifiers, "torch_device", lambda: torch.device(accel))
+    monkeypatch.setattr(classifiers, "GPU_MIN_ENTRIES", 0)  # 40 x 4 entries: MPS is skipped below it
     monkeypatch.setattr(JointOvRLogistic, "_lbfgs", lbfgs)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
-    m = JointOvRLogistic().fit(X, y)  # 40 x 4 entries: far below GPU_MIN_ENTRIES, still tried on CUDA
-    assert devices == ["cuda", "cpu"] and np.array_equal(m.W_, ref.W_)
+    monkeypatch.setattr(torch.mps, "empty_cache", lambda: None)
+    m = JointOvRLogistic().fit(X, y)
+    assert devices == [accel, "cpu"] and np.array_equal(m.W_, ref.W_)

@@ -15,6 +15,7 @@ import pytest
 
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
+from xmr4el.features.transformers import Transformer
 from xmr4el.learning.classifiers import JointOvRLogistic
 from xmr4el.learning.scoring import knn_index, label_max_cos, label_rows
 from xmr4el.xmodel import XModel
@@ -123,7 +124,7 @@ def test_candidate_knn_equals_full_knn():
 def test_predict_config_checks(xm):
     for bad in ({"beam_size": 0}, {"topk": -1}, {"beam_size": 1.5}, {"topk": 2.0}, {"knn_beta": float("nan")},
                 {"knn_beta": float("inf")}, {"beam_size": True},
-                {"leaf_candidates": 0}, {"leaf_candidates": 1.5}):
+                {"leaf_candidates": 0}, {"leaf_candidates": 1.5}, {"knn_beta": 1000}, {"knn_beta": -1}):
         with pytest.raises(ValueError):
             xm.resolve_predict_config(**bad)
     for depth in (0, -1, 1.0):
@@ -208,3 +209,40 @@ def test_matcher_warns_at_max_iter(caplog):
     with caplog.at_level(logging.WARNING, logger="xmr4el.learning.classifiers"):
         JointOvRLogistic(tol=1e-8, max_iter=1).fit(X, y)
     assert "max_iter=1" in caplog.text
+
+
+# E (comprehensive audit, 2026-10-16)
+
+def test_dict_to_pubtator_failure_keeps_output(tmp_path):
+    ctd, out = tmp_path / "ctd.tsv.gz", tmp_path / "out.pubtator"
+    with gzip.open(ctd, "wt") as f:
+        f.write("Fever\tMESH:D005334\n")  # no column header: convert raises
+    out.write_text("previous output\n")
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/dict_to_pubtator.py"), "-ctd_path", str(ctd),
+                        "-out", str(out), "-type", "Disease"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and out.read_text() == "previous output\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["ctd.tsv.gz", "out.pubtator"], "no temp file left"
+
+
+def test_model_config_checks():
+    for bad in ({"features": "bogus"}, {"min_leaf_size": -1},
+                {"transformer_config": {"type": "sapbert", "kwargs": {"batch_size": -1}}},
+                {"predict_config": {"beam_size": None}}, {"predict_config": {"knn_beta": 1000}}):
+        with pytest.raises(ValueError):
+            XModel(**{**CONFIG, **bad})
+    with pytest.raises(ValueError, match="batch_size"):  # before any model load or cache lookup
+        Transformer.transform(["a"], {"type": "sapbert", "kwargs": {"batch_size": -1}})
+
+
+def test_split_cli_unknown_pmids_and_nan(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("1|t|t\n1|a|a\n\n2|t|t\n2|a|a\n\n")
+    for name, ids in (("tr", "1\n"), ("dv", "99\n"), ("te", "")):
+        (tmp_path / name).write_text(ids)
+    script = str(ROOT / "scripts/split_pubtator.py")
+    run = lambda *a: subprocess.run([sys.executable, script, "--input", str(corpus), "--outdir",
+                                     str(tmp_path / "out"), *a], capture_output=True, text=True, cwd=ROOT)
+    r = run(*[x for k, f in (("train", "tr"), ("dev", "dv"), ("test", "te")) for x in (f"--{k}_pmids", str(tmp_path / f))])
+    assert r.returncode != 0 and "not in" in r.stderr and not (tmp_path / "out").exists()
+    r = run("--train_ratio", "nan")
+    assert r.returncode != 0 and "<= 1" in r.stderr

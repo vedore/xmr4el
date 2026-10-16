@@ -116,7 +116,7 @@ GPU_MIN_ENTRIES = 5_000_000
 
 class JointOvRLogistic:
     """Every one-vs-rest L2 logistic problem of a node solved at once by torch L-BFGS (float32; on CUDA if available,
-    else CPU on CUDA out-of-memory; on MPS if n * L >= GPU_MIN_ENTRIES; else CPU).
+    on MPS if n * L >= GPU_MIN_ENTRIES; else CPU; CPU again after a CUDA/MPS out-of-memory).
 
     Per label the objective is liblinear's (`LogisticRegression(solver="liblinear")`): 0.5 ||w||^2 + C sum_i c_i
     log(1 + exp(-y_i w.x_i)), the bias a regularised constant-1 feature, c_i from `class_weight` "balanced" or 1.
@@ -167,9 +167,14 @@ class JointOvRLogistic:
             dev = torch.device("cpu")
         try:
             self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, dev)
-        except torch.cuda.OutOfMemoryError:
-            logger.warning("JointOvRLogistic: CUDA out of memory (n=%d, L=%d), fitting on CPU", n, L)
-            torch.cuda.empty_cache()
+        except RuntimeError as oom:  # torch.cuda.OutOfMemoryError subclasses RuntimeError; MPS raises a plain one
+            if not isinstance(oom, torch.cuda.OutOfMemoryError) and "MPS backend out of memory" not in str(oom):
+                raise
+            logger.warning("JointOvRLogistic: %s out of memory (n=%d, L=%d), fitting on CPU", dev.type, n, L)
+            if dev.type == "mps":
+                torch.mps.empty_cache()
+            else:
+                torch.cuda.empty_cache()
             self.W_, self.n_iter_ = self._lbfgs(Xb, S, cw, torch.device("cpu"))
         if self.n_iter_ >= self.max_iter:
             logger.warning("JointOvRLogistic stopped at max_iter=%d before max |grad| <= tol=%g (n=%d, L=%d)",

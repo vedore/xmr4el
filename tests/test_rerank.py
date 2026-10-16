@@ -112,3 +112,12 @@ def test_out_of_fold_top_k_never_uses_own_document():
     assert all(set(n) <= {f"S{j}" for j in range(4)} | {f"U{e}" for e in range(8)} for n in names)
     full, _ = top_k(xm.predict(queries), len(xm.initial_labels))
     assert all(o in top for o, top in zip(own, full)), "in-sample tree must rank the own-document label"
+
+
+def test_from_pretrained_seeds_the_head(tmp_path):
+    """A checkpoint without a classification head: the same seed gives the same random head."""
+    rr = tiny_reranker()
+    rr.model.bert.save_pretrained(tmp_path)  # encoder only
+    rr.tokenizer.save_pretrained(tmp_path)
+    head = lambda seed: CrossEncoderReranker.from_pretrained(str(tmp_path), {}, seed=seed).model.classifier.weight
+    assert torch.equal(head(3), head(3)) and not torch.equal(head(3), head(4))
