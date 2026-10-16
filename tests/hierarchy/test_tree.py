@@ -67,12 +67,12 @@ def test_tree():
     lc = hml.predict(Xq, beam_size=3, leaf_candidates=2).toarray()
     assert ((lc > 0).sum(axis=1) == 2 * len(hml.hmodel[1])).all() and np.allclose(lc[lc > 0], expect[lc > 0])
 
-    # query blocks: same candidates, scores and row order as one pass
+    # query blocks: same candidates and row order as one pass, scores up to float rounding
     with patch.object(HierarchicalMLModel, "QUERY_BATCH", 5):
         blocked = hml.predict(Xq, beam_size=2, topk=3)
     whole = hml.predict(Xq, beam_size=2, topk=3)
     assert (blocked.indptr == whole.indptr).all() and (blocked.indices == whole.indices).all()
-    assert np.array_equal(blocked.data, whole.data)
+    assert np.allclose(blocked.data, whole.data, rtol=1e-6, atol=0)  # BLAS rounding varies with block rows
 
     # routing features keep X's dtype (float32 at predict too, not promoted by the Python float lists)
     assert augment_features(Xq.astype(np.float32), [0.5] * L, [1.0] * L, [0.5] * L).dtype == np.float32
