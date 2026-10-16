@@ -11,7 +11,7 @@ from copy import deepcopy
 from os.path import join as pjoin, exists as pexists, isdir as pisdir
 from os import makedirs as pmakedirs, listdir as plistdir
 from pickle import dump as pkl_dump, load as pkl_load
-from scipy.sparse import hstack as sp_hstack, csr_matrix
+from scipy.sparse import hstack as sp_hstack, vstack as sp_vstack, csr_matrix
 from numpy import (
     asarray, int32, log, vstack as np_vstack
 )
@@ -32,8 +32,8 @@ class NodeInput(NamedTuple):
 
 
 def augment_features(X, selected, total, maximum):
-    """Append routing probabilities and normalize identically during train and predict."""
-    extra = csr_matrix(np_vstack([selected, total, maximum]).T)
+    """Append routing probabilities and normalize identically during train and predict (X's dtype kept)."""
+    extra = csr_matrix(np_vstack([selected, total, maximum]).T.astype(X.dtype, copy=False))
     return normalize(sp_hstack([X, extra], format="csr"), norm="l2", axis=1)
 
 
@@ -53,6 +53,7 @@ def rank_rows(qis, cols, vals, shape, topk=0):
 class HierarchicalMLModel():
     """Loops MLModel"""
     LEAF_CANDIDATES = 100  # labels each visited leaf contributes (the cap on @cand)
+    QUERY_BATCH = 2048  # queries per search pass: bounds the beam rows and leaf probability matrices
 
     def __init__(self, 
                  clustering_config=None, 
@@ -306,7 +307,14 @@ class HierarchicalMLModel():
         Beam search over the internal layers; every visited leaf contributes its leaf_candidates labels with the
         highest matcher probability, scored matcher probability x routing path probability (XR-Linear). Leaf
         matcher probabilities are per-label sigmoids trained only against that leaf's labels, so the path
-        probability is what makes leaves in one beam comparable. topk > 0 keeps each row's topk best labels."""
+        probability is what makes leaves in one beam comparable. topk > 0 keeps each row's topk best labels.
+        Queries are searched in blocks of QUERY_BATCH rows (rows are independent)."""
+        n = X_query.shape[0]
+        return sp_vstack([self._predict_block(X_query[s:s + self.QUERY_BATCH], beam_size, topk, leaf_candidates)
+                          for s in range(0, max(n, 1), self.QUERY_BATCH)], format="csr")
+
+    def _predict_block(self, X_query, beam_size, topk, leaf_candidates):
+        """`predict` on one block of queries."""
         time_start_routing = time.perf_counter()
         n_queries = X_query.shape[0]
         self.logger.info("Routing started: rows=%d beam=%d topk=%d leaf_candidates=%d", n_queries, beam_size, topk,

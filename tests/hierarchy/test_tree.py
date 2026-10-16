@@ -67,6 +67,16 @@ def test_tree():
     lc = hml.predict(Xq, beam_size=3, leaf_candidates=2).toarray()
     assert ((lc > 0).sum(axis=1) == 2 * len(hml.hmodel[1])).all() and np.allclose(lc[lc > 0], expect[lc > 0])
 
+    # query blocks: same candidates, scores and row order as one pass
+    with patch.object(HierarchicalMLModel, "QUERY_BATCH", 5):
+        blocked = hml.predict(Xq, beam_size=2, topk=3)
+    whole = hml.predict(Xq, beam_size=2, topk=3)
+    assert (blocked.indptr == whole.indptr).all() and (blocked.indices == whole.indices).all()
+    assert np.array_equal(blocked.data, whole.data)
+
+    # routing features keep X's dtype (float32 at predict too, not promoted by the Python float lists)
+    assert augment_features(Xq.astype(np.float32), [0.5] * L, [1.0] * L, [0.5] * L).dtype == np.float32
+
     # routing_features False: leaves see the root's X unchanged (PECOS XR-Linear), at train and predict
     plain = train(X, Y, Z, cfg, routing_features=False)
     P = np.asarray(plain.hmodel[0][0].matcher_model.predict_proba(Xq))
