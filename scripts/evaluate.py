@@ -27,6 +27,8 @@ def main():
     parser.add_argument("-xmodel_path", type=str, required=True)
     parser.add_argument("-test_path", type=str, required=True)
     parser.add_argument("-beam_size", type=int, default=None, help="default: the tree's predict_config")
+    parser.add_argument("-leaf_candidates", type=int, default=None,
+                        help="labels each visited leaf contributes (default: predict_config, 100)")
     parser.add_argument("-topk", type=int, default=None,
                         help="keep each query's topk best labels; 0 = all candidates (default: predict_config)")
     parser.add_argument("-train_path", type=str, default=None,
@@ -51,7 +53,8 @@ def main():
     trained_xtree = XModel.load(args.xmodel_path)
     tree = os.path.basename(os.path.normpath(args.xmodel_path))
     m, state = evaluate_tree(trained_xtree, tree, args.test_path, train_path=args.train_path,
-                             beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta)
+                             beam_size=args.beam_size, topk=args.topk, knn_beta=args.knn_beta,
+                             leaf_candidates=args.leaf_candidates)
     if state is None:
         sys.exit(format_metrics(m))  # no metrics: exit status 1
     print("-" * 72)

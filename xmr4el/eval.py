@@ -80,7 +80,8 @@ def string_breakdown(test_texts, gold, tree_top1, train_pairs):
     return out
 
 
-def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=None, knn_beta=None):
+def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=None, knn_beta=None,
+                  leaf_candidates=None):
     """Rank the PubTator `test_path` with the loaded tree `xm` (named `tree`); search settings left None come from
     its predict_config. Rows whose gold label is not in the tree are dropped (`rows` of `rows_total` kept).
     Returns (metrics, state): metrics is JSON-ready (acc@1, MRR, R@k, R@cand, with `train_path` the mention-string
@@ -92,7 +93,8 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
     m = {"tree": tree, "test_path": test_path, "train_path": train_path, "labels": len(labels),
          "features": xm.features, "rows": len(gold), "rows_total": len(test["labels"]),
          "distinct_gold": len(set(gold))}
-    m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+    m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta,
+                                            leaf_candidates=leaf_candidates)
     if not gold:
         return m, None
     start = time.perf_counter()
@@ -137,7 +139,8 @@ def format_metrics(m):
     if not n:
         return f"rows     0/{m['rows_total']} gold label in vocabulary: nothing to evaluate"
     s = m["search"]
-    lines += [f"search   beam {s['beam_size']}, topk {s['topk']}, knn beta {s['knn_beta']:g}, "
+    lines += [f"search   beam {s['beam_size']}, leaf candidates {s['leaf_candidates']}, topk {s['topk']}, "
+              f"knn beta {s['knn_beta']:g}, "
               f"{m['candidates_per_query']:.0f} candidates/query", "",
               f"acc@1    {m['acc@1']:.4f}   (all {m['rows_total']} rows, out-of-vocabulary = miss: {m['acc@1_all']:.4f})",
               f"MRR      {m['MRR']:.4f}",

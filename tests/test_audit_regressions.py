@@ -122,7 +122,8 @@ def test_candidate_knn_equals_full_knn():
 
 def test_predict_config_checks(xm):
     for bad in ({"beam_size": 0}, {"topk": -1}, {"beam_size": 1.5}, {"topk": 2.0}, {"knn_beta": float("nan")},
-                {"knn_beta": float("inf")}, {"beam_size": True}):
+                {"knn_beta": float("inf")}, {"beam_size": True},
+                {"leaf_candidates": 0}, {"leaf_candidates": 1.5}):
         with pytest.raises(ValueError):
             xm.resolve_predict_config(**bad)
     for depth in (0, -1, 1.0):

@@ -13,7 +13,7 @@ Moved out of `STATUS.md` (2026-10-06).
 | Features | `"tfidf"`: TF-IDF (-> dimension model) of the whole text (TSV). `"sapbert_char_context"`: [transformer(mention) \| char TF-IDF -> SVD(mention) \| TF-IDF -> SVD(context window)], per-block L2; optional `abbrev_expansion`. Other names raise | `TextEncoder._encode`, `features` in the config |
 | Clustering | Seeded balanced spherical k-means (numpy): recursive balanced 2-means, then joint balanced refinement over all k clusters; undersized clusters reassigned instead of dropping labels | `xmr4el/hierarchy/clusterers.py` |
 | Leaf matching | Label-level leaf matchers; base config matcher `jointlogisticregression` (`JointOvRLogistic`) | `MLModel.train`, `xmr4el/hierarchy/node.py`, `xmr4el/learning/classifiers.py` |
-| Leaf scoring | Each visited leaf contributes its 100 best labels by leaf matcher probability (`LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear) | `HierarchicalMLModel.predict` |
+| Leaf scoring | Each visited leaf contributes its `leaf_candidates` best labels by leaf matcher probability (search setting, default 100 = `LEAF_CANDIDATES`), scored matcher probability x exp(path_logscore) (XR-Linear) | `HierarchicalMLModel.predict` |
 | Knn fusion | `-knn_beta b`: each candidate x exp(b * max cosine of the query's mention block to the label's training rows), computed for the candidate pairs only; BC5CDR uses 10, off by default | `XModel.predict`, `scoring.label_max_cos` |
 
 Implemented does not mean validated on dev. Saved trees retain their trained classifiers and leaf

@@ -40,13 +40,18 @@ def _json_state(state):
     return out
 
 
+PREDICT_DEFAULTS = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, "leaf_candidates": 100}
+
+
 def check_search(cfg):
-    """Raise ValueError unless beam_size is an int >= 1, topk an int >= 0 and knn_beta a finite number
-    (keys left out or None are not checked)."""
+    """Raise ValueError unless beam_size and leaf_candidates are ints >= 1, topk an int >= 0 and knn_beta a finite
+    number (keys left out or None are not checked)."""
     is_int = lambda v: isinstance(v, numbers.Integral) and not isinstance(v, bool)
     bad = []
     if cfg.get("beam_size") is not None and not (is_int(cfg["beam_size"]) and cfg["beam_size"] >= 1):
         bad.append(f"beam_size {cfg['beam_size']!r} (int >= 1)")
+    if cfg.get("leaf_candidates") is not None and not (is_int(cfg["leaf_candidates"]) and cfg["leaf_candidates"] >= 1):
+        bad.append(f"leaf_candidates {cfg['leaf_candidates']!r} (int >= 1)")
     if cfg.get("topk") is not None and not (is_int(cfg["topk"]) and cfg["topk"] >= 0):
         bad.append(f"topk {cfg['topk']!r} (int >= 0)")
     beta = cfg.get("knn_beta")
@@ -107,7 +112,7 @@ class XModel:
         self.depth = depth
         self.features = features
         # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
-        self.predict_config = {"beam_size": 10, "topk": 0, "knn_beta": 0.0, **(predict_config or {})}
+        self.predict_config = {**PREDICT_DEFAULTS, **(predict_config or {})}
         
         self.text_encoder = None
         self.model = None  # HierarchicalMLModel
@@ -332,27 +337,30 @@ class XModel:
         
         
     def predict(self, X_text, beam_size: Optional[int] = None, topk: Optional[int] = None,
-                knn_beta: Optional[float] = None):
+                knn_beta: Optional[float] = None, leaf_candidates: Optional[int] = None):
         """Score CSR (n_queries x n_labels) for raw text queries (`HierarchicalMLModel.predict`).
         Arguments left None take the tree's `predict_config`.
 
         knn_beta > 0 multiplies each candidate's score by exp(knn_beta * knn), knn = max cosine of the query's
         mention block to that label's training rows (`mention_block`, `self.X`, `self.Y`). The candidates
         stay the tree's; rows are re-sorted by the fused score before topk."""
-        self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)  # bad settings fail before encoding
+        search = dict(beam_size=beam_size, topk=topk, knn_beta=knn_beta, leaf_candidates=leaf_candidates)
+        self.resolve_predict_config(**search)  # bad settings fail before encoding
         time_start_encoding = time.perf_counter()
         X_query = self.text_encoder.predict(X_text)
         self.logger.info("Prediction encoding completed: rows=%d shape=%s elapsed=%.1fs",
                          X_query.shape[0], X_query.shape, time.perf_counter() - time_start_encoding)
-        return self.predict_encoded(X_query, beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+        return self.predict_encoded(X_query, **search)
 
     def predict_encoded(self, X_query, beam_size: Optional[int] = None, topk: Optional[int] = None,
-                        knn_beta: Optional[float] = None):
+                        knn_beta: Optional[float] = None, leaf_candidates: Optional[int] = None):
         """`predict` on already encoded queries (`text_encoder.predict` rows): search + knn only."""
-        cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta)
+        cfg = self.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta,
+                                          leaf_candidates=leaf_candidates)
         knn_beta = cfg["knn_beta"]
         # knn changes the order: rank all of the tree's candidates, then cut to topk
-        scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=0 if knn_beta else cfg["topk"])
+        scores = self.model.predict(X_query, beam_size=cfg["beam_size"], topk=0 if knn_beta else cfg["topk"],
+                                    leaf_candidates=cfg["leaf_candidates"])
         if knn_beta:
             time_start_knn = time.perf_counter()
             Y = self.Y.tocsr()
@@ -370,8 +378,8 @@ class XModel:
         return scores
 
     def resolve_predict_config(self, **overrides):
-        """`predict_config` with the non-None overrides applied."""
-        cfg = {**self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
+        """`predict_config` with the non-None overrides applied (keys it lacks take PREDICT_DEFAULTS)."""
+        cfg = {**PREDICT_DEFAULTS, **self.predict_config, **{k: v for k, v in overrides.items() if v is not None}}
         check_search(cfg)
         return cfg
 

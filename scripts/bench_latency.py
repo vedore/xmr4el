@@ -9,6 +9,7 @@ dominates. Search times exclude encoding:
 Batch = all rows at once (chunked); single = one row per call over the first -single rows (median ms).
 Memory: index sizes in bytes (tree directory on disk, 1-NN matrices) and the process RSS after each step
 (Linux VmRSS; the tree is loaded first, so 1-NN steps add to it). Writes -out JSON.
+-leaf_candidates N...: the tree only, timed once per value (keys xmr4el_lc<N>); the 1-NN baselines are skipped.
 """
 import json
 import os
@@ -58,6 +59,8 @@ def main():
     ap.add_argument("-test_path", required=True)
     ap.add_argument("-single", type=int, default=100, help="rows timed one at a time")
     ap.add_argument("-chunk", type=int, default=1024, help="1-NN query rows per matmul")
+    ap.add_argument("-leaf_candidates", type=int, nargs="+", default=None,
+                    help="time the tree at each value only (no 1-NN baselines)")
     ap.add_argument("-out", required=True)
     args = ap.parse_args()
     m = {"tree": args.xmodel_path, "test_path": args.test_path, "rss_gb": {}, "bytes": {}, "batch_s": {}, "single_ms": {}}
@@ -75,9 +78,13 @@ def main():
     Xq = Xq.tocsr()
     _, m["first_call_s"] = timed(lambda: xm.predict_encoded(Xq[:1]))  # one-off: builds the knn index
 
-    m["single_ms"]["xmr4el"] = single_ms(lambda i: xm.predict_encoded(Xq[i:i + 1]), n1)
-    _, m["batch_s"]["xmr4el"] = timed(lambda: xm.predict_encoded(Xq))
+    for lc in args.leaf_candidates or [None]:
+        key = "xmr4el" if lc is None else f"xmr4el_lc{lc}"
+        m["single_ms"][key] = single_ms(lambda i: xm.predict_encoded(Xq[i:i + 1], leaf_candidates=lc), n1)
+        _, m["batch_s"][key] = timed(lambda: xm.predict_encoded(Xq, leaf_candidates=lc))
     m["rss_gb"]["after_xmr4el"] = rss_gb()
+    if args.leaf_candidates:
+        return finish(m, args.out, len(texts))
 
     dev = torch_device()
     block = xm.mention_block()
@@ -111,9 +118,13 @@ def main():
     _, m["batch_s"]["tfidf"] = timed(lambda: tfidf(0, len(texts)))
     m["rss_gb"]["after_tfidf"] = rss_gb()
 
-    m["batch_ms_per_query"] = {k: 1000 * v / len(texts) for k, v in m["batch_s"].items()}
+    finish(m, args.out, len(texts))
+
+
+def finish(m, out, n):
+    m["batch_ms_per_query"] = {k: 1000 * v / n for k, v in m["batch_s"].items()}
     print(json.dumps(m, indent=1))
-    with open(args.out, "w") as f:
+    with open(out, "w") as f:
         json.dump(m, f, indent=1)
 
 

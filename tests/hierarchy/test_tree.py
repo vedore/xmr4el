@@ -63,6 +63,10 @@ def test_tree():
         expect[:, leaf.local_to_global_idx] = P[:, [c]] * leaf.matcher_model.predict_proba(Xa)
     assert np.allclose(hml.predict(Xq, beam_size=3).toarray(), expect)
 
+    # leaf_candidates k keeps each visited leaf's k best labels, same scores
+    lc = hml.predict(Xq, beam_size=3, leaf_candidates=2).toarray()
+    assert ((lc > 0).sum(axis=1) == 2 * len(hml.hmodel[1])).all() and np.allclose(lc[lc > 0], expect[lc > 0])
+
     # routing_features False: leaves see the root's X unchanged (PECOS XR-Linear), at train and predict
     plain = train(X, Y, Z, cfg, routing_features=False)
     P = np.asarray(plain.hmodel[0][0].matcher_model.predict_proba(Xq))

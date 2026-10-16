@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-15 (I3 rerun read into results.md; single-row encode fix in `reduction.py`; NEXT = start `leaf_candidates` (> 100) at beam 10: user approved 2026-10-15, begin next session; see I3 block).
+Last updated 2026-10-16 (`leaf_candidates` code done, not run; NEXT = user runs `scripts/run_lc.sh` on the server; see LC block after I3).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -140,6 +140,12 @@ smaller than the tree. Single-row encode 149-1575 ms was `TruncatedSVD.transform
 Rule (user 2026-10-14): no eval with beam > 15 (too slow; less time beats a few rows). Beam 20 default dropped; beam 10
 stays. Only open accuracy option: `leaf_candidates` (> 100) at beam 10, judged against its ms/query from the I3 rerun;
 not started; user 2026-10-15: start it next session (code + minimal eval-only commands, judged vs I3 ms/query).
+**LC (2026-10-16, code done, not run).** `leaf_candidates` = search setting (predict_config / evaluate.py
+`-leaf_candidates` / spec eval key / `HierarchicalMLModel.predict`; default 100 = old behavior, trees without the key take
+`PREDICT_DEFAULTS`); `bench_latency.py -leaf_candidates N...` times the tree only (keys `xmr4el_lc<N>`). pytest 56.
+NEXT (user, server, after pushing): `git pull --ff-only && bash scripts/run_lc.sh`; bring back `outputs/lc.tar.gz`.
+Read: BC5CDR-chemical dev at lc 200 / 500 vs I1 `dev` (lc 100, same tree): acc@1, R@cand, seen-1 rows, candidates/query;
+`outputs/lc/bc5cdr_chemical.json` batch/single ms per lc vs I3 (4.4-6.9 ms/q batch). Gap to beat: -72 rows vs SapBERT 1-NN.
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints

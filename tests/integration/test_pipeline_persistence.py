@@ -35,7 +35,7 @@ def test_pipeline_persistence(caplog, capsys):
     assert ((rescored > 0) == (expected > 0)).all() and np.allclose(rescored, expected * np.exp(2 * knn))
     # predict arguments left None come from predict_config (stored with the tree)
     assert XModel(predict_config={"knn_beta": 2}).resolve_predict_config(beam_size=3, topk=None) == \
-        {"beam_size": 3, "topk": 0, "knn_beta": 2}
+        {"beam_size": 3, "topk": 0, "knn_beta": 2, "leaf_candidates": 100}
     with TemporaryDirectory() as tmp:
         first.save(tmp)
         saved = next(Path(tmp).iterdir())
@@ -47,7 +47,8 @@ def test_pipeline_persistence(caplog, capsys):
         assert "vectorizer_model" not in state and "dimension_model" not in state
         restored = XModel.load(saved)
         assert restored.initial_labels == sorted(labels)
-        assert restored.predict_config == first.predict_config == {"beam_size": 10, "topk": 0, "knn_beta": 0.0}
+        assert restored.predict_config == first.predict_config == \
+            {"beam_size": 10, "topk": 0, "knn_beta": 0.0, "leaf_candidates": 100}
         assert restored.training_set == first.training_set
         assert np.allclose(restored.predict(queries, beam_size=2).toarray(), expected)
     assert capsys.readouterr().out == "", "library code must use logging, not stdout"

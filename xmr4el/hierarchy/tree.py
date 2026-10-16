@@ -300,16 +300,17 @@ class HierarchicalMLModel():
             return self.hmodel
         
     
-    def predict(self, X_query, beam_size: int = 5, topk: int = 0):
+    def predict(self, X_query, beam_size: int = 5, topk: int = 0, leaf_candidates: int = LEAF_CANDIDATES):
         """Score CSR (n_queries x n_labels), each row sorted by descending score.
 
-        Beam search over the internal layers; every visited leaf contributes its LEAF_CANDIDATES labels with the
+        Beam search over the internal layers; every visited leaf contributes its leaf_candidates labels with the
         highest matcher probability, scored matcher probability x routing path probability (XR-Linear). Leaf
         matcher probabilities are per-label sigmoids trained only against that leaf's labels, so the path
         probability is what makes leaves in one beam comparable. topk > 0 keeps each row's topk best labels."""
         time_start_routing = time.perf_counter()
         n_queries = X_query.shape[0]
-        self.logger.info("Routing started: rows=%d beam=%d topk=%d", n_queries, beam_size, topk)
+        self.logger.info("Routing started: rows=%d beam=%d topk=%d leaf_candidates=%d", n_queries, beam_size, topk,
+                         leaf_candidates)
 
         # Beam entries of all queries, in query order then beam order; row i of X_beam belongs to entry i.
         # One matcher call and one augment_features call per layer instead of per query and beam entry.
@@ -364,7 +365,7 @@ class HierarchicalMLModel():
             rows = np.flatnonzero(leaves == leaf_idx)
             leaf = self.hmodel[-1][leaf_idx]
             P = asarray(leaf.matcher_model.predict_proba(X_beam[rows]), dtype=float)  # column j = local label j
-            k = min(self.LEAF_CANDIDATES, P.shape[1])
+            k = min(leaf_candidates, P.shape[1])
             top = np.argpartition(P, P.shape[1] - k, axis=1)[:, -k:]
             path = np.exp([beam[r][2] for r in rows])
             qis.append(np.repeat([beam[r][0] for r in rows], k))

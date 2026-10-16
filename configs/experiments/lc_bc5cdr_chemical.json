@@ -1,0 +1,17 @@
+{
+  "name": "lc_bc5cdr_chemical",
+  "evals": [
+    {
+      "split": "dev_lc200",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "leaf_candidates": 200
+    },
+    {
+      "split": "dev_lc500",
+      "test_path": "datasets/BC5CDR/chemical/dev.pubtator",
+      "train_path": "datasets/BC5CDR/chemical/train_plus_ctd.pubtator",
+      "leaf_candidates": 500
+    }
+  ]
+}

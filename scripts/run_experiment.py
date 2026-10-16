@@ -1,7 +1,7 @@
 """One tracked run: train a tree from a spec (or take a saved one) and evaluate it on each listed split.
 
 Spec (JSON): {"name", "model_config", "train_path", "evals": [{"split", "test_path", "train_path"?, "beam_size"?,
-"topk"?, "knn_beta"?}]}; an eval's train_path adds the seen/unseen mention-string breakdown, search settings left out
+"topk"?, "knn_beta"?, "leaf_candidates"?}]}; an eval's train_path adds the seen/unseen mention-string breakdown, search settings left out
 come from the tree's predict_config. Unknown keys are errors. PubTator input only.
 
 Writes outputs/runs/<timestamp>_<name>/ (an existing directory is refused): spec.json (as given + xmodel_path),
@@ -31,7 +31,7 @@ from xmr4el.eval import evaluate_tree, format_metrics
 from xmr4el.xmodel import XModel, check_search
 
 SPEC_KEYS = {"name", "model_config", "train_path", "evals"}
-EVAL_KEYS = {"split", "test_path", "train_path", "beam_size", "topk", "knn_beta"}
+EVAL_KEYS = {"split", "test_path", "train_path", "beam_size", "topk", "knn_beta", "leaf_candidates"}
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGES = ("numpy", "scipy", "scikit-learn", "torch", "transformers", "sentence-transformers")
 
@@ -150,7 +150,8 @@ def run(spec, xmodel_path=None):
         for e in spec["evals"]:
             start = time.perf_counter()
             m, _ = evaluate_tree(xm, tree, e["test_path"], train_path=e.get("train_path"),
-                                 beam_size=e.get("beam_size"), topk=e.get("topk"), knn_beta=e.get("knn_beta"))
+                                 beam_size=e.get("beam_size"), topk=e.get("topk"), knn_beta=e.get("knn_beta"),
+                                 leaf_candidates=e.get("leaf_candidates"))
             m.update(split=e["split"], eval_seconds=round(time.perf_counter() - start, 1))
             write_json(os.path.join(run_dir, f"metrics_{e['split']}.json"), m)
             logger.info("Eval %s:\n%s", e["split"], format_metrics(m))
