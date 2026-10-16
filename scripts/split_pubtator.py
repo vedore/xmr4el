@@ -1,6 +1,7 @@
 """Split a local PubTator corpus into train/dev/test files."""
 import argparse
 import os
+import tempfile
 from xmr4el.data.splits import (deterministic_split, parse_pubtator, write_pubtator_file,
                                 emit_jsonl_for_split, load_pmids)
 
@@ -55,17 +56,25 @@ def main():
             s = deterministic_split(pmid, args.train_ratio, args.dev_ratio)
             splits[s].append(pmid)
 
-    # Write PubTator files
+    # Write every split to a temp file, publish only after all succeed (no mixed generations)
     os.makedirs(args.outdir, exist_ok=True)
-    write_pubtator_file(splits["train"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_train.txt"))
-    write_pubtator_file(splits["dev"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_dev.txt"))
-    write_pubtator_file(splits["test"], pmid_blocks, os.path.join(args.outdir, "corpus_pubtator_test.txt"))
-
-    # Optional JSONL
+    jobs = [(write_pubtator_file, s, "corpus_pubtator_%s.txt" % s) for s in ("train", "dev", "test")]
     if args.emit_jsonl:
-        emit_jsonl_for_split(splits["train"], pmid_blocks, os.path.join(args.outdir, "train.jsonl"))
-        emit_jsonl_for_split(splits["dev"], pmid_blocks, os.path.join(args.outdir, "dev.jsonl"))
-        emit_jsonl_for_split(splits["test"], pmid_blocks, os.path.join(args.outdir, "test.jsonl"))
+        jobs += [(emit_jsonl_for_split, s, "%s.jsonl" % s) for s in ("train", "dev", "test")]
+    tmps = []
+    try:
+        for write, split, _ in jobs:
+            fd, tmp = tempfile.mkstemp(dir=args.outdir, suffix=".tmp")
+            os.close(fd)
+            tmps.append(tmp)
+            write(splits[split], pmid_blocks, tmp)
+        for (_, _, name), tmp in zip(jobs, tmps):
+            os.replace(tmp, os.path.join(args.outdir, name))
+    except BaseException:
+        for tmp in tmps:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        raise
 
     print("Done. Split sizes: train=%d dev=%d test=%d" %
           (len(splits["train"]), len(splits["dev"]), len(splits["test"])))

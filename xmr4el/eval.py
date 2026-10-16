@@ -122,7 +122,7 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
         m["hybrid_all"] = m["hybrid"] * len(gold) / len(test["labels"])
         m["strings"] = {k: dict(zip(("n", "tree", "dict", "either"), (int(v[0]), *map(float, v[1:]))))
                         for k, v in b.items()}
-        # routed = gold among the candidates; a group's misses = (1 - routed) lost in routing + the rest ranked wrong
+        # routed = gold among the candidates after topk (topk > 0 also counts ranking losses); a group's misses = (1 - routed) lost in routing + the rest ranked wrong
         n_lab = np.array([len(c) for c in train_string_labels(texts, train_pairs)])
         for k, g in {"all": n_lab >= 0, "seen, 1 label": n_lab == 1, "seen, >1 label": n_lab > 1,
                      "unseen string": n_lab == 0}.items():

@@ -226,7 +226,6 @@ class ClusteringTrainer:
         """Train clustering without recursive partitioning."""
         
         n_points = Z.shape[0]
-        n_clusters = config["kwargs"]["n_clusters"]
 
         if n_points <= min_leaf_size:
             return None, None

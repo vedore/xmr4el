@@ -25,6 +25,9 @@ Local commands use `.venv/bin/python`; inside the Docker containers use `python3
 Dependencies are declared in `pyproject.toml` and resolved in `uv.lock`.
 Transformer encoding uses CUDA when available, then Apple MPS, otherwise CPU. Its first use
 may download the configured pretrained model.
+The locked torch 2.10.0 has advisories CVE-2025-3000 (TorchScript) and CVE-2026-4538 (export loading);
+this repository calls neither `torch.jit` nor `torch.export`/`torch.load` (triaged 2026-10-16; upgrade pending).
+CI (`.github/workflows/ci.yml`) runs ruff (pyflakes rules), pytest and an installed-wheel smoke check on CPU.
 
 ### Run on another server with Docker
 
@@ -167,7 +170,9 @@ Search settings come from the tree's `predict_config` (saved from the training c
 Evaluation reports acc@1, MRR, recall@k, candidate recall, and vocabulary coverage.
 It excludes mentions whose gold labels are absent from training, so metrics are
 conditional on vocabulary coverage. `topk` cuts each query's final list; `0` keeps all
-candidates (each visited leaf contributes at most 100).
+candidates (each visited leaf contributes at most 100). Candidate recall (`R@cand`) and the
+per-string `routed` column are measured after that cut: with `topk > 0` they also count ranking
+losses, not only routing (recorded results use `topk` 0).
 
 For prediction from Python:
 
@@ -178,6 +183,7 @@ model = XModel.load("outputs/saved_trees/<run>")
 scores = model.predict(["mention [SEP] context"])  # predict_config; keyword arguments override it
 ```
 
+`XModel.load` unpickles the tree: load only trees you trust (unpickling can run arbitrary code).
 `scores` is a CSR matrix (queries x labels); column `j` is `model.initial_labels[j]`. Each visited
 leaf contributes its 100 best labels, scored leaf matcher probability x routing path probability;
 `topk > 0` keeps each row's best `topk`. `knn_beta` multiplies each candidate's score by
@@ -196,8 +202,10 @@ leaf contributes its 100 best labels, scored leaf matcher probability x routing 
 for `XModel.predict` and `evaluate.py`: base config beam 2, knn off; BC5CDR config beam 10, `knn_beta` 10.
 
 Transformer: `transformer_config.type` `sapbert`, `sentencetbiobert` or `biobert`, or any
-checkpoint with `"kwargs": {"model_name": "<HF id>"}` (optional `pooling`, e.g. `"cls"`, and
-`max_seq_length`). `abbrev_expansion` `"append"` expands in-document abbreviations in PubTator input.
+checkpoint with `"kwargs": {"model_name": "<HF id>"}` (optional `pooling`, e.g. `"cls"`,
+`max_seq_length`, and `revision`, a Hub commit hash). Both tracked configs leave `revision` unset: a saved
+tree then encodes queries with the Hub's current checkpoint, and the embedding cache
+(`outputs/cache/transformers`) cannot see a Hub update; delete it after one. `abbrev_expansion` `"append"` expands in-document abbreviations in PubTator input.
 
 The default uses `"sapbert_char_context"` with SapBERT, abbreviation expansion, balanced k-means
 (`balancedkmeans`), and one-vs-rest L2 logistic-regression matchers (`jointlogisticregression`:

@@ -1,12 +1,13 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
 widths, persistence (training-only arrays not saved, stale layers, same-second saves), reader edge cases; second audit (C1);
-third audit (2026-10-16: reader headers/offsets, cache write, OOF labels, to_pubtator)."""
+third audit (2026-10-16: reader headers/offsets, cache write, OOF labels, to_pubtator, split publish)."""
 from copy import deepcopy
 import gzip
 import logging
 import json
 import pickle
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from xmr4el.data import splits
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import TextEncoder
 from xmr4el.features.transformers import Transformer
@@ -285,3 +287,23 @@ def test_to_pubtator_missing_input_leaves_no_output(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "scripts/to_pubtator.py"), "filter", "-input",
                         str(tmp_path / "missing"), "-out", str(out)], capture_output=True, text=True, cwd=ROOT)
     assert r.returncode != 0 and list(tmp_path.iterdir()) == [], "no output or temp file left"
+
+
+def test_split_cli_failure_keeps_old_splits(tmp_path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("1|t|t\n1|a|a\n\n2|t|t\n2|a|a\n\n")
+    out = tmp_path / "out"
+    out.mkdir()
+    for s in ("train", "dev", "test"):
+        (out / f"corpus_pubtator_{s}.txt").write_text("old")
+    real = splits.write_pubtator_file
+
+    def fail_on_test(pmids, blocks, path):
+        if len([p for p in out.iterdir() if p.suffix == ".tmp"]) == 3:
+            raise OSError("disk full")
+        real(pmids, blocks, path)
+    argv = ["split_pubtator.py", "--input", str(corpus), "--outdir", str(out)]
+    with patch.object(splits, "write_pubtator_file", fail_on_test), patch.object(sys, "argv", argv), \
+            pytest.raises(OSError, match="disk full"):
+        runpy.run_path(str(ROOT / "scripts/split_pubtator.py"), run_name="__main__")
+    assert sorted(p.read_text() for p in out.iterdir()) == ["old"] * 3, "old splits kept, no temp files"

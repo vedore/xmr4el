@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uvx ruff check xmr4el scripts tests
+      - run: uv run pytest -q
+      # installed wheel, read-only install, run outside the repo: cache miss must not fail
+      - run: |
+          uv build --wheel
+          uv export --frozen --no-dev --no-emit-project -o "$RUNNER_TEMP/req.txt"
+          uv venv "$RUNNER_TEMP/wheel" --python 3.12
+          uv pip install -p "$RUNNER_TEMP/wheel" -r "$RUNNER_TEMP/req.txt" dist/*.whl
+          chmod -R a-w "$RUNNER_TEMP/wheel"
+          cp tests/smoke_installed.py "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP" && "$RUNNER_TEMP/wheel/bin/python" smoke_installed.py

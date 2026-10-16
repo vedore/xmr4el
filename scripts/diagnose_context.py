@@ -68,12 +68,14 @@ def main():
     print(f"train rows {m['train_rows']}, with context {m['train_rows_with_context']}; clusters {m['clusters']}, "
           f"with a context row {m['ctx_clusters']}; dev rows {len(gold)}, gold in a ctx cluster {in_ctx.sum()}")
 
-    print(f"\nroot gold-cluster recall @1 / @{beam} (n)")
+    m["chance"] = {"r@1": 1 / C.shape[1], f"r@{beam}": min(beam, C.shape[1]) / C.shape[1]}
+    print(f"\nroot gold-cluster recall @1 / @{beam} (n); uniform chance "
+          f"{m['chance']['r@1']:.3f} / {m['chance'][f'r@{beam}']:.3f}")
     print(f"{'group':8} {'cluster':12} {'as is':>14} {'ctx 0':>14}")
     for name, X in (("as is", Xq), ("ctx 0", Xz)):
         P = np.asarray(root.matcher_model.predict_proba(X))
         g = P[np.arange(len(gold)), gold_cluster]
-        ranks = (P > g[:, None]).sum(axis=1) + 1
+        ranks = (P >= g[:, None]).sum(axis=1)  # ties count against gold (counts gold itself)
         for gname, gm in groups.items():
             for cname, cm in (("any", gm), ("ctx", gm & in_ctx), ("dict only", gm & ~in_ctx)):
                 m["root"].setdefault(name, {}).setdefault(gname, {})[cname] = {

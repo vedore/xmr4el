@@ -9,6 +9,8 @@ dominates. Search times exclude encoding:
 Batch = all rows at once (chunked); single = one row per call over the first -single rows (median ms).
 Memory: index sizes in bytes (tree directory on disk, 1-NN matrices) and the process RSS after each step
 (Linux VmRSS; the tree is loaded first, so 1-NN steps add to it). Writes -out JSON.
+Encoder calls go through the persistent embedding cache: "encoder_calls" counts transforms vs real encoder forwards
+per encode step (a cache hit times an np.load, not the encoder; delete outputs/cache/transformers to time forwards).
 -leaf_candidates N...: the tree only, timed once per value (keys xmr4el_lc<N>); the 1-NN baselines are skipped.
 """
 import json
@@ -25,6 +27,7 @@ from sklearn.preprocessing import normalize
 from xmr4el import torch_device
 from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import filter_labels_and_inputs
+from xmr4el.features.transformers import Transformer
 from xmr4el.xmodel import XModel
 
 
@@ -45,6 +48,27 @@ def timed(fn):
     t = time.perf_counter()
     out = fn()
     return out, time.perf_counter() - t
+
+
+CALLS = {"transform": 0, "forward": 0}
+
+
+def counted(fn, key):
+    def wrapper(*a, **k):
+        CALLS[key] += 1
+        return fn(*a, **k)
+    return staticmethod(wrapper)
+
+
+Transformer.transform, Transformer._predict = counted(Transformer.transform, "transform"), \
+    counted(Transformer._predict, "forward")
+
+
+def encoder_calls():
+    """Transforms and encoder forwards since the last call (cache hits = transforms - forwards)."""
+    out = {**CALLS, "cache_hits": CALLS["transform"] - CALLS["forward"]}
+    CALLS.update(transform=0, forward=0)
+    return out
 
 
 def single_ms(fn, n):
@@ -73,8 +97,11 @@ def main():
     n1 = min(args.single, len(texts))
     m["rows"], m["train_rows"], m["search"] = len(texts), xm.X.shape[0], xm.resolve_predict_config()
 
+    encoder_calls()
     m["single_ms"]["encode"] = single_ms(lambda i: xm.text_encoder.predict(texts[i:i + 1]), n1)
+    m["encoder_calls"] = {"single": encoder_calls()}
     Xq, m["batch_s"]["encode"] = timed(lambda: xm.text_encoder.predict(texts))
+    m["encoder_calls"]["batch"] = encoder_calls()
     Xq = Xq.tocsr()
     _, m["first_call_s"] = timed(lambda: xm.predict_encoded(Xq[:1]))  # one-off: builds the knn index
 
@@ -101,7 +128,7 @@ def main():
     if dev.type == "cuda":
         m["sapbert_gpu_peak_gb"] = torch.cuda.max_memory_allocated() / 1e9
     m["rss_gb"]["after_sapbert"] = rss_gb()
-    del B, Q
+    B = Q = None  # free the device memory (sap is not called again)
 
     train_mentions = [t.split("[SEP]", 1)[0] for g in xm.training_set for t in g]
     queries = [t.split("[SEP]", 1)[0] for t in texts]

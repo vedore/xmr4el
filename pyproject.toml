@@ -31,3 +31,6 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.ruff.lint]
+select = ["F", "E9"]  # pyflakes + syntax errors (CI); style rules are not enforced

@@ -17,7 +17,6 @@ import os
 import sys
 import time
 from argparse import ArgumentParser
-from collections import defaultdict
 
 import numpy as np
 from scipy.sparse import csr_matrix, hstack, load_npz

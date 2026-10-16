@@ -1,8 +1,7 @@
 import os
 import pickle
 import logging
-import numpy as np
-from typing import Any, Dict, Optional, Tuple, Sequence, List
+from typing import Any, Dict, Optional, Tuple, Sequence
 from scipy.sparse import csr_matrix, hstack
 from sklearn.preprocessing import normalize
 from xmr4el.features.vectorizers import Vectorizer

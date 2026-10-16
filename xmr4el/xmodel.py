@@ -181,18 +181,18 @@ class XModel:
             logger_info = "None"
 
         parts = [
-            f"XModel summary:",
+            "XModel summary:",
             f"  logger: {logger_info}",
             f"  depth={self.depth}, features={self.features}, predict={self.predict_config}",
             f"  cluster: min_leaf_size={self.min_leaf_size}, cut_half_cluster={self.cut_half_cluster}, "
             f"routing_features={self.routing_features}",
-            f"  configs:",
+            "  configs:",
             f"    vectorizer: {_short(self.vectorizer_config)}",
             f"    transformer: {_short(self.transformer_config)}",
             f"    dimension: {_short(self.dimension_config)}",
             f"    clustering: {_short(self.clustering_config)}",
             f"    matcher: {_short(self.matcher_config)}",
-            f"  internal state:",
+            "  internal state:",
             f"    text_encoder: {_short(self.text_encoder)}",
             f"    hml: {_short(self.model)}",
             f"    training_texts: {_short(self.training_set)}",
