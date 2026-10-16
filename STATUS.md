@@ -6,7 +6,7 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-16 (`leaf_candidates` code done, not run; NEXT = user runs `scripts/run_lc.sh` on the server; see LC block after I3).
+Last updated 2026-10-16 (LC read; user: the loss is the routing model, not leaf_candidates. NEXT = user runs `scripts/run_ctx.sh`; see CTX block after LC).
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model
@@ -143,9 +143,21 @@ not started; user 2026-10-15: start it next session (code + minimal eval-only co
 **LC (2026-10-16, code done, not run).** `leaf_candidates` = search setting (predict_config / evaluate.py
 `-leaf_candidates` / spec eval key / `HierarchicalMLModel.predict`; default 100 = old behavior, trees without the key take
 `PREDICT_DEFAULTS`); `bench_latency.py -leaf_candidates N...` times the tree only (keys `xmr4el_lc<N>`). pytest 56.
-NEXT (user, server, after pushing): `git pull --ff-only && bash scripts/run_lc.sh`; bring back `outputs/lc.tar.gz`.
-Read: BC5CDR-chemical dev at lc 200 / 500 vs I1 `dev` (lc 100, same tree): acc@1, R@cand, seen-1 rows, candidates/query;
-`outputs/lc/bc5cdr_chemical.json` batch/single ms per lc vs I3 (4.4-6.9 ms/q batch). Gap to beat: -72 rows vs SapBERT 1-NN.
+LC result (2026-10-16, `outputs/lc.tar.gz` read, commit `e699f99`): BC5CDR-chemical dev beam 10, lc 100 / 200 / 500 =
+4894 / 4919 / 4931 rows, search 8.0 / 9.7 / 14.6 ms/q batch (same process). lc 500 = beam 20 accuracy; still -69 rows vs
+SapBERT 1-NN. Default stays 100 (configs unchanged) until the user picks; open question: lc 200 in the chemical
+predict_config (+25 rows, +21% time)? Not run on test or NLM-Chem.
+**CTX (2026-10-16, user: "the problem is in the routing, look into the matcher").** From code: CTD pseudo-docs are
+`name|t|` + empty abstract with the span = whole title, so `context_window` gives "" and the context block is 0 for
+469,694 of 474,854 BC5CDR-chemical training rows (98.9%); dev rows always have context. The root matcher (OvR logistic,
+128 clusters, balanced weights) learns context weights from the ~5k corpus rows only: clusters with no corpus row see
+"context present" only in negatives -> suspected push-down of dictionary-only clusters at test time. Diagnostic
+`scripts/diagnose_context.py` (root gold-cluster recall @1/@beam, as is vs context zeroed, split ctx / dict-only
+cluster; full search on both), synthetic check passed. Runner `scripts/run_ctx.sh` (BC5CDR-chem, NLM-Chem, NCBI control).
+NEXT (user, server): `git pull --ff-only && nohup bash scripts/run_ctx.sh > outputs/ctx_nohup.log 2>&1 &`; bring back
+`outputs/ctx.tar.gz`. Read: if ctx 0 raises dict-only recall@10 / acc@1 -> fix the feature shift (candidates: dict rows
+get the name as context, or drop/zero context in the root matcher, or train the root without context); if not ->
+root capacity (linear OvR on 2304 dense dims for 128 clusters of ~1400 labels; compare train-row recall).
 **G-scispaCy (user 2026-10-13: option a, MedMentions only; code ready, not run):** its KBs are keyed by UMLS CUIs
 (the "mesh" KB too), so no MeSH set. `scispacy.dockerfile` (scispacy 0.6.2), `scripts/baselines/scispacy_run.py`
 (CandidateGenerator umls, k 100, max alias similarity, no 0.7 threshold, restricted to the tree's labels; prints

@@ -862,6 +862,26 @@ projection (fixed 2026-10-15 in `reduction.py`), not reported. RSS = process aft
   at 180k labels (6.1 / 6.9 vs 19.2 / 17.1 ms/q).
 - Tree load 2-14 s (BC5CDR-chemical 93 s: cold disk, the same 10 GB size as NLM-Chem's 14 s).
 
+## 2026-10-16: leaf_candidates > 100 at beam 10 (BC5CDR-chemical dev, eval-only)
+
+`bash scripts/run_lc.sh` on the server, commit `e699f99` (clean), tree `xmodel_2026-10-13_13-52-04` (the I1 tree),
+run dir `outputs/runs/2026-10-16_09-16-20_lc_bc5cdr_chemical`, latency `outputs/lc/bc5cdr_chemical.json`. Beam 10, knn 10;
+leaf candidates = labels each visited leaf contributes (100 = every earlier row). lc 100 and beam 20 rows = the I1 run.
+Search ms = `bench_latency.py`, all three lc values in one process (lc 100 here 8.0 ms/q vs 6.1 in I3: server load).
+Rows correct / gold among the candidates per group (seen 1 n=4465 / seen >1 n=68 / unseen n=648).
+
+| search | acc@1 | rows | R@cand | candidates/q | seen 1 | seen >1 | unseen | search batch ms/q / single ms |
+|---|---|---|---|---|---|---|---|---|
+| beam 10, lc 100 | 0.945 | 4894 | 0.968 | 1000 | 4358 / 4382 | 46 / 66 | 490 / 569 | 8.0 / 26.3 |
+| beam 10, lc 200 | 0.949 | 4919 | 0.975 | 2000 | 4374 / 4400 | 46 / 66 | 499 / 585 | 9.7 / 32.8 |
+| beam 10, lc 500 | 0.952 | 4931 | 0.980 | 5000 | 4384 / 4417 | 46 / 66 | 501 / 592 | 14.6 / 53.7 |
+| beam 20, lc 100 (I1) | 0.951 | 4928 | 0.981 | 2000 | 4381 / 4408 | 46 / 67 | 501 / 606 | not timed |
+
+- lc 200: +25 rows for +21% search time; lc 500: +37 rows (= beam 20, +3) for +84% batch / +104% single.
+- Seen-1 golds outside the candidates: 83 -> 65 -> 48; lc 500 brings 35 of them in, 26 then ranked first.
+- vs SapBERT 1-NN (5000 rows, 0.17 ms/q batch): lc 500 is still -69 rows, seen 1 -63 (4384 vs 4447). A larger leaf
+  share does not close the gap: the remaining seen-1 loss is mostly ranking (33 routed, not first) plus 48 not routed.
+
 ## Commands
 
 ```bash
