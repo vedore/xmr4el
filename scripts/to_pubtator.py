@@ -12,6 +12,7 @@ Both print the kept / skipped counts.
 """
 import argparse
 import os
+import tempfile
 import xml.etree.ElementTree as ET
 from collections import Counter
 
@@ -90,16 +91,23 @@ def main():
     if os.path.exists(args.out):
         parser.error(f"{args.out} exists")
     counts = Counter()
-    with open(args.out, "w", encoding="utf-8") as fout:
-        if args.mode == "filter":
-            with open(args.input, encoding="utf-8") as fin:
-                fout.writelines(filter_pubtator(fin, set(args.types or []), counts))
-        else:
-            with open(args.pmcids) as fin:
-                pmcids = fin.read().split()
-            for pmc in pmcids:
-                fout.write(bioc_document(os.path.join(args.input_dir, f"{pmc}_v1.xml"), args.type, counts))
-            counts["documents"] = len(pmcids)
+    # write-then-rename: a failed conversion leaves no output behind (a rerun is not refused)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(args.out)), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fout:
+            if args.mode == "filter":
+                with open(args.input, encoding="utf-8") as fin:
+                    fout.writelines(filter_pubtator(fin, set(args.types or []), counts))
+            else:
+                with open(args.pmcids) as fin:
+                    pmcids = fin.read().split()
+                for pmc in pmcids:
+                    fout.write(bioc_document(os.path.join(args.input_dir, f"{pmc}_v1.xml"), args.type, counts))
+                counts["documents"] = len(pmcids)
+        os.replace(tmp, args.out)
+    except BaseException:
+        os.unlink(tmp)
+        raise
     print(args.out, dict(counts))
 
 

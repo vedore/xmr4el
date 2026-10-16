@@ -87,9 +87,8 @@ class ClusteringModel(metaclass=ClusterMeta):
 
         config = deepcopy(config)
         cluster_type = config.get("type", None)
-        assert (
-            cluster_type is not None
-        ), f"config {config} should contain a key 'type' for the cluster type"
+        if cluster_type is None:
+            raise ValueError(f"config {config} should contain a key 'type' for the cluster type")
         model = cluster_dict[cluster_type].train(
             trn_corpus, config=config["kwargs"], dtype=dtype
         )

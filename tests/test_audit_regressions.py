@@ -1,5 +1,6 @@
 """Regressions for the 2026-10-08 bug audit: knn fusion before topk, split leakage/aliasing, fitted block
-widths, persistence (training-only arrays not saved, stale layers, same-second saves), reader edge cases; second audit (C1)."""
+widths, persistence (training-only arrays not saved, stale layers, same-second saves), reader edge cases; second audit (C1);
+third audit (2026-10-16: reader headers/offsets, cache write, OOF labels, to_pubtator)."""
 from copy import deepcopy
 import gzip
 import logging
@@ -18,6 +19,7 @@ from xmr4el.features.encoder import TextEncoder
 from xmr4el.features.transformers import Transformer
 from xmr4el.learning.classifiers import JointOvRLogistic
 from xmr4el.learning.scoring import knn_index, label_max_cos, label_rows
+from xmr4el.rerank import out_of_fold_top_k
 from xmr4el.xmodel import XModel
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -227,7 +229,8 @@ def test_dict_to_pubtator_failure_keeps_output(tmp_path):
 def test_model_config_checks():
     for bad in ({"features": "bogus"}, {"min_leaf_size": -1},
                 {"transformer_config": {"type": "sapbert", "kwargs": {"batch_size": -1}}},
-                {"predict_config": {"beam_size": None}}, {"predict_config": {"knn_beta": 1000}}):
+                {"predict_config": {"beam_size": None}}, {"predict_config": {"knn_beta": 1000}},
+                {"predict_config": {"beam_szie": 1}}):
         with pytest.raises(ValueError):
             XModel(**{**CONFIG, **bad})
     with pytest.raises(ValueError, match="batch_size"):  # before any model load or cache lookup
@@ -246,3 +249,39 @@ def test_split_cli_unknown_pmids_and_nan(tmp_path):
     assert r.returncode != 0 and "not in" in r.stderr and not (tmp_path / "out").exists()
     r = run("--train_ratio", "nan")
     assert r.returncode != 0 and "<= 1" in r.stderr
+
+
+def test_reader_headers_and_offsets(tmp_path):
+    pub = tmp_path / "doc.pubtator"
+    pub.write_text("1|t|alpha a|t|b\n1|a|gamma\n1\t6\t11\ta|t|b\tDisease\tD1\n\n")
+    assert Preprocessor.load_pubtator_file(str(pub))["labels"] == ["D1"], "a mention with |t| is not a title"
+    for ann in ("2\t0\t5\talpha\tDisease\tD1", "1\t-4\t999\talpha\tDisease\tD1"):
+        pub.write_text(f"1|t|alpha\n1|a|gamma\n{ann}\n\n")
+        with pytest.raises(ValueError, match="doc.pubtator:3"):
+            Preprocessor.load_pubtator_file(str(pub))
+    with pytest.raises(ValueError):
+        Preprocessor.load_pubtator_file(str(pub), abbrev="bogus")
+
+
+def test_transformer_cache_write_failure_keeps_embeddings(tmp_path, caplog):
+    (tmp_path / "file").write_text("")
+    emb = np.arange(4, dtype=np.float32).reshape(2, 2)
+    with patch("xmr4el.features.transformers.CACHE_DIR", str(tmp_path / "file" / "cache")), \
+            patch.object(Transformer, "_predict", return_value=emb):
+        _, out = Transformer.transform(["b", "a", "b"], {"type": "sapbert", "kwargs": {}})
+    assert out.tolist() == [[2, 3], [0, 1], [2, 3]] and "not cached" in caplog.text
+
+
+def test_out_of_fold_rejects_foreign_labels_and_folds(xm):
+    data = {"corpus": ["concept0 x", "other y"], "labels": ["L0", "ZZ"], "docs": ["d1", "d2"], "spans": [(0, 1)] * 2}
+    with pytest.raises(ValueError, match="not in the saved tree"):
+        out_of_fold_top_k(xm, ["q1", "q2"], ["d1", "d2"], data, folds=2, k=1)
+    with pytest.raises(ValueError, match="folds"):
+        out_of_fold_top_k(xm, ["q1", "q2"], ["d1", "d2"], data, folds=3, k=1)
+
+
+def test_to_pubtator_missing_input_leaves_no_output(tmp_path):
+    out = tmp_path / "out.pubtator"
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/to_pubtator.py"), "filter", "-input",
+                        str(tmp_path / "missing"), "-out", str(out)], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and list(tmp_path.iterdir()) == [], "no output or temp file left"

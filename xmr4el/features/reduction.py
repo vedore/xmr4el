@@ -86,9 +86,8 @@ class DimensionModel(metaclass=DimensionModelMeta):
 
         config = deepcopy(config) if config is not None else {"type": "sklearntruncatedsvd", "kwargs": {}}
         dimension_type = config.get("type", None)
-        assert (
-            dimension_type is not None
-        ), f"config {config} should contain a key 'type' for the dimension type"
+        if dimension_type is None:
+            raise ValueError(f"config {config} should contain a key 'type' for the dimension type")
         model = dimension_dict[dimension_type].fit(
             X_emb, config=config["kwargs"], dtype=dtype
         )

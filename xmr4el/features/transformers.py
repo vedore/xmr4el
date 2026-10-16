@@ -67,7 +67,8 @@ class Transformer:
         config = config if config is not None else {"type": "sentencetbiobert", "kwargs": {}}
         kwargs = {"batch_size": 1000, "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
         model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
-        assert model_name, f"transformer config {config} needs a known 'type' or kwargs.model_name"
+        if not model_name:
+            raise ValueError(f"transformer config {config} needs a known 'type' or kwargs.model_name")
         kwargs.pop("device", None)  # _predict picks cuda, then mps (Apple GPU), then cpu
         if not (isinstance(kwargs["batch_size"], int) and kwargs["batch_size"] >= 0):  # < 0 never ends the batch loop
             raise ValueError(f"batch_size must be an int >= 0 (0 = 400), got {kwargs['batch_size']!r}")
@@ -84,16 +85,20 @@ class Transformer:
             logger.info("Transformer cache hit: model=%s rows=%d path=%s", model_name, len(uniq), path)
         else:
             emb = cls._predict(model_name, uniq.tolist(), **kwargs)
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            # write-then-rename: an interrupted save leaves no partial cache file; a private tmp per writer
-            fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "wb") as f:
-                    np.save(f, emb)
-                os.replace(tmp, path)
-            except BaseException:
-                os.unlink(tmp)
-                raise
+            try:  # a read-only install cannot cache: keep the computed embeddings
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                # write-then-rename: an interrupted save leaves no partial cache file; a private tmp per writer
+                fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
+            except OSError as e:
+                logger.warning("Transformer cache not written (%s): embeddings not cached", e)
+            else:
+                try:
+                    with os.fdopen(fd, "wb") as f:
+                        np.save(f, emb)
+                    os.replace(tmp, path)
+                except BaseException:
+                    os.unlink(tmp)
+                    raise
         return kwargs, emb[inv.ravel()]
 
     @classmethod

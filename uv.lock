@@ -1169,12 +1169,12 @@ name = "xmr4el"
 version = "0.5.3"
 source = { editable = "." }
 dependencies = [
-    { name = "joblib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "sentence-transformers" },
+    { name = "threadpoolctl" },
     { name = "torch" },
     { name = "transformers" },
 ]
@@ -1186,12 +1186,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "joblib" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "sentence-transformers" },
+    { name = "threadpoolctl" },
     { name = "torch", specifier = ">=2.8.0" },
     { name = "transformers" },
 ]

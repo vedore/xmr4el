@@ -10,11 +10,6 @@ _pkg_logger.addHandler(logging.NullHandler())
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     return _pkg_logger.getChild(name) if name else _pkg_logger
 
-def set_logger(logger: logging.Logger):
-    """Replace package logger (package-level override)."""
-    global _pkg_logger
-    _pkg_logger = logger
-
 def set_verbosity(level: int):
     """0 = WARNING, 1 = INFO, 2+ = DEBUG"""
     mapping = [logging.WARNING, logging.INFO, logging.DEBUG]

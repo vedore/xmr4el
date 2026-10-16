@@ -63,7 +63,8 @@ class ClassifierModel(metaclass=ClassifierMeta):
         Initialize (but do not fit) a classifier, returning a ClassifierModel wrapper.
         """
         classifier_type = config.get("type", None)
-        assert classifier_type is not None, f"config {config} should contain a key 'type' for the classifier type"
+        if classifier_type is None:
+            raise ValueError(f"config {config} should contain a key 'type' for the classifier type")
 
         kwargs = config.get("kwargs", {})
         # delegate to the subclass's init_model (required for all subclasses)
@@ -79,7 +80,8 @@ class ClassifierModel(metaclass=ClassifierMeta):
         Works regardless of whether you call ClassifierModel.train(...) or a subclass's train(...).
         """
         classifier_type = config.get("type", None)
-        assert classifier_type is not None, f"config {config} should contain a key 'type' for the classifier type"
+        if classifier_type is None:
+            raise ValueError(f"config {config} should contain a key 'type' for the classifier type")
 
         # Initialize via subclass init_model, then fit.
         wrapper = cls.init_model(config, onevsrest=onevsrest)

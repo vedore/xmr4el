@@ -58,6 +58,8 @@ def export(args):
     assert (Y.getnnz(axis=1) == 1).all() and X.shape[0] == Y.shape[0] == len(trn_texts), \
         (X.shape, Y.shape, len(trn_texts))
     assert [labels[j] for j in Y.indices] == trn_labels, "tree rows do not match the reloaded training rows"
+    assert trn_texts == [t for g in xm.training_set[:len(labels)] for t in g], \
+        f"{args.train_path} texts differ from the tree's training texts"
 
     test = Preprocessor.load_pubtator_file(args.test_path, window=window, abbrev=abbrev)
     dev_labels, dev_texts = filter_labels_and_inputs(test["corpus"], test["labels"], labels)

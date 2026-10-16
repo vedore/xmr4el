@@ -53,9 +53,14 @@ def out_of_fold_top_k(xm, queries, docs, tree_data, folds, k, seed=0):
     minus every document of the query's fold. Folds = query documents split at random; tree_data rows of other
     documents (e.g. CTD names) are in every fold tree. Labels only in the held-out fold are absent from its tree."""
     ids = sorted(set(docs))
+    if not 2 <= folds <= len(ids):
+        raise ValueError(f"folds must be in [2, {len(ids)}] (query documents), got {folds}")
+    label_to_idx = {lab: i for i, lab in enumerate(xm.initial_labels)}
+    extra = sorted(set(tree_data["labels"]) - set(label_to_idx))
+    if extra:  # fold trees would rank labels the saved tree has no index for
+        raise ValueError(f"{len(extra)} tree_data labels are not in the saved tree (first: {extra[:5]})")
     fold_of = dict(zip(np.random.default_rng(seed).permutation(ids).tolist(), np.arange(len(ids)) % folds))
     config = {p: deepcopy(getattr(xm, p)) for p in inspect.signature(XModel).parameters if p not in ("verbose", "logger")}
-    label_to_idx = {lab: i for i, lab in enumerate(xm.initial_labels)}
     out = [None] * len(queries)
     for f in range(folds):
         rows = [i for i, d in enumerate(docs) if fold_of[d] == f]

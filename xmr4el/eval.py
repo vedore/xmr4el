@@ -99,8 +99,9 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
         return m, None
     start = time.perf_counter()
     scores = xm.predict(texts, **m["search"])
-    m["predict_seconds"] = round(time.perf_counter() - start, 1)
-    m["ms_per_query"] = round(1000 * m["predict_seconds"] / len(gold), 2)  # batch predict incl. encoding
+    seconds = time.perf_counter() - start
+    m["predict_seconds"] = round(seconds, 1)
+    m["ms_per_query"] = round(1000 * seconds / len(gold), 2)  # batch predict incl. encoding
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
     # Rank of the gold label in each query's score row. 0 = never retrieved.
     # Single gold CUI per mention (Preprocessor.load_pubtator_file -> one-hot Y), so acc@1 / MRR /

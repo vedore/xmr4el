@@ -6,15 +6,19 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
-Last updated 2026-10-16. NEXT SESSION = go through `docs/comprehensive_audit_2026-10-16.md` with the user (see SHIP block).
+Last updated 2026-10-16. Second audit `docs/comprehensive_audit_2026-10-16.md` (new file, 20 findings, all verified). Applied (uncommitted, pytest 65, 5 self-checks OK): #3 cache-write failure non-fatal, #5 reader header structure + doc-id/span ValueError (21 local PubTator files scanned: 0 anomalies, results unaffected), #6 OOF rejects foreign tree_data labels / bad folds, #7 unknown predict_config keys, #8 to_pubtator write-then-rename, #10 ms_per_query unrounded, #13 pecos export texts == xm.training_set, #17 set_logger deleted, #19 asserts -> ValueError (reader, transformer, 4 factories), #20 joblib -> threadpoolctl (uv.lock). NEXT SESSION = Phase A (user 2026-10-16). User wants ALL remaining findings fixed and LIFTED the SHIP rule for Phase C (one retrain round). Plan: **A (no result change, agent does it):** #8 split_pubtator writes all splits to tmp, renames after all succeed; #11 diagnose_context ties count against gold (>=) + chance line; #10 bench_latency reports cache hits vs encoder forwards; #18 GitHub Actions (pytest + ruff, CPU), installed-wheel + read-only-cache smoke test, clear ruff diagnostics; docs #4 trusted trees only, #9 unpinned revision, #12 routed = after topk, #15 torch advisories unreachable. **B (inference only, user runs one dev eval per existing tree):** #2 bounded query batches in predict/evaluate_tree (must equal results.md exactly); #14 float32 routing features (small score shift, measured by the same eval). **C (one retrain round, all 5 sets dev+test):** #1 label-block classifier fit (same per-label optimum, L-BFGS path differs; liblinear tests + peak RAM); #16 inference vs research state in saved trees (knn still needs X/Y; old trees not loadable, retrain); #9 resolve + persist the transformer revision (cache key change: re-encode); #15 torch upgrade past the advisories.
 
-**SHIP (user 2026-10-16): ship the model as is: no more training, no more model fixes.** Defaults stay (beam 10,
-`leaf_candidates` 100, knn 10). Next session: review `docs/comprehensive_audit_2026-10-16.md` (untracked, not written by
-this agent; 20 findings: 4 High = #1 failed dictionary conversion destroys output, #2 encoder config non-progressing loop,
-#3 saved models do not freeze the transformer checkpoint, #4 unbounded dense training allocations; 15 Medium, 1 Low;
-roadmap at the end). Verified 2026-10-16 (all 20 hold at HEAD `3b7b04d`; #5 does not affect recorded numbers: configs/specs use topk 0; JSONL (#8) has no consumer in the repo). Fixed (user 2026-10-16, uncommitted, pytest 61): #1 dict_to_pubtator write-then-rename; #2 XModel rejects unknown features, min_leaf_size < 0, transformer batch_size < 0 (also in Transformer.transform), null predict_config values, and runs check_search on predict_config; #6 split_pubtator rejects listed PMIDs missing from the corpus and NaN ratios (reports corpus docs in no list); #10 knn_beta in [0, 100]; #12 run_experiment SIGTERM -> failed status; #13 classifier MPS OOM -> CPU; #14 nn_baselines refuses sapbert on a tree without a mention encoder; #15 reranker seeds before from_pretrained (seed in meta); #20 README configs line + experiment_management.md post-baseline note. Open: doc notes for #3/#5/#8/#16/#17 (not yet asked); #4/#7/#9/#11/#18/#19 skipped. Rule: nothing that changes results or needs a retrain. Also pending for shipping: merge
-`repeat` into `main`; README "Scope and limitations" (diseases: XMR4EL > 1-NN; chemicals 180k: SapBERT 1-NN better,
-faster, smaller; causes measured in results.md 2026-10-16) only if the user asks.
+**SHIP (user 2026-10-16), LIFTED 2026-10-16 for the second-audit Phase C retrain:** Defaults stay (beam 10,
+`leaf_candidates` 100, knn 10). Comprehensive audit (2026-10-16, 20 findings, all verified at `3b7b04d`) done: fixes in
+`c660edb` (#1 dict_to_pubtator write-then-rename, #2 XModel/Transformer config checks, #6 split_pubtator unknown PMIDs +
+NaN ratios, #10 knn_beta in [0, 100], #12 SIGTERM -> failed status, #13 classifier MPS OOM -> CPU, #14 nn_baselines
+refuses sapbert without a mention encoder, #15 reranker seeded before load, #20 docs); the audit file was deleted by
+the user. Not done (user never asked): doc notes for unpinned transformer revision in both configs, R@cand/routed
+measured after topk truncation (recorded numbers use topk 0, unaffected), JSONL export keeps -1/composite rows (no
+consumer), torch 2.10 advisories, pickle load = trusted trees only. Skipped: dense-memory bounds, reader offset checks,
+diagnostic full score matrices, wheel-install cache dir, eval parent-tree digest, CI. Rule: nothing that changes results
+or needs a retrain. Pending for shipping: merge `repeat` into `main`; README "Scope and limitations" (diseases: XMR4EL >
+1-NN; chemicals 180k: SapBERT 1-NN better, faster, smaller; causes measured in results.md 2026-10-16) only if the user asks.
 
 **Plan H (user 2026-10-09): `docs/tool_readiness_audit.md` § F action plan.** Items 1-4 done (pytest 48, commit `8168203`):
 spec/search/depth validation before work (`check_search`, `XModel(depth>=1)`, `check_spec` names/paths/model

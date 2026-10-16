@@ -120,6 +120,9 @@ class XModel:
         if not (isinstance(batch, numbers.Integral) and not isinstance(batch, bool) and batch >= 0):
             raise ValueError(f"transformer batch_size must be an int >= 0 (0 = default), got {batch!r}")
         # Defaults of `predict`, stored with the tree so a bare evaluate.py reproduces the reported numbers
+        unknown = sorted(set(predict_config or {}) - set(PREDICT_DEFAULTS))
+        if unknown:
+            raise ValueError(f"predict_config: unknown keys {unknown} (known: {sorted(PREDICT_DEFAULTS)})")
         if None in (predict_config or {}).values():
             raise ValueError(f"predict_config {predict_config}: leave a key out instead of null")
         self.predict_config = {**PREDICT_DEFAULTS, **(predict_config or {})}

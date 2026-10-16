@@ -147,8 +147,10 @@ class Preprocessor:
         `expand_abbreviation`) becomes "mention long form" / "long form"; None keeps it.
         BC5CDR: "-1" ids are skipped; composite "D1|D2" mentions are split via column 7.
         """
-        assert abbrev in (None, "append", "replace"), abbrev
-        assert os.path.exists(pubtator_filepath), f"{pubtator_filepath} does not exist"
+        if abbrev not in (None, "append", "replace"):
+            raise ValueError(f"abbrev must be None, 'append' or 'replace', got {abbrev!r}")
+        if not os.path.exists(pubtator_filepath):
+            raise FileNotFoundError(f"{pubtator_filepath} does not exist")
 
         corpus: List[str] = []
         labels: List[str] = []
@@ -158,25 +160,25 @@ class Preprocessor:
         title, abstract, abbrs, doc_id = "", "", None, ""
 
         with open(pubtator_filepath, "r", encoding="utf-8") as f:
-            for raw in f:
+            for line_no, raw in enumerate(f, 1):
                 raw = raw.rstrip("\r\n")  # title/abstract keep their whitespace: offsets count it
                 line = raw.strip()
                 if not line:
                     continue
 
+                # Header = "<id>|t|<title>" / "<id>|a|<abstract>"; a mention text containing "|t|" is not one
+                parts = raw.split("|", 2)
+                header = len(parts) == 3 and parts[1] in ("t", "a") and "\t" not in parts[0]
+
                 # --- Title line ---
-                if "|t|" in line:
-                    parts = raw.split("|", 2)
-                    if len(parts) == 3:
-                        doc_id, title = parts[0], parts[2]
-                        abstract = ""
-                        abbrs = None
+                if header and parts[1] == "t":
+                    doc_id, title = parts[0], parts[2]
+                    abstract = ""
+                    abbrs = None
 
                 # --- Abstract line ---
-                elif "|a|" in line:
-                    parts = raw.split("|", 2)
-                    if len(parts) == 3:
-                        abstract = parts[2]
+                elif header:
+                    abstract = parts[2]
 
                 # --- Annotation line (mentions) ---
                 elif "\t" in line:
@@ -191,6 +193,9 @@ class Preprocessor:
                             continue
                         span = (int(parts[1]), int(parts[2]))
                         doc = f"{title} {abstract}" if abstract else title  # PubTator offset layout
+                        if parts[0] != doc_id or not 0 <= span[0] <= span[1] <= len(doc):
+                            raise ValueError(f"{pubtator_filepath}:{line_no}: annotation of {parts[0]} at {span} "
+                                             f"does not fit document {doc_id!r} (length {len(doc)})")
                         if abbrev is not None and abbrs is None:
                             abbrs = Preprocessor.abbreviations(doc)
                         context = doc if window is None else Preprocessor.context_window(doc, span, window)

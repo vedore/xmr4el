@@ -93,9 +93,8 @@ class Vectorizer(metaclass=VectorizerMeta):
 
         config = deepcopy(config) if config is not None else {"type": "tfidf", "kwargs": {}}
         vectorizer_type = config.get("type", None)
-        assert (
-            vectorizer_type is not None
-        ), f"config {config} should contain a key 'type' for the vectorizer type"
+        if vectorizer_type is None:
+            raise ValueError(f"config {config} should contain a key 'type' for the vectorizer type")
         model = vectorizer_dict[vectorizer_type].fit(
             trn_corpus, config=config["kwargs"], dtype=dtype
         )
