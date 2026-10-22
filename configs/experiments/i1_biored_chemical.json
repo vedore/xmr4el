@@ -1,0 +1,16 @@
+{
+  "name": "i1_biored_chemical",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/BioRED/chemical/dev.pubtator",
+      "train_path": "datasets/BioRED/chemical/train_plus_ctd.pubtator"
+    },
+    {
+      "split": "dev_knn0",
+      "test_path": "datasets/BioRED/chemical/dev.pubtator",
+      "train_path": "datasets/BioRED/chemical/train_plus_ctd.pubtator",
+      "knn_beta": 0
+    }
+  ]
+}

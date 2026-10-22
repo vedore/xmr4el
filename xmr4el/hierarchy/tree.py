@@ -72,7 +72,7 @@ class HierarchicalMLModel():
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
         # Append [parent cluster prob, sum, max] to a child's rows (train and predict); False = the parent's X as is
-        # (PECOS XR-Linear)
+        # (PECOS XR-Linear, for the equivalence test)
         self.routing_features = routing_features
         
         self.hmodel = []  # hmodel[layer][node] = MLModel, in training order

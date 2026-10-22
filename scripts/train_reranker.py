@@ -1,4 +1,4 @@
-"""Train the cross-encoder reranker on a saved tree's top-K candidates.
+"""Train the cross-encoder reranker on a saved tree's top-K candidates (STATUS.md § R).
 
 Rows = the PubTator mentions of -train_path whose gold is a tree label; negatives = the tree's top K on the row
 (its predict_config) minus gold, cut to K-1. With -folds N the top K comes instead from N fold trees (the saved

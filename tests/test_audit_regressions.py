@@ -238,6 +238,27 @@ def test_dict_to_pubtator_refuses_own_input(tmp_path):
     assert r.returncode != 0 and "is the input file" in r.stderr and ctd.read_bytes() == before
 
 
+def test_pecos_export_refuses_nonempty_dir(tmp_path):
+    (tmp_path / "pred_old.npz").write_bytes(b"")
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/baselines/pecos_compare.py"), "export",
+                        "-xmodel_path", "unused", "-out", str(tmp_path)], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "not empty" in r.stderr
+
+
+def test_beam_sweep_fails_when_a_child_fails(tmp_path):
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/experiments/beam_sweep.py"), str(tmp_path / "none"),
+                        str(tmp_path / "none"), "5", "5", "0"], capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode != 0 and "failed beam sizes: [5]" in r.stderr
+
+
+def test_beam_sweep_rejects_bad_range(tmp_path):
+    """Sixth audit #5: a reversed or nonpositive range fails before any evaluation."""
+    for start, end in (("10", "5"), ("0", "5")):
+        r = subprocess.run([sys.executable, str(ROOT / "scripts/experiments/beam_sweep.py"), str(tmp_path / "none"),
+                            str(tmp_path / "none"), start, end, "0"], capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode != 0 and "beam_start <= beam_end" in r.stderr and "Running test" not in r.stdout
+
+
 def test_reader_warnings_carry_no_text(tmp_path, caplog):
     """Sixth audit #2: reader warnings name file, line and problem, never corpus text."""
     path = tmp_path / "c.pubtator"
@@ -247,6 +268,24 @@ def test_reader_warnings_carry_no_text(tmp_path, caplog):
         Preprocessor.load_pubtator_file(str(path))
     assert "differs from the document text" in caplog.text and "without concept id" in caplog.text
     assert "SENTINEL" not in caplog.text
+
+
+def test_bench_latency_sparse_tfidf_tree(tmp_path):
+    """Sixth audit #3: a TF-IDF tree without SVD (sparse X) benchmarks; the SapBERT comparison is skipped."""
+    config = deepcopy(CONFIG)
+    config["dimension_config"]["kwargs"]["n_components"] = 10 ** 6  # SVD skipped
+    model = XModel(**config)
+    model.train([[f"concept{j} synonym{i}" for i in range(4)] for j in range(4)], [f"L{j}" for j in range(4)])
+    tree = model.save(str(tmp_path / "tree"))
+    test = tmp_path / "test.pubtator"
+    test.write_text("".join(f"{j}|t|concept{j} synonym9\n{j}|a|x\n{j}\t0\t8\tconcept{j}\tT\tL{j}\n\n" for j in range(4)))
+    out = tmp_path / "bench.json"
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/bench_latency.py"), "-xmodel_path", tree,
+                        "-test_path", str(test), "-single", "2", "-out", str(out)], capture_output=True, text=True,
+                       cwd=ROOT)
+    assert r.returncode == 0, r.stderr[-2000:]
+    m = json.loads(out.read_text())
+    assert m["sapbert"].startswith("skipped") and "tfidf" in m["batch_s"] and "xmr4el" in m["batch_s"]
 
 
 def test_matcher_warns_at_max_iter(caplog):
@@ -532,6 +571,23 @@ def test_training_arrays_are_float32(xm):
 
 
 # Fourth audit (user paste 2026-10-20)
+
+def test_zero_context_equals_empty_context():
+    """#1: diagnose_context's ctx-0 rows = the encoder's own empty-context rows (renormalised, norm 1)."""
+    zero_context = runpy.run_path(str(ROOT / "scripts/diagnose_context.py"))["zero_context"]
+    enc = TextEncoder(vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char_wb", "ngram_range": [2, 4]}},
+                      dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 3, "random_state": 0}},
+                      transformer_config={"type": "stub", "kwargs": {}}, features="sapbert_char_context",
+                      context_vectorizer_config={"type": "tfidf", "kwargs": {"ngram_range": [1, 1], "max_df": 1.0}},
+                      context_dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2}})
+    fake = staticmethod(lambda texts, _c: np.array([[10.0 * len(t), 30.0, 1.0] for t in texts], dtype=np.float32))
+    with patch.object(TextEncoder, "_encode_text_using_transformer", fake), \
+            patch("xmr4el.features.encoder.resolve_revision", side_effect=lambda c: c):
+        enc.encode(["aspirin [SEP] doc one", "tumour [SEP] another doc", "fever [SEP] doc dose"])
+        Xq = enc.predict(["aspirin [SEP] doc one", "tumour [SEP] another doc"])
+        X0 = enc.predict(["aspirin [SEP] ", "tumour [SEP] "])
+    Xz = zero_context(Xq, slice(6, 8))
+    assert isinstance(Xz, np.ndarray) and np.allclose(Xz, X0, atol=1e-6)
 
 
 def test_transformer_output_not_copied_again():

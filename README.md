@@ -109,7 +109,7 @@ are aligned.
 
 Conversion tools: `scripts/split_pubtator.py` (train/dev/test splits), `scripts/to_pubtator.py` (filter
 PubTator, convert BioC XML), `scripts/dict_to_pubtator.py` (CTD dictionaries as PubTator training rows).
-Dataset sources and conversion commands are in `docs/results.md`.
+Dataset recipes are in `scripts/README.md`.
 
 ## Evaluation
 
@@ -200,7 +200,10 @@ Checks on synthetic data (no corpus needed):
 ```bash
 .venv/bin/python -m pytest -q && \
 uvx ruff check xmr4el scripts tests && \
-.venv/bin/python scripts/evaluate.py -selfcheck
+.venv/bin/python scripts/evaluate.py -selfcheck && \
+.venv/bin/python scripts/diagnose_routing.py -selfcheck && \
+.venv/bin/python scripts/diagnose_unseen.py -selfcheck && \
+.venv/bin/python scripts/experiments/screen_features.py -selfcheck
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff, pytest and an installed-wheel smoke test on CPU.
@@ -212,8 +215,8 @@ Layout:
 - `xmr4el/hierarchy/`: clustering, tree training, beam search, persistence.
 - `xmr4el/learning/`: one-vs-rest logistic matchers, mention-kNN scoring.
 - `xmr4el/xmodel.py`: public API (`XModel.train`, `predict`, `save`, `load`); `xmr4el/eval.py`: metrics.
-- `scripts/`: train, evaluate, experiment runner, data conversion, 1-NN baselines.
-- `configs/`: model configs and experiment specs. `docs/`: pipeline notes (`pipeline.md`), results (`results.md`), future work (`future_work.md`).
+- `scripts/`: train, evaluate, experiment runner, data conversion, diagnostics, baselines (`scripts/README.md`).
+- `configs/`: model configs and experiment specs. `docs/`: pipeline notes (`pipeline.md`) and results.
 
 ## License
 

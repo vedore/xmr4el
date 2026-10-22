@@ -1,0 +1,198 @@
+"""Unseen-string diagnostic: where do test mentions whose exact string is not in train fail? No training.
+
+For one saved tree, on in-vocabulary test rows, ranked as evaluate.py (`-beam_size`, `-knn_beta`; default the tree's):
+  - per string group (seen 1 label / seen >1 / unseen): acc@1 and gold-rank buckets (1, 2-5, 6-20, >20 in the
+    candidates, not in the candidates = routing loss)
+  - unseen rows: flat baselines per feature block ("sapbert_char_context": mention, char, context): 1-NN over the
+    tree's own train rows (`XModel.X`, labels from `XModel.Y`) and nearest label embedding (root Z)
+  - fusion screen, all rows: each tree candidate (knn-free scores) re-scored by log(tree score) + beta * knn, knn = max
+    cosine of the query's mention block to that label's train rows (SapBERT's nearest-synonym score); beta inf = knn
+    only within the candidates. Printed as the evaluate.py string breakdown, hybrid included.
+  - a TSV of every error with its group, `abbrev` (the mention got an expansion), whether gold / pred are among the
+    labels train gives the exact string, and each label's most frequent train mention, for reading
+"""
+import os
+import sys
+from argparse import ArgumentParser
+from collections import Counter, defaultdict
+
+import numpy as np
+from scipy.sparse import csr_matrix
+from sklearn.preprocessing import normalize
+from xmr4el.data.readers import Preprocessor
+from xmr4el.eval import filter_labels_and_inputs, gold_rank, mention_key, string_breakdown
+from xmr4el.learning.scoring import knn_index, label_max_cos
+from xmr4el.xmodel import XModel
+
+BETAS = (0, 5, 10, 20, 40, np.inf)
+
+
+def _dense(a):
+    return a.toarray() if hasattr(a, "toarray") else np.asarray(a)
+
+
+def nn_labels(Q, B, b_labels, block=256):
+    """Label of the cosine-nearest row of B for every row of Q; Q in row blocks, never the full (n, labels) matrix."""
+    n, index = int(b_labels.max()) + 1, knn_index(B, b_labels)
+    return np.concatenate([np.zeros(0, dtype=int)] + [label_max_cos(Q[s:s + block], None, None, n, chunk=block, index=index)
+                                                      .argmax(axis=1) for s in range(0, Q.shape[0], block)])
+
+
+def candidate_knn(score_csr, Q, index, n_labels, block=256):
+    """knn of each stored candidate of score_csr (CSR order, aligned with .data): candidate pairs only."""
+    rows = np.repeat(np.arange(score_csr.shape[0]), np.diff(score_csr.indptr))
+    return label_max_cos(Q, None, None, n_labels, chunk=block, rows=rows, cols=score_csr.indices, index=index)
+
+
+def fused_top1(score_csr, knn, beta):
+    """Per row, the candidate maximising log(tree score) + beta * knn (beta inf: knn alone); -1 if no candidates.
+    knn: one value per stored candidate (`candidate_knn`)."""
+    out = np.full(score_csr.shape[0], -1)
+    for q in range(score_csr.shape[0]):
+        lo, hi = score_csr.indptr[q], score_csr.indptr[q + 1]
+        if lo == hi:
+            continue
+        idx = score_csr.indices[lo:hi]
+        k = knn[lo:hi]
+        f = k if np.isinf(beta) else np.log(np.maximum(score_csr.data[lo:hi], 1e-300)) + beta * k
+        out[q] = idx[f.argmax()]
+    return out
+
+
+def rank_buckets(ranks):
+    """Shares of gold rank 1, 2-5, 6-20, >20 (still a candidate) and 0 (not a candidate)."""
+    return {"1": np.mean(ranks == 1), "2-5": np.mean((ranks >= 2) & (ranks <= 5)),
+            "6-20": np.mean((ranks >= 6) & (ranks <= 20)), ">20": np.mean(ranks > 20),
+            "not cand": np.mean(ranks == 0)}
+
+
+def main():
+    ap = ArgumentParser()
+    ap.add_argument("-xmodel_path", required=True)
+    ap.add_argument("-test_path", required=True)
+    ap.add_argument("-train_path", required=True, help="PubTator file the tree was trained from")
+    ap.add_argument("-beam_size", type=int, default=None, help="default: the tree's")
+    ap.add_argument("-knn_beta", type=float, default=None,
+                    help="knn beta of the ranking behind acc@1, rank buckets and the TSV (default: the tree's)")
+    ap.add_argument("-out", default="outputs/logs/unseen_errors.tsv")
+    ap.add_argument("-query_block", type=int, default=256,
+                    help="query rows per nearest-label matmul (memory: rows x labels floats per block)")
+    args = ap.parse_args()
+    if args.query_block < 1:
+        ap.error("-query_block must be >= 1")
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+
+    xm = XModel.load(args.xmodel_path, research=True)
+    labels = np.array(xm.initial_labels)
+    label_to_idx = {lab: i for i, lab in enumerate(labels)}
+
+    test = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window, abbrev=xm.abbrev_expansion)
+    gold, texts = filter_labels_and_inputs(test["corpus"], test["labels"], labels)
+    gold_idx = np.array([label_to_idx[g] for g in gold])
+
+    train = Preprocessor.load_pubtator_file(args.train_path, abbrev=xm.abbrev_expansion)
+    train_pairs = [(t, y) for t, y in zip(train["corpus"], train["labels"]) if y in label_to_idx]
+    by_string, by_label = defaultdict(Counter), defaultdict(Counter)
+    for t, y in train_pairs:
+        by_string[mention_key(t)][y] += 1
+        by_label[y][mention_key(t)] += 1
+    n_lab = np.array([len(by_string.get(mention_key(t), ())) for t in texts])
+    group = np.where(n_lab == 0, "unseen", np.where(n_lab == 1, "seen 1", "seen >1"))
+    u_idx = np.flatnonzero(n_lab == 0)
+    raw = Preprocessor.load_pubtator_file(args.test_path, window=xm.context_window)
+    raw_gold, raw_texts = filter_labels_and_inputs(raw["corpus"], raw["labels"], labels)
+    assert raw_gold == gold, "abbrev-free reload must keep the row order"
+    abbrev = np.array([mention_key(a) != mention_key(b) for a, b in zip(raw_texts, texts)])
+
+    cfg = xm.resolve_predict_config(beam_size=args.beam_size, knn_beta=args.knn_beta)
+    beta = cfg["knn_beta"]
+    score_raw = xm.predict(texts, beam_size=cfg["beam_size"], topk=0, knn_beta=0)  # every candidate, for the screen
+    score_csr = xm.predict(texts, beam_size=cfg["beam_size"], knn_beta=beta)
+    ranks_all = np.array([gold_rank(score_csr.getrow(i), gold_idx[i]) for i in range(len(texts))])
+    ranks = ranks_all[u_idx]
+
+    print("-" * 72)
+    print(f"ranking: beam {cfg['beam_size']}, topk {cfg['topk']}, knn beta {beta} (tree score x exp(beta * knn), as evaluate.py)")
+    print(f"unseen-string test rows: {len(u_idx)}/{len(texts)} in vocabulary")
+    print("acc@1 and gold rank by group:")
+    for g in ("seen 1", "seen >1", "unseen"):
+        r = ranks_all[group == g]
+        if not len(r):
+            continue
+        print(f"  {g:<8} n {len(r):>5}  acc@1 {np.mean(r == 1):.4f}  "
+              + "  ".join(f"{k} {v:.3f}" for k, v in rank_buckets(r).items()))
+
+    Y = xm.Y.tocsr()
+    assert (Y.getnnz(axis=1) == 1).all(), "expected exactly one gold label per training row"
+    y_train = Y.indices
+    Z = _dense(xm.Z)
+    X = _dense(xm.text_encoder.predict(texts))
+    blocks = {"all": slice(None)}
+    blocks.update(xm.feature_blocks())
+    nn_pred = {}
+    print("flat baselines on the unseen rows (acc@1):")
+    for name, sl in blocks.items():
+        nn_pred[name] = nn_labels(X[u_idx, sl], xm.X[:, sl], y_train, args.query_block)
+        flat = nn_labels(X[u_idx, sl], Z[:, sl], np.arange(Z.shape[0]), args.query_block)
+        print(f"  {name:<8} 1-NN train row {np.mean(nn_pred[name] == gold_idx[u_idx]):.4f}  "
+              f"nearest label z {np.mean(flat == gold_idx[u_idx]):.4f}")
+    ok = {k: v == gold_idx[u_idx] for k, v in nn_pred.items()}
+    tree_ok = ranks == 1
+    nn_col = "mention" if "mention" in ok else "all"
+    print(f"  tree wrong, {nn_col} 1-NN right {np.mean(~tree_ok & ok[nn_col]):.4f}; "
+          f"tree right, {nn_col} 1-NN wrong {np.mean(tree_ok & ~ok[nn_col]):.4f}")
+
+    Q, index = X[:, blocks[nn_col]], knn_index(xm.X[:, blocks[nn_col]], y_train)
+    knn = candidate_knn(score_raw, Q, index, len(labels), args.query_block)
+    tree_top1 = fused_top1(score_raw, knn, 0)  # beta 0: tree order (ties: lowest label index)
+    print(f"fusion screen, all rows: log(tree score) + beta * {nn_col} knn (acc@1; hybrid = dict if string seen)")
+    print(f"  {'beta':>5}  {'all':>6}  {'seen 1':>6}  {'seen >1':>7}  {'unseen':>6}  {'hybrid':>6}")
+    for b_ in BETAS:
+        top1 = tree_top1 if b_ == 0 else fused_top1(score_raw, knn, b_)
+        b = string_breakdown(texts, gold, [labels[i] if i >= 0 else None for i in top1], train_pairs)
+        print(f"  {b_:>5}  {b['all'][1]:.4f}  {b['seen, 1 label'][1]:.4f}  {b['seen, >1 label'][1]:>7.4f}  "
+              f"{b['unseen string'][1]:.4f}  {b['hybrid']:.4f}")
+
+    def example(lab_i):
+        return by_label[labels[lab_i]].most_common(1)[0][0] if lab_i >= 0 and by_label[labels[lab_i]] else ""
+
+    pred = fused_top1(score_csr, np.zeros(score_csr.nnz), 0)  # top-1 of the beta ranking (beta 0: knn unused)
+    nn_all = nn_labels(Q, xm.X[:, blocks[nn_col]], y_train, args.query_block)  # 1-NN train row's label (mention block), all rows
+    errors = np.flatnonzero(ranks_all != 1)
+    with open(args.out, "w") as f:
+        f.write(f"mention\tgroup\tabbrev\tgold\tgold_example\tpred\tpred_example\tgold_rank\tgold_in_string_set"
+                f"\tpred_in_string_set\t{nn_col}_1nn\t{nn_col}_1nn_example\n")
+        for i in errors:
+            p, nn, s_set = pred[i], nn_all[i], by_string.get(mention_key(texts[i]), {})
+            f.write(f"{mention_key(texts[i])}\t{group[i]}\t{int(abbrev[i])}\t{gold[i]}\t{example(gold_idx[i])}"
+                    f"\t{labels[p] if p >= 0 else ''}\t{example(p)}\t{ranks_all[i]}\t{int(gold[i] in s_set)}"
+                    f"\t{int(p >= 0 and labels[p] in s_set)}\t{labels[nn]}\t{example(nn)}\n")
+    print(f"errors (all groups): {args.out} ({len(errors)} rows; "
+          + ", ".join(f"{g} {int((group[errors] == g).sum())}" for g in ("seen 1", "seen >1", "unseen")) + ")")
+
+
+def _selfcheck():
+    B = np.array([[1.0, 0], [0, 1.0], [0.7, 0.7]])
+    Q = np.array([[2.0, 0.1], [0.1, 3.0], [1.0, 1.1]])
+    assert list(nn_labels(Q, B, np.array([5, 6, 7]))) == [5, 6, 7]
+    assert list(nn_labels(Q, B, np.array([5, 6, 7]), block=2)) == [5, 6, 7], "row blocks = one pass"
+    # labels 0 and 2 own rows {0, 2} and {1}; label 1 has none
+    k = label_max_cos(Q, B, np.array([0, 2, 0]), 3, chunk=2)
+    assert np.allclose(k[:, 1], -1) and np.allclose(k[:, 0], np.max(normalize(Q) @ normalize(B[[0, 2]]).T, axis=1))
+    S = csr_matrix(np.array([[0.9, 0.1, 0.0], [0.0, 0.0, 0.0]]))
+    cand = candidate_knn(S, Q[:2], knn_index(B, np.array([0, 2, 0])), 3)
+    assert np.allclose(cand, k[0, :2]), "candidate pairs = full knn at those pairs"
+    knn = np.array([0.1, 0.5], dtype=np.float32)  # row 0's candidates (labels 0, 1); row 1 has none
+    assert list(fused_top1(S, knn, 0)) == [0, -1]               # tree alone
+    assert list(fused_top1(S, knn, 10)) == [1, -1]              # log 0.9 + 1 < log 0.1 + 5; label 2 is no candidate
+    assert list(fused_top1(S, knn, np.inf)) == [1, -1]
+    b = rank_buckets(np.array([1, 3, 10, 50, 0]))
+    assert all(np.isclose(v, 0.2) for v in b.values()), b
+    print("selfcheck ok")
+
+
+if __name__ == "__main__":
+    if "-selfcheck" in sys.argv:
+        _selfcheck()
+    else:
+        main()

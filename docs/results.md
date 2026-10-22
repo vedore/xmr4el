@@ -1,162 +1,997 @@
 # Results
 
-Benchmark of XMR4EL against SapBERT 1-NN (same mention encoder, no tree) on seven biomedical entity-linking sets, with
-PECOS XR-Linear and the scispaCy UMLS linker as external systems. Character TF-IDF 1-NN is a string-match reference row,
-not a baseline. The PECOS and scispaCy runners are not part of this repository; their setup is described below.
+One row per change, with the exact command that produced it. This table is the ablation appendix.
 
-## Setup
+The trees behind the rows recorded before the 2026-10-06 restructure were deleted in it (their pickles store the old
+module paths and no longer load). Rows stay as records; reproducing one needs a retrain. Paths in rows are
+as they were at the time; the Commands section uses the current layout.
 
-- Config `configs/xmr4el_bc5cdr_config.json` for every set, unchanged; no tuning between dev and test. Search = the config's
-  `predict_config` (beam 10, `leaf_candidates` 100, knn beta 10, topk 0).
-- One tree per set, trained on its train split + a CTD dictionary (diseases: CTD MEDIC + OMIM; chemicals: CTD chemicals,
-  ~180k labels). Test is evaluated on the dev tree, once.
-- Rows: mentions with exactly one concept id (multi-id rows are dropped by the converters). acc@1, MRR and R@10 count
-  in-vocabulary rows (gold label has training text); `cov x acc` counts every row, out-of-vocabulary rows as misses.
-- Mention-string groups, by the training file: `seen, 1` = the exact string is in training under one label, `seen, >1` =
-  under several labels (context decides), `unseen` = string not in training. `hybrid` = exact training string -> its
-  majority label, otherwise the system.
-- 1-NN baselines (`scripts/baselines/nn_baselines.py`): nearest training row of the tree, same rows and vocabulary as
-  XMR4EL; exact ties -> lower label index.
-- PECOS XR-Linear (libpecos, Docker linux/amd64): trained on XMR4EL's exported features of the 2026-10-13 trees (same rows
-  and labels), `-nr_splits 16 -max_leaf_size 100 -threshold 0` (hierarchy 16 -> 256 -> labels on diseases and MedMentions,
-  8 -> 128 -> 2048 -> labels on chemicals, 8 -> 128 -> labels on BC5CDR-disease), beam 10, top 100; trained once on the dev
-  export, test predicted with that model. PECOS's default weight pruning (0.1) cost 0.075 acc@1 on BC5CDR-disease dev.
-- scispaCy (MedMentions only: its knowledge bases are keyed by UMLS CUIs): scispaCy 0.6.2 UMLS `CandidateGenerator` (KB
-  2022AB; MedMentions is 2017AA, so retired CUIs get no candidate), k 100, score = max alias similarity, no 0.7 threshold,
-  candidates restricted to the tree's labels (8.7 / 8.5 per row; 0.6 / 0.4% of rows get none). Unrestricted, its top-1 is
-  outside the label set for 23.9 / 23.7% of rows (dev / test).
-- Trees: the five sets' XMR4EL and 1-NN rows are the 2026-10-20 trees (current code). MedMentions st21pv (2026-10-13) and
-  BC5CDR-disease (2026-10-09) trees predate the current saved-tree layout and float32 training, so they have no SapBERT
-  1-NN row (a rerun needs a retrain).
-- Each mention has one gold label, so this is multi-class: precision@k would be recall@k / k and is not reported.
-- Same-code GPU retrains move 10-20 rows; smaller gaps are noise.
+## Metric choice
 
-## Dev and test
+Each mention carries exactly one gold CUI (`Preprocessor.load_pubtator_file` in `xmr4el/data/readers.py` → one-hot `Y` rows),
+so this is extreme multi-**class**, not multi-label. Reported metrics are **acc@1, MRR, recall@k**.
+PECOS's precision@k / propensity-scored suite is **not** reused: with a single gold label,
+precision@k is just recall@k / k and carries no extra information.
+
+`recall@candidates` is the binary `gold in cand` hit count. `In-vocabulary mentions` is the vocabulary ceiling — mentions whose gold CUI is
+absent from the training label space are deleted before scoring
+(`scripts/evaluate.py`), so every row below is an in-vocabulary upper bound.
+
+## Session 6 (2026-09-30): first dev rows with the corrected label mapping
+
+Eval-only on the saved 2026-09-29 tree; code = `9556856` + uncommitted `classes_` label mapping.
+st21pv dev, 500-label vocabulary (first 500 label groups), in-vocabulary 7530/40884 (18.4%),
+347 gold CUIs kept. `-beam_size 2 -topk 0`, K=6 root clusters, leaf limit 100. Both trees have
+label-level leaf matchers (OvR classes = leaf labels, 83-85 per leaf) and 66-83 rankers per leaf.
+Only the flag-1 tree is listed: the flag-4 tree of that day had row-permuted training features
+(transformer batch-order bug, fixed) and its rows were deleted.
+
+| Tree | flag | recall@cand | acc@1 | MRR | R@5 | R@20 | R@100 | cand/query | random acc@1 |
+|---|---|---|---|---|---|---|---|---|---|
+| `15-16-12` | 1 | 0.823 | 0.113 | 0.217 | 0.339 | 0.501 | 0.705 | 166.6 | 0.0049 |
+
+`diagnose_routing.py` (5000 sampled rows per split, seed 0):
+
+| Tree | split | majority cluster | root matcher | cosine/all | flat nearest-label acc@1 |
+|---|---|---|---|---|---|
+| `15-16-12` | train | 0.558 | 0.640 | 0.649 | 0.304 |
+| `15-16-12` | dev | 0.598 | 0.546 | 0.600 | 0.267 |
+
+Dictionary baseline (dev, mention string -> most frequent train CUI): acc@1 0.718, string coverage 0.743.
+
+Flag-1 reading (500 labels only):
+- Scoring beats random ordering (acc@1 23x the random line), so the leaf scores carry signal. This does
+  not show that rankers improve on matcher-only scores; that is the `-alpha 0` vs `0.5` comparison.
+- Root routing top-1 is below the majority-cluster reference on dev (0.546 vs 0.598). Clusters have
+  similar label counts but skewed mention frequencies. How much of recall@cand 0.82 at beam 2 is skew
+  needs the fixed top-2-cluster reference (now printed by `diagnose_routing.py`).
+- Hierarchy acc@1 0.113 (7530 rows) vs flat nearest-label 0.267 and mention dictionary 0.718 (5000-row
+  sample). Not yet on identical rows; rerun the diagnostic with `-max_rows 100000` to use all 7530.
+  All figures cover only the 18.4% of dev mentions inside the 500-label vocabulary.
+
+## Session 7 (2026-10-01): flag-4 retrain + flag-1 alpha ablation
+
+Code = `47ee08b` (batch-order + OOM fixes, `classes_` label mapping). Same split/vocabulary as Session 6:
+st21pv dev, 500 labels, in-vocabulary 7530/40884, 347 gold CUIs. `-beam_size 2 -topk 0`, K=6.
+Flag-4 tree `xmodel_2026-09-30_16-37-01` (`-ds_len 500`, base config, X 23512x2268), first valid
+flag-4 tree. Flag-1 tree `15-16-12` unchanged (TF-IDF only, unaffected by the batch fix).
+
+| Tree | flag | alpha | recall@cand | acc@1 | MRR | R@5 | R@20 | R@100 | cand/query | random acc@1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `16-37-01` | 4 | 0.5 | 0.949 | 0.529 | 0.671 | 0.841 | 0.854 | 0.914 | 166.3 | 0.0057 |
+| `16-37-01` | 4 | 0 | 0.949 | 0.510 | 0.686 | 0.909 | 0.929 | 0.941 | 166.3 | 0.0057 |
+| `16-37-01` | 4 | 1 | 0.949 | **0.001** | 0.015 | 0.003 | 0.051 | 0.299 | 166.3 | 0.0057 |
+| `15-16-12` | 1 | 0 | 0.823 | 0.143 | 0.283 | 0.456 | 0.707 | 0.797 | 166.6 | 0.0049 |
+| `15-16-12` | 1 | 0.5 | 0.823 | 0.113 | 0.217 | 0.339 | 0.501 | 0.705 | 166.6 | 0.0049 (Session 6) |
+| `15-16-12` | 1 | 1 | 0.823 | **0.000** | 0.009 | 0.0001 | 0.003 | 0.331 | 166.6 | 0.0049 |
+
+Gold with / without a trained ranker (acc@1): flag 4 alpha 0.5 0.528 (n=7397) / 0.609 (n=133);
+flag 4 alpha 0 0.511 / 0.496; flag 4 alpha 1 **0.000** / 0.068; flag 1 alpha 0 0.144 / 0.000 (n=37). 0 cosine fallbacks at predict. Distinct scores/query: flag 1
+alpha 0 52.4 of 167 (matcher ties), alpha 1 165.2.
+
+`diagnose_routing.py -max_rows 100000` (all rows; dev rows identical to eval):
+
+| Tree | split | majority | fixed top-2 | root matcher top-1 | top-2 | cosine/all | flat nearest-label acc@1 |
+|---|---|---|---|---|---|---|---|
+| `16-37-01` | train | 0.352 | 0.616 | 0.903 | 0.968 | 0.768 | 0.793 |
+| `16-37-01` | dev | 0.351 | 0.608 | 0.879 | 0.949 | 0.756 | 0.767 |
+| `15-16-12` | train | 0.568 | 0.713 | 0.624 | 0.880 | 0.632 | 0.298 |
+| `15-16-12` | dev | 0.603 | 0.731 | 0.547 | 0.823 | 0.600 | 0.258 |
+
+Flag 4 extra: mention-block share 0.994 (train) / 0.998 (dev); cosine/mention = cosine/all
+(dev 0.756, flat 0.766); cosine/context dev 0.407, flat 0.202. Dictionary baseline (dev, same rows):
+acc@1 0.7165, string coverage 0.743.
+
+Reading (500 labels, in-vocabulary rows only):
+- **Rankers anti-rank on flag 1.** Ranker-only (alpha 1) puts gold below random ordering: R@50 0.029
+  vs random line 0.247, R@100 0.331 vs 0.494, MRR 0.009. acc@1 falls monotonically with alpha
+  (0.143 -> 0.113 -> 0.000). Ranker scores carry signal with the wrong sign or are miscalibrated
+  across per-label models; cause not yet traced. Flag 4 hints the same: labels scored by cosine
+  fallback beat ranker-scored labels (0.609 vs 0.528).
+- **Feature-independent: flag 4 alpha 1 is also below random** (R@50 0.101 vs 0.285, R@100 0.299
+  vs 0.570). Among 7397 gold labels with a ranker, acc@1 is exactly 0.000. Matcher-only (alpha 0) has
+  the best MRR/R@5 (0.686 / 0.909); alpha 0.5 trades R@5 for +0.019 acc@1.
+- **Cause, two training-side defects** (checked on the saved trees, `16-37-01` and `15-16-12`):
+  1. *Leaf label embeddings are erased.* `prepare_layer` appended mean/sum/max of `X_node . Z` to each
+     child z; the sum grows with node size, so after L2 norm those 3 dims hold 1.000 of every leaf z's
+     squared norm (both trees, all checked leaves). Leaf cosine fallback and ranker hard-negative
+     mining (cos/ip to z) therefore ignore the label. Fixed (zero pad, width kept);
+     regression `test/xmr4el/test_prepare_layer.py` (cos 0.0009 before, 1.0 after).
+  2. *Per-label rankers are under-trained and not comparable across labels* (not fixed). Leaf rankers
+     of `16-37-01`: median ||w_X|| 0.13-0.34, so half output ~sigmoid(bias) 0.47-0.50 for any query;
+     better-trained rankers have strongly negative bias (corr(||w_X||, bias) -0.75 to -0.85, 1:5
+     negatives). The gold label's ranker is usually trained, so its score on its own mention falls
+     below the ~0.5 crowd of untrained rankers. Synthetic reproduction (SGD log_loss, l1,
+     eta0 0.01, 3 partial_fit epochs): n_pos=2 outputs 0.47 for positive and OOD queries alike;
+     n_pos=300 gives its positive 0.46. 20 epochs do not fix it (n_pos=20 positive 0.31 < n_pos=2
+     baseline 0.36), so more epochs alone are not the fix.
+- **Flag 4 routing is solved at this scale; leaf scoring is the bottleneck.** Root matcher 0.879 vs
+  majority 0.351 (flag 1: 0.547 vs 0.603, below majority). recall@cand 0.949 caps acc@1 at 0.949, but
+  the hierarchy gets 0.529 while flat nearest-label on the same features gets 0.767 and the
+  dictionary 0.717.
+- Flag 4 vs flag 1 (alpha 0.5, identical rows): acc@1 0.529 vs 0.113, recall@cand 0.949 vs 0.823.
+  This bundles features, clustering and every trained component; no single factor is attributed.
+- The flag-4 mention block still carries ~all of the row norm; context alone is weak (flat 0.202).
+
+### Leaf-Z fix retrain (single factor)
+
+Tree `xmodel_2026-10-01_11-20-27` (flag 4, `-ds_len 500`, base config); code = `47ee08b` + leaf-Z
+fix in `prepare_layer` (zero pad). Checked on the saved tree: pad share of leaf z norm 0.0000 in all 6
+leaves (old trees: 1.000). Same rows/flags as above.
+
+| Tree | flag | alpha | recall@cand | acc@1 | MRR | R@5 | R@20 | R@100 | gold w/ ranker acc@1 (n=7383) | gold w/o ranker acc@1 (n=147) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `11-20-27` | 4 | 0 | 0.949 | 0.510 | 0.686 | 0.909 | 0.929 | 0.941 | 0.510 | 0.517 |
+| `11-20-27` | 4 | 0.5 | 0.949 | 0.501 | 0.673 | 0.887 | 0.896 | 0.916 | 0.498 | **0.680** |
+| `11-20-27` | 4 | 1 | 0.949 | 0.014 | 0.032 | 0.030 | 0.084 | 0.264 | 0.003 | 0.537 |
+| `11-20-27` cosine | 4 | 0.5 | 0.949 | 0.748 | 0.821 | 0.914 | 0.942 | 0.948 | 0.749 | 0.667 |
+| `11-20-27` cosine | 4 | 1 | 0.949 | **0.764** | 0.822 | 0.888 | 0.936 | 0.948 | 0.765 | 0.735 |
+
+384 rankers (was 387). `diagnose_routing.py` output is identical to `16-37-01` (root not touched).
+
+Reading:
+- Control holds: alpha 0 reproduces `16-37-01` exactly (0.510 / 0.686 / 0.909); root and leaf matcher
+  do not use leaf z, so training is deterministic and the fix is the only factor.
+- The restored leaf z works as a scorer: labels scored by cosine (no ranker, n=147) go 0.068 -> 0.537
+  at alpha 1, and fusing cosine with the matcher lifts them 0.517 (alpha 0) -> 0.680 (alpha 0.5).
+- Trained rankers still anti-rank (alpha 1 gold-with-ranker 0.003), and alpha 0.5 is now slightly worse
+  than before (0.501 vs 0.529): changing hard negatives did not fix ranker calibration (defect 2).
+- `-scorer cosine` (eval-only; every leaf label scored by cosine to its leaf z, rankers ignored):
+  acc@1 0.510 -> 0.764 (alpha 1) / 0.748 (alpha 0.5), MRR 0.686 -> 0.822. "gold w/ ranker" here only
+  marks labels that have a (unused) trained ranker.
+- Hierarchy + cosine now matches flat nearest-label on the same rows (0.764 vs 0.767) and beats the
+  dictionary (0.717). Leaf z = parent z with a zero pad and the 3 query extras only rescale x, so the
+  leaf cosine orders like flat nearest-label within the candidates; acc@1 within candidates
+  0.764/0.949 = 0.805. The remaining gap to flat is routing (recall@cand 0.949).
+- Matcher fusion (alpha 0.5) trades -0.016 acc@1 for +0.026 R@5. Alpha was picked on dev; treat
+  0.5 vs 1 as unresolved until a held-out check.
+- Ranker contribution, measured: negative at every alpha. Retain the leaf-Z fix; leaf scoring by
+  cosine beats trained rankers by 0.25 acc@1 on this split.
+
+### Mention-string breakdown and beam 3 (eval-only, `11-20-27`, `-scorer cosine -alpha 1`)
+
+Leaf scoring here is cosine only (alpha 1 gives the matcher weight 0); trained rankers unused.
+`-train_path` breakdown; dict = most frequent train label for the exact (lower-cased) mention string.
+
+| group | n | share | tree acc@1 | dict acc@1 | either | tree errors (share of 1776) |
+|---|---|---|---|---|---|---|
+| all | 7530 | 1.000 | 0.764 | 0.717 | 0.811 | 1776 |
+| seen, 1 label | 3631 | 0.482 | 0.952 | 0.984 | 0.989 | 175 (0.10) |
+| seen, >1 label | 1964 | 0.261 | 0.832 | 0.928 | 0.943 | 330 (0.19) |
+| unseen string | 1935 | 0.257 | 0.343 | 0.000 | 0.343 | 1271 (0.72) |
+
+Hybrid (dict if string seen, else tree): **acc@1 0.805** (+0.041 over the tree, training-free; the
+"either" oracle is 0.811). Consistency: "all" reproduces tree 0.764 and dict 0.7165.
+
+Beam 3 (`-beam_size 3`): recall@cand 0.949 -> 0.975, candidates 166 -> 249, acc@1 0.764 -> 0.763,
+MRR 0.822 -> 0.821, R@20 0.936 -> 0.951.
+
+Reading:
+- Routing is not what limits top-1: beam 3 recovers 2.6% more golds but they rank low; acc@1 flat.
+- 72% of tree errors are mentions whose string never appears in train (acc@1 0.343). After the hybrid,
+  ~86% of remaining errors are unseen strings. That is where the next gain is: the mention encoder
+  (flag 4 = TF-IDF/SVD 1500 + `sentencetbiobert`; mention block holds 0.998 of the row norm).
+- On seen strings the most-frequent-label prior beats the tree (0.928 vs 0.832 ambiguous, 0.984 vs
+  0.952 unambiguous). The hybrid captures that; a reranker could learn it as a feature.
+
+## Session 8 (2026-10-01): feature screen by flat retrieval (`screen_features.py`)
+
+No training. Vocabulary and dev rows of tree `11-20-27` (500 labels, 7530 in-vocabulary dev rows,
+23512 train rows). Mention-only features; label = PIFA centroid of its train rows;
+score = cosine to every label (flat, no hierarchy). Breakdown groups as in Session 7.
+
+| features | acc@1 | MRR | hybrid | seen, 1 label | seen, >1 label | unseen string |
+|---|---|---|---|---|---|---|
+| `sbiobert` (current flag-4 mention block) | 0.766 | 0.825 | 0.804 | 0.956 | 0.833 | 0.340 |
+| char 2-4 TF-IDF (`char_wb`, sublinear) | 0.743 | 0.797 | 0.808 | 0.926 | 0.789 | 0.355 |
+| `sbiobert` + char, per-block L2 | **0.784** | **0.847** | **0.832** | 0.954 | 0.799 | **0.448** |
+
+Consistency: `sbiobert` 0.766 reproduces tree 0.764 / flat 0.767, so the mention block alone is the
+flag-4 feature.
+
+Round 2 (tie-corrected `screen_features.py`: expected acc@1/MRR under random tie-breaking; breakdown
+uses one random tie-break; round-1 `max`/`word` output was inflated by ties and is discarded):
+
+| features | scorer | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen | gold tied at top |
+|---|---|---|---|---|---|---|---|---|
+| `sbiobert` | centroid | 0.766 | 0.825 | 0.804 | 0.956 | 0.833 | 0.340 | 0.000 |
+| `sbiobert` | max | 0.695 | 0.796 | 0.825 | 0.983 | 0.427 | 0.423 | 0.254 |
+| char | centroid | 0.743 | 0.797 | 0.808 | 0.926 | 0.789 | 0.355 | 0.000 |
+| char | max | 0.678 | 0.782 | 0.815 | 0.984 | 0.421 | 0.385 | 0.279 |
+| word TF-IDF | centroid | 0.726 | 0.785 | 0.798 | 0.911 | 0.790 | 0.315 | 0.093 |
+| word TF-IDF | max | 0.647 | 0.741 | 0.787 | 0.980 | 0.422 | 0.272 | 0.373 |
+| `sbiobert` + char | centroid | **0.784** | **0.847** | 0.832 | 0.954 | 0.799 | 0.448 | 0.000 |
+| `sbiobert` + char | max | 0.704 | 0.803 | 0.832 | 0.984 | 0.431 | 0.451 | 0.262 |
+| `sbiobert` + charsvd 768 | centroid | 0.775 | 0.837 | 0.826 | 0.949 | 0.794 | 0.427 | 0.000 |
+| `sbiobert` + charsvd 768 | max | 0.706 | 0.804 | **0.835** | 0.984 | 0.420 | **0.461** | 0.262 |
+
+Round 3, SapBERT (`cambridgeltl/SapBERT-from-PubMedBERT-fulltext`, [CLS] pooling, max 25 tokens;
+user decision 2026-10-01). Same rows; `sbiobert+charsvd` repeated as the in-run reference.
+
+| features | scorer | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen | gold tied at top |
+|---|---|---|---|---|---|---|---|---|
+| `sapbert` | centroid | 0.780 | 0.842 | 0.820 | 0.953 | 0.833 | 0.404 | 0.000 |
+| `sapbert` | max | 0.729 | 0.820 | **0.839** | 0.984 | 0.514 | 0.476 | 0.215 |
+| `sbiobert` + charsvd 768 | centroid | 0.775 | 0.837 | 0.826 | 0.949 | 0.794 | 0.427 | 0.000 |
+| `sbiobert` + charsvd 768 | max | 0.707 | 0.805 | 0.836 | 0.984 | 0.453 | 0.463 | 0.261 |
+| `sapbert` + charsvd 768 | centroid | 0.793 | 0.851 | 0.836 | 0.961 | 0.804 | 0.466 | 0.000 |
+| `sapbert` + charsvd 768 | max | 0.696 | 0.799 | 0.833 | 0.984 | 0.404 | 0.453 | 0.277 |
+| `sapbert` + char | centroid | **0.799** | **0.857** | 0.841 | 0.962 | 0.804 | **0.486** | 0.000 |
+| `sapbert` + char | max | 0.693 | 0.797 | 0.829 | 0.984 | 0.394 | 0.439 | 0.278 |
+
+Reproducibility: `sbiobert+charsvd / centroid` repeats round 2 exactly (0.7745). `max` rows move by
+up to 0.009 in their breakdown between runs (one random tie-break; ~26% of rows tied).
+
+Reading (round 3):
+- SapBERT beats S-BioBert as the mention encoder, alone (0.780 vs 0.766; unseen 0.404 vs 0.340) and
+  with char-SVD (0.793 vs 0.775; unseen 0.466 vs 0.427). Tree-feasible winner:
+  `sapbert` + charsvd 768 = `.models/xmr4el_flag5_sapbert_config.json`.
+- Char n-grams still add on top of SapBERT (+0.013 with SVD, +0.019 raw), so they are complementary.
+- Seen strings with >1 label stay at 0.80-0.83 for every encoder (dictionary 0.928): a mention-only
+  feature cannot separate labels that share a string; that needs context or a frequency prior.
+- `max` still loses overall (ties); its best hybrid (0.839) is within 0.003 of the centroid winner.
+
+Reading (rounds 1-2):
+- Character n-grams are the first feature gain at this scale: on unseen strings `sbiobert` + char
+  reaches 0.448 vs 0.340 (+0.108); overall +0.018, hybrid +0.028. Char alone is weaker than
+  `sbiobert` overall, so the blocks are complementary, not a replacement.
+- Seen ambiguous strings drop (0.833 -> 0.799), which the hybrid's dictionary covers.
+- 30 sampled unseen-string `sbiobert` errors (label shown by its most frequent train mention):
+  most golds are broad CUIs whose train mentions are heterogeneous ("findings" x6, "proteins" x4,
+  "embase" x3, "population", "regions", "area", "infection", "cells", "words"); a centroid
+  represents those poorly. About 6/30 are abbreviations (IHCC, BarR, FP, hUCB, CHD) that need local
+  context, which no current feature provides (the context block is the whole document, ~0 weight).
+- Raw char TF-IDF cannot go into the tree: tree training densifies X (`base.py` `X.toarray()`).
+  `sbiobert` + charsvd 768 / centroid keeps half the overall gain (+0.009 vs +0.018) and most of the
+  unseen gain (+0.087 of +0.108). It is the tree-feasible winner -> `emb_flag` 5.
+- `max` (1-NN) loses overall: a quarter of dev rows tie at the top (one string under several
+  labels, no frequency prior), collapsing seen ambiguous strings to ~0.42. On unseen strings it
+  gains for `sbiobert` (+0.083) but only +0.003-0.034 once char is in; hybrids differ by <= 0.009.
+  Centroid stays; `max` is not a feature fix.
+- Word TF-IDF on the mention is worst on unseen strings (0.315 / 0.272): no subword overlap.
+
+### Flag-5 SapBERT tree `xmodel_2026-10-01_15-10-04` (bundle)
+
+Config `.models/xmr4el_flag5_sapbert_config.json`, checked on the saved tree: `emb_flag` 5,
+`sapbert`, char_wb 2-4 TF-IDF -> SVD 768, `train_rankers` false; otherwise as `11-20-27` (500 labels,
+depth 2, K 6). Eval: dev, beam 2, `-topk 0`, `-scorer cosine -alpha 1`, `-train_path` breakdown.
+Bundle vs `11-20-27`: encoder S-BioBert -> SapBERT, flag 4 -> 5 (char block, per-block L2, document
+context dropped), rankers not trained (prediction-neutral, `test_no_rankers.py`).
+
+| tree | acc@1 | MRR | R@5 | R@20 | recall@cand | cand/query | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `11-20-27` (flag 4, S-BioBert) | 0.764 | 0.822 | - | 0.936 | 0.949 | 166 | 0.952 | 0.832 | 0.343 | 0.805 |
+| `15-10-04` (flag 5, SapBERT) | **0.790** | **0.844** | 0.915 | 0.935 | 0.942 | 167 | 0.956 | 0.804 | **0.464** | **0.836** |
+| flat screen, `sapbert` + charsvd | 0.793 | 0.851 | | | | 500 | 0.961 | 0.804 | 0.466 | 0.836 |
+
+7530/7530 in-vocabulary dev rows in both trees; dictionary 0.7165 (same rows).
+
+Reading:
+- Retain. +0.026 acc@1, +0.022 MRR, +0.121 on unseen strings, +0.031 hybrid; the gain is where the
+  screen predicted (unseen strings), and the tree lands 0.003 under its flat ceiling.
+- Routing is slightly worse (recall@cand 0.949 -> 0.942), so the hierarchy now costs ~0.003-0.007;
+  still not the bottleneck.
+- Seen ambiguous strings fall 0.832 -> 0.804 (dropping document context and S-BioBert): mention-only
+  features cannot separate labels that share a string. Dictionary gets 0.928 there; the hybrid
+  recovers it. Next feature lever: local context.
+- Attribution is to the bundle; the screen attributes the encoder (+0.018 flat) and the char block
+  (+0.013 flat on SapBERT) separately.
+
+## Session 9 (2026-10-01): context screen (flat, `screen_features.py`)
+
+Same vocabulary/rows as Session 8 (500 labels, 7530 dev rows), centroid scorer. Context blocks are
+added to `sapbert` + charsvd 768; every block L2-normalised, then scaled by `*w`. `ctxwin` = word
+TF-IDF (English stop words, sublinear) of +-10 words around the mention, mention excluded (PubTator
+offsets, verified 122241/122241 train and 40884/40884 dev); `ctxdoc` = same on the whole document;
+`winsbiobert` = S-BioBert of the window; `svd` = SVD 768.
+
+| features | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen |
+|---|---|---|---|---|---|---|
+| `sapbert` + charsvd (baseline) | 0.793 | 0.851 | 0.836 | 0.961 | 0.804 | 0.466 |
+| + ctxwin * 0.3 | 0.795 | 0.852 | 0.838 | 0.961 | 0.807 | 0.471 |
+| + ctxwin * 0.5 | 0.803 | 0.857 | 0.839 | 0.962 | 0.833 | 0.475 |
+| + ctxwin * 1 | **0.805** | **0.860** | 0.839 | 0.963 | **0.835** | 0.478 |
+| + ctxdoc * 0.5 | 0.803 | 0.858 | 0.838 | 0.962 | 0.834 | 0.474 |
+| + winsbiobert * 0.5 | 0.800 | 0.856 | **0.840** | 0.962 | 0.815 | 0.479 |
+| + ctxwinsvd * 0.5 | 0.803 | 0.858 | 0.838 | 0.962 | 0.832 | 0.474 |
+
+Reading:
+- Context adds +0.010-0.012 acc@1, almost all on seen ambiguous strings (0.804 -> 0.835), the
+  group it was meant for. Unseen strings gain +0.008-0.013.
+- The hybrid barely moves (+0.002-0.004): on seen strings the dictionary's frequency prior already
+  gets 0.928, so context and dictionary fix the same rows. Context matters when there is no
+  dictionary (tree alone) and at larger vocabularies where strings are more ambiguous (untested).
+- A 10-word window and the whole document give the same result at weight 0.5 (0.803); TF-IDF beats
+  the S-BioBert window embedding on ambiguous strings (0.833 vs 0.815). SVD 768 loses nothing
+  (0.803 = raw at 0.5), so the tree-feasible block is `ctxwinsvd`.
+- Weight: 1 (equal block weight, the untuned default, as in flag 5) >= 0.5 > 0.3 on raw TF-IDF.
+  Chosen for the tree: equal weights, so no dev-tuned parameter enters.
+
+### Flag-6 SapBERT tree `xmodel_1000_flag6_sapbert_sgd`, 1000 labels
+
+Config `.models/xmr4el_flag6_sapbert_config.json`, checked on the saved tree: `emb_flag` 6,
+`context_window` 10, 1000 labels, K 6. 11661/40884 in-vocabulary dev rows. New vocabulary: compare
+only within 1000 labels.
+
+| features (flat, centroid) | acc@1 | MRR | hybrid | seen, 1 | seen, >1 | unseen |
+|---|---|---|---|---|---|---|
+| `sapbert` + charsvd (flag 5) | 0.781 | 0.838 | 0.822 | 0.951 | 0.796 | 0.435 |
+| + ctxwinsvd (flag 6, tree features) | **0.800** | **0.852** | **0.827** | 0.955 | **0.840** | 0.453 |
+
+n: seen 1 = 5532, seen >1 = 3281, unseen = 2848. Dictionary 0.716 (string coverage 0.756).
+Routing (dev): root matcher cluster acc 0.884, top-2 0.946.
+
+| tree (beam 2, `-alpha 1`) | acc@1 | MRR | R@5 | R@20 | recall@cand | cand/query | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `xmodel_1000_flag6_sapbert_sgd` (flag 6) | 0.797 | 0.844 | 0.905 | 0.932 | 0.943 | 200 | 0.951 | 0.844 | 0.442 | 0.824 |
+| flat screen, flag-6 features | 0.800 | 0.852 | | | | 1000 | 0.955 | 0.840 | 0.453 | 0.827 |
+
+The first eval was run at `-alpha 0.5` (acc@1 0.759, MRR 0.819). That mixes the leaf matcher's cluster probability into
+the score; it cost 0.038.
+
+Reading (tree):
+- The tree lands 0.003 under its flat ceiling, the same gap as flag 5 at 500 labels. At 1000 labels the hierarchy
+  still costs almost nothing; recall@cand 0.943 is the cap.
+- The tree beats the dictionary on all rows (0.797 vs 0.716), but not on seen strings (ambiguous 0.844 vs 0.893).
+  The hybrid adds +0.027.
+
+Reading (flat):
+- Context gains more at 1000 labels (+0.019) than at 500 (+0.012), nearly all on seen ambiguous strings
+  (+0.044), as expected for a larger vocabulary.
+
+## Session 11 (2026-10-02): abbreviation expansion (flat, `screen_features.py`)
+
+Vocabulary/rows of tree `xmodel_1000_flag6_sapbert_sgd` (1000 labels, 11661 in-vocabulary dev rows), features `sapbert` + charsvd + ctxwinsvd
+(flag 6), centroid scorer. A mention that is a short form defined as "long form (SF)" in its own document (Schwartz-Hearst,
+first definition wins) is expanded in train and dev; context blocks unchanged. Expanded rows: train 1593/36377, dev 487/11661
+(349 of the 2848 unseen-string rows). Detector precision: 30/30 sampled dev pairs correct (full files: 11595/122241 train,
+3895/40884 dev rows). Groups keyed by the raw mention string.
+
+| abbrev | acc@1 | MRR | hybrid (raw key) | hybrid (expanded key) | seen, 1 | seen, >1 | unseen | abbrev rows | abbrev, unseen |
+|---|---|---|---|---|---|---|---|---|---|
+| none (baseline) | 0.800 | 0.852 | 0.827 | | 0.955 | 0.840 | 0.453 | 0.386 | 0.181 |
+| replace | 0.809 | 0.860 | 0.833 | 0.833 | 0.958 | 0.842 | 0.480 | 0.550 | 0.390 |
+| append ("SF long form") | **0.810** | **0.861** | 0.834 | **0.835** | **0.960** | 0.842 | **0.482** | **0.556** | **0.398** |
+
+n: seen 1 = 5532, seen >1 = 3281, unseen = 2848, abbrev rows = 487 (unseen 349).
+
+Reading:
+- Append wins: +0.010 acc@1, +0.009 MRR, +0.008 hybrid. Abbreviation rows 0.386 -> 0.556; unseen abbreviations 0.181 -> 0.398.
+- Append >= replace everywhere (small): keeping the short form keeps its char n-grams.
+- Dictionary key barely matters (0.834 raw vs 0.835 expanded); the loader expands both sides, so eval uses the expanded key.
+- Remaining abbreviation errors are mostly generic gold labels ("findings", "regions", "embase") and short forms
+  not defined in the document.
+
+Retained: `abbrev_expansion: "append"` (now `.models/xmr4el_base_config.json`); not yet in a tree.
+
+## Session 11 (2026-10-02): XMR4EL vs PECOS XR-Linear, 500 labels
+
+Tree `xmodel_500_flag6_sapbert_abbrev_sgd`: base config (flag 6, SapBERT + charsvd + ctxwinsvd, `abbrev_expansion` append,
+window 10), `-ds_len 500` -> 500 labels, 23512 train rows; 7530/40884 in-vocabulary dev rows (347 distinct gold labels).
+New vocabulary and new features: compare only within this table.
+
+PECOS 1.2.8 XR-Linear (`pecos.dockerfile`, `test/xmr4el/pecos_run.py`, defaults otherwise): PIFA label embeddings,
+hierarchical k-means nr_splits 8 / max leaf 100 -> 8 clusters -> labels, top-100 output. `ours` = the tree's own X/Y
+and dev features (same rows, same label order; `pecos_compare.py export`); `tfidf` = PECOS's default TF-IDF of the same
+"mention [SEP] window" texts. Metrics from the same code as eval (`pecos_compare.py score`).
+
+| system | acc@1 | MRR | R@5 | R@20 | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|
+| XMR4EL tree (beam 2, cosine leaf, `-alpha 1`) | 0.817 | 0.867 | 0.928 | 0.947 | 0.964 | 0.839 | 0.521 | 0.851 |
+| PECOS, our features, beam 2 | **0.861** | 0.891 | 0.928 | 0.939 | **0.977** | **0.933** | **0.571** | **0.865** |
+| PECOS, our features, beam 10 | **0.861** | **0.896** | **0.939** | **0.955** | **0.977** | **0.933** | **0.571** | **0.865** |
+| PECOS, PECOS TF-IDF, beam 2 | 0.507 | 0.628 | 0.776 | 0.825 | 0.583 | 0.623 | 0.251 | 0.782 |
+| PECOS, PECOS TF-IDF, beam 10 | 0.510 | 0.639 | 0.799 | 0.862 | 0.587 | 0.625 | 0.252 | 0.783 |
+| dictionary | 0.716 | | | | 0.984 | 0.932 | 0 | |
+
+n: seen 1 = 3638, seen >1 = 1946, unseen = 1946. Tree: 40 candidates/query, recall@cand 0.951.
+PECOS time (Docker, amd64 emulation): train 7.3 s / predict 0.7 s (ours, beam 2); XMR4EL train time not recorded.
+
+Reading:
+- Same features, same rows: PECOS +0.044 acc@1 over the tree. The features are not the gap; the label scorer is.
+  The tree scores leaf labels by cosine to the PIFA centroid (rankers off); PECOS trains one linear classifier per label
+  against the other labels of its cluster.
+- The gain is largest on seen ambiguous strings (0.839 -> 0.933, = dictionary 0.932): a per-label classifier can use the
+  context block, a centroid cannot separate labels that share a mention. Unseen +0.050, seen single +0.013.
+- PECOS alone (0.861) beats our hybrid (0.851); its hybrid adds only 0.004.
+- Beam 2 vs 10 does not change acc@1 (0.861): routing is not PECOS's limit either.
+- Our own leaf matcher as the scorer (`-alpha 0`, beam 2): acc@1 0.394, MRR 0.607, but R@5 0.917 (seen 1 0.450,
+  seen >1 0.320, unseen 0.362). Gold is near the top, rarely first. From code: each leaf's matcher is a multilabel
+  OneVsRest (fitted on a 0/1 indicator matrix), so `predict_proba` is one sigmoid per label, trained only against the
+  other labels of that leaf; the tree merges the beam's leaves by max score with no root/cluster factor
+  (`_predict_one_leaf`). A wrong leaf's labels never saw the query's true neighbours as negatives, so beam-2 scores from
+  two leaves are not on one scale. PECOS multiplies the cluster score into each label score along the path.
+  (Corrected 2026-10-06: an earlier version of this note said OneVsRest renormalises rows within a leaf; it does not in
+  multilabel mode, checked on the saved matchers: `multilabel_` True.)
+- Confirmed with `-alpha 0 -beam_size 1` (one leaf, no merge): acc@1 0.794, MRR 0.839, recall@cand 0.898 (seen 1 0.934,
+  seen >1 0.812, unseen 0.515). Within the routed leaf the matcher is right 0.794 / 0.898 = 0.88 of the time it can be,
+  vs cosine 0.817 / 0.951 = 0.86 and PECOS ~0.90. The leaf classifiers are fine; the beam merge is the bug.
+- With the fix (`-alpha 0 -beam_size 2 -path_score`): acc@1 0.801, MRR 0.858, R@5 0.926, recall@cand 0.945, hybrid
+  0.856 (seen 1 0.935, seen >1 0.812, unseen 0.540). Merge fixed (0.394 -> 0.801), but the leaf matcher stays under
+  cosine (0.817) and PECOS (0.861) on seen strings (PECOS 0.977 / 0.933); it beats cosine on unseen (0.540 vs 0.521).
+  Same routing, so the remaining gap is the leaf classifier itself (SGD log_loss, L1, `class_weight` balanced vs PECOS
+  L2 squared hinge, unweighted).
+
+Leaf scorer screen (`screen_leaf_scorer.py`, no training): the tree's 6 leaves (83-85 labels), exported features, oracle
+routing, so acc@1 = within-leaf accuracy (end-to-end ~ this x routing recall).
+
+| leaf scorer | within-leaf acc@1 | seen, 1 | seen, >1 | unseen | hybrid | fit time |
+|---|---|---|---|---|---|---|
+| cosine to PIFA centroid (tree default) | 0.866 | 0.977 | 0.857 | 0.666 | 0.890 | 2 s |
+| logreg liblinear L2 C=1 | 0.891 | 0.957 | 0.945 | 0.712 | 0.902 | 53 s |
+| logreg liblinear L2 C=1, class_weight balanced | 0.920 | 0.987 | 0.947 | 0.769 | 0.916 | 104 s |
+| LinearSVC squared hinge C=1 (PECOS loss) | **0.921** | **0.989** | 0.945 | **0.771** | **0.917** | 108 s |
+
+- liblinear L2 beats cosine by +0.055 within the leaf; balanced weights help (+0.029), so `class_weight` was not the
+  problem: the SGD L1 solution was. svm = logreg_bal within 0.001.
+- Retained: logreg liblinear balanced (gives probabilities, needed for the path product). Base config matcher (all
+  layers) is now `sklearnlogisticregression` {solver liblinear, C 1, class_weight balanced}; tree `xmodel_500_flag6_sapbert_abbrev_sgd` was trained
+  with the previous SGD matcher (its pickle keeps that config).
+- PECOS with its default word TF-IDF on "mention [SEP] window" is weak (0.51): the context words dominate the mention.
+  The useful comparison is the same-features row.
+
+## Session 11 (2026-10-02): liblinear leaf matcher + path score, 500 and 1000 labels
+
+Trees trained with the base config (flag 6 SapBERT + charsvd + ctxwinsvd, abbrev append, window 10, matcher
+`sklearnlogisticregression` liblinear L2 C 1 balanced at every layer). Eval beam 2; `-alpha 0 -path_score` = leaf matcher
+probability x routing path probability; `-alpha 1` = cosine to leaf z on the same tree.
+
+| tree | labels | dev rows | scorer | acc@1 | MRR | R@5 | recall@cand | seen, 1 | seen, >1 | unseen | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `xmodel_500_flag6_sapbert_abbrev_logreg` | 500 | 7530 | matcher x path | **0.862** | **0.896** | **0.941** | 0.956 | **0.976** | 0.931 | **0.578** | **0.866** |
+| same | 500 | 7530 | cosine | 0.816 | 0.867 | 0.929 | 0.956 | 0.962 | 0.840 | 0.520 | 0.851 |
+| PECOS XR-Linear, same features (beam 2) | 500 | 7530 | | 0.861 | 0.891 | 0.928 | | 0.977 | **0.933** | 0.571 | 0.865 |
+| `xmodel_500_flag6_sapbert_abbrev_sgd` (SGD matcher) | 500 | 7530 | cosine | 0.817 | 0.867 | 0.928 | 0.951 | 0.964 | 0.839 | 0.521 | 0.851 |
+| `xmodel_1000_flag6_sapbert_abbrev_logreg` | 1000 | 11661 | matcher x path | **0.843** | **0.884** | **0.933** | 0.952 | **0.973** | **0.905** | **0.525** | **0.845** |
+| same | 1000 | 11661 | cosine | 0.808 | 0.856 | 0.920 | 0.951 | 0.960 | 0.843 | 0.480 | 0.834 |
+| `xmodel_1000_flag6_sapbert_abbrev_joint` (joint L-BFGS matcher) | 1000 | 11661 | matcher x path | **0.844** | 0.883 | 0.930 | 0.948 | | | | |
+| same | 1000 | 11661 | cosine (path score on) | 0.803 | 0.845 | 0.896 | 0.947 | | | | |
+| PECOS XR-Linear, same features (beam 2; 2 -> 16 clusters -> labels) | 1000 | 11661 | | 0.838 | 0.871 | 0.911 | | 0.967 | 0.894 | 0.529 | 0.846 |
+| PECOS, same, beam 10 | 1000 | 11661 | | 0.839 | 0.878 | 0.926 | | 0.966 | 0.894 | 0.535 | 0.847 |
+| `xmodel_1000_flag6_sapbert_sgd` (no abbrev, SGD) | 1000 | 11661 | cosine | 0.797 | 0.844 | 0.905 | 0.943 | 0.951 | 0.844 | 0.442 | 0.824 |
+
+n (500): seen 1 = 3638, seen >1 = 1946, unseen = 1946. n (1000, abbrev keys): 5518 / 3259 / 2884 (raw keys: 5532 / 3281 /
+2848). Dictionary: 0.716 (500), 0.715 (1000).
+
+Reading:
+- 500 labels: the tree now matches PECOS on the same features (0.862 vs 0.861; MRR 0.896 vs 0.891). The two changes were
+  the leaf classifier (liblinear L2 instead of SGD L1) and combining leaves by path probability.
+- 1000 labels: 0.843 vs 0.797 for the previous 1000-label tree (+0.046). Of that, abbreviation expansion is ~+0.011 (cosine
+  on the new tree 0.808 vs 0.797, matching the flat screen +0.010); the matcher + path score is +0.035.
+- Seen ambiguous strings: the tree now beats the dictionary at 1000 (0.905 vs 0.895) and ties it at 500 (0.931 vs 0.932),
+  so the hybrid adds only +0.002-0.004. The remaining weak group is unseen strings (0.53-0.58).
+- Cosine on a logreg tree equals cosine on the SGD tree (0.816 vs 0.817): the matcher change does not hurt routing.
+- 1000 labels: the tree beats PECOS on the same features (0.843 vs 0.838 at beam 2; MRR 0.884 vs 0.871). PECOS's
+  hierarchy at 1000 labels is 2 -> 16 clusters (nr_splits 8, max leaf 100), not the tree's 6 leaves.
+- Training time (user): our tree ~100 s (500 labels) vs PECOS 7.1 s (features precomputed for PECOS). Profile of a
+  500-label training (cProfile, self time; 195 s under the profiler): SapBERT forward ~91 s (47%), waiting on the
+  OneVsRest liblinear worker processes ~67 s (34%), rest (SVD, I/O, gc, imports) ~30 s. Clustering 1.4 s.
+- Leaf classifier speed screen (`screen_leaf_scorer.py`, 1000 labels, oracle routing, 6 leaves of 166-170 labels):
+  logreg_bal 0.8974 in 238 s; liblinear tol 1e-2: 0.8974 in 197 s; char/context SVD cut to 256 dims: 0.8919 in 143 s
+  (unseen -0.013, rejected); **joint** (same objective, all labels of a leaf in one L-BFGS problem on BLAS,
+  `JointOvRLogistic`): 0.8974 in **19 s**, identical in every group. On one 167-label leaf it agreed with liblinear's top-1
+  on every dev row. Retained: base config matcher `jointlogisticregression` {C 1, class_weight balanced, tol 1e-4} (1e-3 since 2026-10-08, `11-04-56`).
+  Cost per label of the old path: liblinear 0.45 s single-core; 8 OneVsRest worker processes only reach 0.12-0.16 s.
+- Speed changes (prediction-neutral up to float noise): `Transformer.transform` embeds each distinct text once (500
+  labels: 23512 rows -> 5937 strings; measured 13.2 s -> 6.2 s on 3000 rows, max abs diff 6e-6) and runs on the Apple
+  GPU (MPS) when available (1.4x on 25-token mentions, max abs diff 9e-6, cosine 1.000000).
+- Joint matcher retrain (session 12, 2026-10-06, Linux): `xmodel_1000_flag6_sapbert_abbrev_joint` 0.8436 / MRR 0.8827
+  vs liblinear tree 0.843 / 0.884: same objective, same result within noise. Train 375.7 s (6m34 real, 158 min CPU) vs
+  PECOS 12.4 s; no stage breakdown yet. Group columns not reported (compact eval report).
+
+## 2026-10-06: BC5CDR dev, XMR4EL vs PECOS XR-Linear
+
+Tree `xmodel_2026-10-06_16-44-38`, `configs/xmr4el_bc5cdr_config.json` (base, `n_clusters` 16: root -> 16 leaves),
+trained on `CDR_TrainingSet` (reader drops `-1`, splits composites; 1327 labels). Dev `CDR_DevelopmentSet`:
+7524/9613 rows have a gold label seen in training (78.3%, 694 labels); all metrics are over those rows.
+PECOS: `pecos_run.py -nr_splits 16 -max_leaf_size 100` (16 clusters -> labels), XR-Linear defaults otherwise;
+`ours` = the tree's exported features. Eval `-topk 0 -alpha 0 -path_score`.
+
+| system | beam | acc@1 | MRR | R@5 | R@10 | R@20 | seen, 1 (n=5983) | seen, >1 (n=61) | unseen (n=1480) | hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|
+| XMR4EL | 2 | 0.921 | 0.943 | 0.967 | 0.972 | 0.975 | 0.977 | 0.656 | 0.705 | 0.934 |
+| XMR4EL | 10 | **0.922** | **0.944** | **0.969** | **0.975** | **0.979** | **0.977** | 0.656 | **0.707** | **0.934** |
+| PECOS, our features | 2 | 0.847 | 0.878 | 0.912 | 0.927 | 0.941 | 0.912 | **0.672** | 0.593 | 0.912 |
+| PECOS, our features | 10 | 0.847 | 0.878 | 0.913 | 0.928 | 0.942 | 0.912 | **0.672** | 0.592 | 0.911 |
+| PECOS, our features, `threshold` 0 | 2 | **0.922** | 0.945 | 0.972 | 0.976 | 0.979 | 0.975 | **0.672** | **0.720** | **0.937** |
+| PECOS, our features, `threshold` 0 | 10 | **0.922** | **0.946** | **0.975** | **0.979** | **0.983** | 0.975 | **0.672** | **0.720** | **0.937** |
+| PECOS, PECOS TF-IDF | 2 | 0.487 | 0.558 | 0.642 | 0.656 | 0.664 | 0.546 | 0.377 | 0.250 | 0.844 |
+| PECOS, PECOS TF-IDF | 10 | 0.503 | 0.597 | 0.713 | 0.742 | 0.761 | 0.564 | 0.393 | 0.259 | 0.846 |
+
+XMR4EL recall@cand 0.983 (beam 2, 167 cand/query) / 0.997 (beam 10, 830). Dictionary acc@1 0.795 (seen 1-label 0.993).
+Coverage x acc@1 (all 9613 dev rows): XMR4EL 0.721, PECOS-ours 0.663 (`threshold` 0: 0.722). Eval 20 s (beam 2) / 72 s (beam 10);
+train times not recorded.
+
+- PECOS's default weight pruning (`threshold` 0.1) was the whole +0.074 gap: with `threshold` 0
+  (`XLinearModel.train(..., threshold=0.0)`, same chain, train 3.4 s) PECOS ties XMR4EL (0.922 vs 0.921/0.922).
+  PECOS is +0.015 on unseen strings, XMR4EL +0.002 on seen 1-label. Beam does not matter for either system.
+- Every earlier PECOS row (MedMentions, Session 11) used the default `threshold` 0.1, so those PECOS numbers
+  are likely low too; rerun with `threshold` 0 before claiming parity or a win there.
+- 21.7% of dev rows have a gold label absent from training; neither system can get them.
+
+## 2026-10-07: BC5CDR-disease dev, CTD MEDIC dictionary, depth 2 vs 3, vs PECOS
+
+Disease-only splits `datasets/BC5CDR/disease/{train,dev}.pubtator`; `train_plus_ctd.pubtator` = train + CTD MEDIC
+names (`scripts/dict_to_pubtator.py`, 11,744 labels). Dev has 4306 rows. Eval `-beam_size 2 -topk 0 -alpha 0 -path_score`.
+PECOS: `pecos_run.py -features ours -nr_splits 16 -max_leaf_size 100 -threshold 0` on the export of tree `12-38-23`
+(`outputs/pecos/bc5cdr_dict_dev`). `cov x acc` = acc@1 x in-vocabulary rows / 4306.
+
+| system | train data | depth | beam | in vocab | acc@1 | MRR | R@5 | R@cand (cand) | seen, 1 | seen, >1 | unseen | hybrid | cov x acc | train |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| XMR4EL `12-38-23` | train + CTD | 3 | 2 | 4305 | 0.747 | 0.789 | 0.841 | 0.891 (184) | 0.842 | 0.679 | 0.448 | 0.855 | 0.747 | 567 s |
+| XMR4EL `13-47-38` | train + CTD | 2 | 2 | 4305 | 0.838 | 0.874 | 0.919 | 0.943 (200) | 0.921 | 0.759 | 0.581 | 0.884 | 0.837 | 567 s |
+| XMR4EL `13-47-38` | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | **0.778** | 0.587 | 0.886 | 0.845 | 567 s |
+| XMR4EL `15-15-09` (torch L-BFGS) | train + CTD | 2 | 10 | 4305 | 0.845 | 0.887 | 0.938 | 0.992 (1000) | 0.928 | 0.778 | 0.587 | 0.886 | 0.845 | 454 s |
+| XMR4EL `17-28-48` (own balanced k-means) | train + CTD | 2 | 10 | 4305 | **0.853** | **0.895** | **0.950** | 0.994 (1000) | **0.930** | **0.778** | **0.615** | **0.892** | **0.853** | 179 s* |
+| XMR4EL `11-04-56` (scaled L-BFGS, tol 1e-3) | train + CTD | 2 | 10 | 4305 | 0.851 | 0.895 | 0.951 | 0.994 (1000) | 0.929 | 0.774 | 0.613 | 0.891 | 0.851 | 132 s* |
+| XMR4EL `11-09-56` (128 leaves, tol 1e-3) | train + CTD | 2 | 10 | 4305 | **0.856** | **0.898** | 0.947 | 0.992 (917) | **0.941** | 0.764 | 0.595 | 0.887 | **0.855** | 106 s* |
+| XMR4EL `13-49-39` | train | 3 | 2 | 3631 | 0.801 | 0.824 | 0.847 | 0.881 (10) | 0.901 | 0.672 | 0.528 | 0.862 | 0.675 | 41 s |
+| XMR4EL `13-55-09` | train | 2 | 2 | 3631 | 0.879 | 0.910 | 0.947 | 0.965 (82) | 0.954 | 0.672 | 0.681 | 0.902 | 0.741 | 15 s |
+| PECOS, our features | train + CTD | 8 -> 128 -> labels | 2 | 4305 | 0.838 | 0.864 | 0.892 | (100) | 0.923 | 0.755 | 0.576 | 0.883 | 0.837 | 34.6 s |
+| PECOS, our features | train + CTD | 8 -> 128 -> labels | 10 | 4305 | 0.847 | 0.884 | 0.928 | (100) | **0.930** | 0.755 | 0.594 | 0.886 | 0.846 | 34.6 s |
+
+Dictionary acc@1 (most frequent train label for the exact string): 0.756 with CTD (seen 1-label 0.978), 0.726 without.
+Rows with the same train data share the same row set; the no-CTD rows cover 3631 rows and are compared only by `cov x acc`.
+
+- With CTD, depth 3 loses 0.091 acc@1 to depth 2 (0.747 vs 0.838) and 0.052 of candidate recall: depth 3 at beam 2
+  prunes the gold. Without CTD, depth 3 loses 0.078 (0.801 vs 0.879).
+- XMR4EL depth 2 ties PECOS: beam 2 0.838 vs 0.838, beam 10 0.845 vs 0.847 (hybrid 0.886 both). XMR4EL is ahead on
+  MRR/R@5 at beam 10 (0.887 / 0.938 vs 0.884 / 0.928).
+- On seen 1-label strings both trees are below the exact-string dictionary (0.928 / 0.930 vs 0.978); the hybrid
+  (dictionary if the string was seen, else tree) is +0.041 over the XMR4EL tree at beam 10.
+- CTD at depth 2: `cov x acc` 0.741 -> 0.837 (hybrid 0.760 -> 0.884), all from the 674 rows whose gold is not in
+  the BC5CDR train labels. Whether CTD costs accuracy on the 3631 rows both trees cover is not measured
+  (no-CTD tree 0.879 there; the CTD tree's acc@1 on 4305 rows is not comparable).
+- Literature BC5CDR-disease **test** acc@1: BioSyn 93.2, SapBERT 93.5; these are dev rows.
+- `15-15-09` = `13-47-38` config with the joint matcher solved by torch L-BFGS instead of scipy L-BFGS-B: same
+  dev metrics, hierarchy 330.5 -> 197.9 s (16 leaves 251.4 -> 118.9 s, root 78.7 s unchanged; logs
+  `outputs/logs/speed_baseline2_bc5cdr_ctd.log`, `speed_torchlbfgs_bc5cdr_ctd.log`). SapBERT 197 / 222 s run to run (mps).
+- `17-28-48` = `15-15-09` plus the SapBERT embedding cache and the own balanced k-means (`balancedkmeans`, numpy:
+  recursive balanced 2-means, then joint balanced refinement; replaces kmeans-pytorch). *179 s is a cache-hit run
+  (encoding 25.2 s); hierarchy 148.4 s (root clustering 3.0 s, root node 34.9 s). Log
+  `outputs/logs/bkmeans_bc5cdr_ctd.log`. Same code with seed 1: acc@1 0.843, MRR 0.889, hybrid 0.887, so the
+  seed 0 gain over PECOS (+0.006) is within the seed spread; kmeans-pytorch had 0.845-0.847 at seed 0.
+  The test section below still uses `13-47-38`; not rerun with this clustering.
+- `11-04-56` = `17-28-48` with the joint matcher's objective divided by n, so the max|grad| <= tol stop is reached
+  (before, every fit ran to the float32 loss stall whatever tol was), and tol 1e-3: acc@1 -0.0017, hierarchy
+  148.4 -> 100.8 s (L-BFGS iterations root 258 -> 118, leaves 83-129 -> 62-93). *Cache-hit run. Log
+  `outputs/logs/tol1e3s_bc5cdr_ctd.log`.
+- `11-09-56` = `11-04-56` with root `n_clusters` 128 (leaves of 91-92 labels, PECOS's leaf size): acc@1 +0.005,
+  seen 1-label +0.012, but unseen -0.018, hybrid -0.004, R@20-R@100 lower (R@100 0.977 vs 0.987). Hierarchy
+  100.8 -> 75.1 s: root clustering 17.6 s (3.0 s at 16), root matcher 22.5 s, 128 leaves 34.9 s. *Cache-hit run.
+  Log `outputs/logs/k128_bc5cdr_ctd.log`. Beam 20: R@cand 0.9940 (1835 cand), all ranked metrics identical, so
+  the lower R@20-R@100 is cross-leaf scoring, not routing. Rerun `11-31-05` with the vectorized balanced assignment:
+  identical metrics, root clustering 17.6 -> 5.0 s, hierarchy 65.8 s, run 96.3 s* (`k128c_bc5cdr_ctd.log`).
+  Root matcher on MPS (`11-45-47`, `mps_bc5cdr_ctd.log`): acc@1 0.8551, MRR 0.8972, hybrid 0.8873 (float32 order
+  noise); root node 32.0 -> 20.1 s, hierarchy 54.6 s, run 85.5 s*.
+  No per-node `gc.collect()` (`12-21-30`, `nogc_bc5cdr_ctd.log`): dev metrics identical to `11-45-47`; leaf layer
+  34.9 -> 11.3 s, hierarchy 54.6 -> 31.1 s, run 61.6 s*. Eval (`-path_score`, beam 10) 42 -> 9 s after batching
+  the leaf cosine (`g1a_eval.log`) and the routing (`g1b_eval.log`), output identical.
+
+## 2026-10-08: BC5CDR-disease dev, knn fusion (`-knn_beta`)
+
+Tree `12-21-30`, dev, `-beam_size 10 -topk 0 -alpha 0 -path_score`. Each candidate's tree score x exp(beta * knn),
+knn = max cosine of the query's SapBERT block to the label's training rows (train + CTD), no retraining. Screen:
+`scripts/diagnose_unseen.py` (`outputs/logs/unseen_diag2.log`); beta 10 run: `outputs/logs/knn10_dev_eval.log`.
+
+| beta | acc@1 | seen, 1 (n=3140) | seen, >1 (n=212) | unseen (n=953) | hybrid |
+|---|---|---|---|---|---|
+| 0 (tree) | 0.8551 | 0.9404 | 0.7594 | 0.5950 | 0.8873 |
+| 5 | 0.9015 | 0.9761 | 0.8113 | 0.6758 | 0.9052 |
+| **10** | **0.9041** | 0.9783 | **0.8113** | **0.6800** | **0.9062** |
+| 20 | 0.9003 | **0.9787** | 0.8113 | 0.6621 | 0.9022 |
+| 40 | 0.8976 | 0.9783 | 0.8113 | 0.6506 | 0.8997 |
+| knn only (in candidates) | 0.8846 | 0.9783 | 0.5896 | 0.6411 | 0.8976 |
+
+- Beta 10: MRR 0.8972 -> 0.9335, R@5 0.9473 -> 0.9668, R@20 0.9672 -> 0.9833 (R@cand unchanged 0.9914).
+- Why: on unseen strings the tree had gold at rank 2-5 for 0.207 of rows (routing loss 0.038); SapBERT 1-NN over
+  train rows alone is 0.638 vs tree 0.595, and they err on different rows (oracle 0.738). The tree prefers more
+  specific CTD labels ("obese" -> obesity, morbid); the nearest synonym corrects many of them.
+- Unseen-row flat 1-NN by feature block: all 0.600, SapBERT 0.638, char 0.517, context 0.025.
+
+## 2026-10-07: BC5CDR-disease test, selected configuration
+
+Trees `13-47-38` (depth 2, 16 leaves) and `12-21-30` (depth 2, 128 leaves, current config; also with `-knn_beta 10`), both train + CTD, `datasets/BC5CDR/disease/test.pubtator` (4410 rows, 4399 in vocab, 640 gold
+labels). XMR4EL eval `-beam_size 10 -topk 0 -alpha 0 -path_score`; PECOS as in the dev section on export
+`outputs/pecos/bc5cdr_dict_test` (train 34.4 s). Dictionary acc@1 0.770 (seen 1-label 0.985).
+
+| system | beam | acc@1 | MRR | R@5 | R@10 | R@20 | seen, 1 (n=3287) | seen, >1 (n=174) | unseen (n=938) | hybrid | cov x acc | cov x hybrid |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| XMR4EL, 16 leaves (`13-47-38`) | 10 | 0.860 | 0.898 | 0.945 | 0.963 | 0.974 | 0.930 | 0.730 | 0.641 | 0.906 | 0.858 | 0.904 |
+| XMR4EL, 128 leaves (`12-21-30`) | 10 | 0.873 | 0.909 | 0.949 | 0.961 | 0.965 | 0.947 | 0.672 | 0.653 | 0.909 | 0.871 | 0.906 |
+| XMR4EL, 128 leaves + knn beta 10 (`12-21-30`) | 10 | 0.916 | 0.940 | **0.969** | **0.977** | **0.980** | **0.985** | 0.730 | 0.712 | 0.921 | 0.914 | 0.919 |
+| XMR4EL, same config, new tree (`10-18-51`) | 10 | 0.918 | 0.941 | 0.968 | 0.974 | 0.978 | **0.985** | 0.718 | 0.719 | **0.923** | 0.915 | **0.920** |
+| F1 code (abbreviations), new tree (`14-12-26`) | 10 | 0.922 | 0.943 | 0.967 | 0.976 | 0.979 | **0.985** | 0.770 | **0.732** | **0.925** | 0.920 | **0.923** |
+| `10-18-51` + reranker, not seen 1, w 0.25 | 10 | **0.923** | **0.944** | - | - | - | **0.985** | **0.816** | **0.725** | - | **0.921** | - |
+| PECOS, our features | 2 | 0.852 | 0.876 | 0.905 | 0.908 | 0.909 | 0.925 | 0.747 | 0.618 | 0.901 | 0.850 | 0.899 |
+| PECOS, our features | 10 | 0.862 | 0.897 | 0.939 | 0.948 | 0.954 | 0.933 | 0.747 | 0.634 | 0.904 | 0.860 | 0.902 |
+
+XMR4EL recall@cand 0.991 at 16 leaves (1000 cand/query), 0.989 at 128 (917 cand/query). Eval 54 s at 16 leaves
+(before eval batching), 15 s at 128 (`outputs/logs/test_12-21-30_eval.log`); PECOS predict 2.3 s.
+
+- At 16 leaves XMR4EL ties PECOS on test (0.860 vs 0.862 at beam 10; hybrid 0.906 vs 0.904), as on dev.
+- At 128 leaves it leads PECOS by 1.1 pt acc@1 (0.873 vs 0.862), hybrid 0.909 vs 0.904. Versus 16 leaves: seen
+  1-label +0.017 and unseen +0.012, but seen >1-label -0.058 (n=174) and R@20 -0.009 (cross-leaf scoring, as on dev).
+- `-knn_beta 10` (beta chosen on dev, test run once, `outputs/logs/knn10_test_eval.log`): acc@1 0.873 -> 0.916, unseen
+  0.653 -> 0.712, hybrid 0.909 -> 0.921; the tree alone (0.916) is now above the old hybrid. Dev section 2026-10-08 below.
+- Reranker (2026-10-09, `outputs/logs/r3_test_eval.log`; scope and w chosen on dev from 3 x 7 configs, test run
+  once): cross-encoder (SapBERT init) over the tree's top 10, final = log(tree score) + 0.25 x logit, applied only to
+  rows whose mention string is not seen in train (+ CTD) with exactly one label; recall columns are not reported for
+  the reranked row. acc@1 0.918 -> 0.923 (+23 rows): seen >1 +17, unseen +6, seen 1 untouched. On dev the same
+  choice gave +38 (unseen +26); on test the gain is close to the tree's own hybrid (0.9229 vs 0.9227). Ungated
+  (all rows, w 0.25) test 0.920 with seen 1 -13 rows. `10-18-51` vs `12-21-30`: same code and config, new server
+  (fresh CUDA encoding).
+- F1 tree (2026-10-09, run `outputs/runs/2026-10-09_14-07-17_bc5cdr` + `bc5cdr_test` eval-only, commit `eeeb668`;
+  F1a abbreviation expansion, F1b/F1c result-neutral; test run once): acc@1 0.9225 vs `10-18-51` 0.9177 (+21 rows;
+  unseen +13, seen >1 +9), hybrid 0.925, level with the reranker row without a reranker. Group sizes shift with the
+  reader (seen 1 n=3284, unseen n=941). On dev this tree was -16 rows vs `10-18-51` with the same reader (0.9001 vs
+  0.9038): same-code retrains move ~10-20 rows on dev and test, so the +21 is within retrain noise, not an F1a effect.
+  This tree is the BC5CDR-disease system for the cross-dataset comparison (plan G).
+- Hybrid 0.906 vs literature 93.2 (BioSyn) / 93.5 (SapBERT). The protocols are not matched: this trains on train only
+  (+ CTD), drops `-1` ids and composites without column 7, and excludes 11 out-of-vocabulary rows.
+
+## 2026-10-13: plan G1/G2, six datasets, XMR4EL vs 1-NN baselines, PECOS and scispaCy (dev, then test once)
+
+`bash scripts/run_g.sh` on the server, commit `2c3d6b1` (clean; CUDA leaf matchers since `0189936`),
+`configs/xmr4el_bc5cdr_config.json` unchanged for every set, no tuning between dev and test. One tree per set, trained on its
+train + CTD dictionary (diseases: CTD MEDIC + OMIM, `ctd_disease_omim.pubtator`; chemicals: CTD chemicals,
+`ctd_chemical.pubtator`; MedMentions st21pv: train only, no dictionary). Specs `configs/experiments/<set>[_test].json`, run dirs
+`outputs/runs/2026-10-13_*_<set>[_test]` (trees `xmodel_2026-10-13_*` on the server), baselines `outputs/g1/<set>_<split>_nn.json`
+(`scripts/baselines/nn_baselines.py`: 1-NN over the tree's training rows, same rows and vocabulary as XMR4EL; exact ties ->
+lower label index). XMR4EL is compared with SapBERT 1-NN (same mention encoder); char TF-IDF 1-NN is a string-match
+reference row only. SapBERT 1-NN rows of the five G1 sets = the deterministic rerun (2026-10-20 section; the baseline does not
+depend on the tree); MedMentions and BC5CDR-disease have no SapBERT 1-NN row (their trees predate
+the current saved-tree layout, so the rerun needs a retrain). XMR4EL search =
+config defaults (beam 10, topk 0, knn beta 10). Multi-id rows dropped by the converters. `cov x acc` = `acc@1_all`
+(out-of-vocabulary rows count as misses). Group n = seen 1 / seen >1 / unseen.
+PECOS rows (G2, same run): `scripts/run_g2_pecos.sh`, XR-Linear on the tree's exported features (`pecos_compare.py export`,
+same rows), `-nr_splits 16 -max_leaf_size 100 -threshold 0`, beam 10, top 100; trained once on the dev export, test predicted
+with that model. Logs `outputs/g2/`.
+scispaCy rows (MedMentions only; its KBs are keyed by UMLS CUIs): `scripts/run_scispacy.sh`, scispaCy 0.6.2 UMLS
+CandidateGenerator (KB 2022AB; MedMentions is 2017AA, retired CUIs get no candidate), k 100, score = max alias similarity, no 0.7
+threshold, candidates restricted to the tree's labels (8.7 / 8.5 per row; 0.6 / 0.4% of rows get none). Unrestricted, its top-1 is
+outside the label set for 23.9 / 23.7% of rows (dev / test). Logs `outputs/g2/medmentions_st21pv_<split>_{scispacy,score}.log`.
+BC5CDR-disease rows: the F1 tree `14-12-26` (commit `eeeb668`, same config, train + CTD MEDIC; run
+`outputs/runs/2026-10-09_14-07-17_bc5cdr`, test eval-only, 2026-10-07 section); its 1-NN + PECOS rows (2026-10-13,
+`outputs/g2/bc5cdr_<split>_{nn.json,pecos.log,score.log}`) as above. Hierarchy for PECOS 8 -> 128 -> labels.
 
 dev:
 
 | dataset (labels, rows) | system | acc@1 | cov x acc | MRR | R@10 | seen, 1 | seen, >1 | unseen | hybrid |
 |---|---|---|---|---|---|---|---|---|---|
-| NCBI-disease (13,385, 729/757; n 537/17/175) | XMR4EL | 0.925 | 0.890 | 0.946 | 0.974 | 0.968 | 0.941 | 0.789 | 0.929 |
+| NCBI-disease (13,385, 729/757; n 537/17/175) | XMR4EL (`13-22-39`) | 0.925 | 0.890 | 0.946 | 0.974 | 0.968 | 0.941 | 0.789 | 0.929 |
 |  | SapBERT 1-NN | 0.894 | 0.861 | 0.932 | 0.984 | 0.972 | 0.176 | 0.726 | 0.914 |
-|  | char TF-IDF 1-NN (reference) | 0.868 | 0.836 | 0.911 | 0.973 | 0.972 | 0.176 | 0.617 | 0.888 |
+|  | char TF-IDF 1-NN | 0.868 | 0.836 | 0.911 | 0.973 | 0.972 | 0.176 | 0.617 | 0.888 |
 |  | PECOS XR-Linear, our features | 0.894 | 0.861 | 0.916 | 0.947 | 0.946 | 0.882 | 0.737 | 0.916 |
-| BioRED disease (13,325, 956/961; n 605/23/328) | XMR4EL | 0.883 | 0.878 | 0.914 | 0.963 | 0.979 | 0.870 | 0.707 | 0.886 |
-|  | SapBERT 1-NN | 0.880 | 0.875 | 0.912 | 0.970 | 0.979 | 0.826 | 0.701 | 0.883 |
-|  | char TF-IDF 1-NN (reference) | 0.847 | 0.843 | 0.889 | 0.957 | 0.979 | 0.826 | 0.607 | 0.850 |
+| BioRED disease (13,325, 956/961; n 605/23/328) | XMR4EL (`13-26-50`) | 0.897 | 0.893 | 0.921 | 0.962 | 0.979 | 0.957 | 0.744 | 0.894 |
+|  | SapBERT 1-NN | 0.880 | 0.875 | 0.912 | 0.970 | 0.979 | 0.826 | 0.701 | 0.880 |
+|  | char TF-IDF 1-NN | 0.847 | 0.843 | 0.889 | 0.957 | 0.979 | 0.826 | 0.607 | 0.847 |
 |  | PECOS XR-Linear, our features | 0.844 | 0.840 | 0.879 | 0.935 | 0.931 | 0.739 | 0.692 | 0.877 |
-| BC5CDR-chemical (179,709, 5181/5307; n 4465/68/648) | XMR4EL | 0.946 | 0.924 | 0.954 | 0.965 | 0.978 | 0.632 | 0.764 | 0.967 |
+| BC5CDR-chemical (179,709, 5181/5307; n 4465/68/648) | XMR4EL (`13-52-04`) | 0.945 | 0.922 | 0.953 | 0.965 | 0.976 | 0.676 | 0.756 | 0.966 |
 |  | SapBERT 1-NN | 0.968 | 0.945 | 0.975 | 0.986 | 0.996 | 0.559 | 0.821 | 0.974 |
-|  | char TF-IDF 1-NN (reference) | 0.961 | 0.939 | 0.970 | 0.983 | 0.996 | 0.559 | 0.765 | 0.967 |
+|  | char TF-IDF 1-NN | 0.961 | 0.939 | 0.970 | 0.983 | 0.996 | 0.559 | 0.765 | 0.967 |
 |  | PECOS XR-Linear, our features | 0.827 | 0.807 | 0.859 | 0.911 | 0.853 | 0.559 | 0.677 | 0.956 |
-| BioRED chemical (179,702, 779/809; n 629/22/128) | XMR4EL | 0.870 | 0.838 | 0.896 | 0.942 | 0.968 | 0.955 | 0.375 | 0.895 |
+| BioRED chemical (179,702, 779/809; n 629/22/128) | XMR4EL (`14-27-36`) | 0.874 | 0.842 | 0.899 | 0.947 | 0.973 | 0.955 | 0.375 | 0.892 |
 |  | SapBERT 1-NN | 0.920 | 0.886 | 0.937 | 0.969 | 0.998 | 0.864 | 0.547 | 0.920 |
-|  | char TF-IDF 1-NN (reference) | 0.929 | 0.895 | 0.937 | 0.951 | 0.998 | 0.864 | 0.602 | 0.929 |
+|  | char TF-IDF 1-NN | 0.929 | 0.895 | 0.937 | 0.951 | 0.998 | 0.864 | 0.602 | 0.929 |
 |  | PECOS XR-Linear, our features | 0.739 | 0.712 | 0.792 | 0.875 | 0.822 | 0.409 | 0.391 | 0.897 |
-| NLM-Chem (179,696, 4907/4945; n 3168/173/1566) | XMR4EL | 0.875 | 0.869 | 0.892 | 0.916 | 0.963 | 0.636 | 0.723 | 0.883 |
-|  | SapBERT 1-NN | 0.845 | 0.838 | 0.893 | 0.959 | 0.975 | 0.202 | 0.653 | 0.857 |
-|  | char TF-IDF 1-NN (reference) | 0.872 | 0.865 | 0.898 | 0.941 | 0.975 | 0.202 | 0.738 | 0.884 |
+| NLM-Chem (179,696, 4907/4945; n 3168/173/1566) | XMR4EL (`14-58-54`) | 0.877 | 0.870 | 0.894 | 0.916 | 0.962 | 0.647 | 0.729 | 0.877 |
+|  | SapBERT 1-NN | 0.845 | 0.838 | 0.893 | 0.959 | 0.975 | 0.202 | 0.653 | 0.852 |
+|  | char TF-IDF 1-NN | 0.872 | 0.865 | 0.898 | 0.941 | 0.975 | 0.202 | 0.738 | 0.880 |
 |  | PECOS XR-Linear, our features | 0.689 | 0.684 | 0.751 | 0.841 | 0.807 | 0.526 | 0.471 | 0.795 |
-| MedMentions st21pv (18,520, 31564/40884; n 11303/11049/9212) | XMR4EL | 0.741 | 0.572 | 0.806 | 0.908 | 0.932 | 0.763 | 0.480 | 0.743 |
-|  | char TF-IDF 1-NN (reference) | 0.593 | 0.458 | 0.704 | 0.884 | 0.933 | 0.412 | 0.392 | 0.718 |
+| MedMentions st21pv (18,520, 31564/40884; n 11303/11049/9212) | XMR4EL (`15-38-51`) | 0.741 | 0.572 | 0.806 | 0.908 | 0.932 | 0.763 | 0.480 | 0.743 |
+|  | char TF-IDF 1-NN | 0.593 | 0.458 | 0.704 | 0.884 | 0.933 | 0.412 | 0.392 | 0.718 |
 |  | PECOS XR-Linear, our features | 0.688 | 0.531 | 0.756 | 0.860 | 0.861 | 0.767 | 0.381 | 0.715 |
 |  | scispaCy UMLS linker (restricted) | 0.683 | 0.528 | 0.749 | 0.852 | 0.875 | 0.633 | 0.509 | 0.752 |
-| BC5CDR-disease (11,744, 4305/4306; n 3140/212/953) | XMR4EL | 0.900 | 0.900 | 0.931 | 0.973 | 0.978 | 0.778 | 0.669 | 0.904 |
-|  | char TF-IDF 1-NN (reference) | 0.874 | 0.874 | 0.908 | 0.957 | 0.978 | 0.618 | 0.589 | 0.886 |
+| BC5CDR-disease (11,744, 4305/4306; n 3140/212/953) | XMR4EL (`14-12-26`) | 0.900 | 0.900 | 0.931 | 0.973 | 0.978 | 0.778 | 0.669 | 0.904 |
+|  | char TF-IDF 1-NN | 0.874 | 0.874 | 0.908 | 0.957 | 0.978 | 0.618 | 0.589 | 0.886 |
 |  | PECOS XR-Linear, our features | 0.852 | 0.851 | 0.889 | 0.944 | 0.934 | 0.769 | 0.597 | 0.887 |
 
 test:
 
 | dataset (labels, rows) | system | acc@1 | cov x acc | MRR | R@10 | seen, 1 | seen, >1 | unseen | hybrid |
 |---|---|---|---|---|---|---|---|---|---|
-| NCBI-disease (13,385, 923/945; n 633/33/257) | XMR4EL | 0.896 | 0.875 | 0.923 | 0.964 | 0.978 | 0.818 | 0.704 | 0.900 |
+| NCBI-disease (13,385, 923/945; n 633/33/257) | XMR4EL (`13-22-39`) | 0.901 | 0.880 | 0.924 | 0.960 | 0.978 | 0.848 | 0.720 | 0.904 |
 |  | SapBERT 1-NN | 0.874 | 0.854 | 0.910 | 0.966 | 0.976 | 0.394 | 0.685 | 0.894 |
-|  | char TF-IDF 1-NN (reference) | 0.826 | 0.806 | 0.874 | 0.946 | 0.976 | 0.394 | 0.510 | 0.845 |
+|  | char TF-IDF 1-NN | 0.826 | 0.806 | 0.874 | 0.946 | 0.976 | 0.394 | 0.510 | 0.845 |
 |  | PECOS XR-Linear, our features | 0.829 | 0.810 | 0.875 | 0.939 | 0.913 | 0.879 | 0.615 | 0.874 |
-| BioRED disease (13,325, 904/904; n 549/18/337) | XMR4EL | 0.882 | 0.882 | 0.914 | 0.967 | 0.971 | 0.444 | 0.760 | 0.892 |
-|  | SapBERT 1-NN | 0.876 | 0.876 | 0.910 | 0.969 | 0.973 | 0.500 | 0.739 | 0.885 |
-|  | char TF-IDF 1-NN (reference) | 0.840 | 0.840 | 0.878 | 0.961 | 0.973 | 0.500 | 0.641 | 0.848 |
+| BioRED disease (13,325, 904/904; n 549/18/337) | XMR4EL (`13-26-50`) | 0.879 | 0.879 | 0.911 | 0.963 | 0.971 | 0.556 | 0.748 | 0.886 |
+|  | SapBERT 1-NN | 0.876 | 0.876 | 0.910 | 0.969 | 0.973 | 0.500 | 0.739 | 0.883 |
+|  | char TF-IDF 1-NN | 0.840 | 0.840 | 0.878 | 0.961 | 0.973 | 0.500 | 0.641 | 0.846 |
 |  | PECOS XR-Linear, our features | 0.829 | 0.829 | 0.868 | 0.935 | 0.920 | 0.556 | 0.694 | 0.866 |
-| BC5CDR-chemical (179,709, 5167/5352; n 4330/111/726) | XMR4EL | 0.930 | 0.898 | 0.943 | 0.960 | 0.966 | 0.604 | 0.770 | 0.957 |
+| BC5CDR-chemical (179,709, 5167/5352; n 4330/111/726) | XMR4EL (`13-52-04`) | 0.933 | 0.901 | 0.944 | 0.961 | 0.965 | 0.757 | 0.771 | 0.956 |
 |  | SapBERT 1-NN | 0.952 | 0.919 | 0.963 | 0.983 | 0.989 | 0.649 | 0.774 | 0.957 |
-|  | char TF-IDF 1-NN (reference) | 0.961 | 0.928 | 0.969 | 0.983 | 0.989 | 0.649 | 0.837 | 0.966 |
+|  | char TF-IDF 1-NN | 0.961 | 0.928 | 0.969 | 0.983 | 0.989 | 0.649 | 0.837 | 0.966 |
 |  | PECOS XR-Linear, our features | 0.811 | 0.783 | 0.846 | 0.899 | 0.848 | 0.514 | 0.640 | 0.938 |
-| BioRED chemical (179,702, 728/741; n 559/27/142) | XMR4EL | 0.912 | 0.896 | 0.928 | 0.944 | 0.966 | 0.704 | 0.739 | 0.945 |
+| BioRED chemical (179,702, 728/741; n 559/27/142) | XMR4EL (`14-27-36`) | 0.913 | 0.897 | 0.927 | 0.940 | 0.962 | 0.667 | 0.768 | 0.927 |
 |  | SapBERT 1-NN | 0.920 | 0.904 | 0.950 | 0.989 | 0.996 | 0.185 | 0.761 | 0.926 |
-|  | char TF-IDF 1-NN (reference) | 0.919 | 0.903 | 0.947 | 0.979 | 0.996 | 0.185 | 0.754 | 0.924 |
+|  | char TF-IDF 1-NN | 0.919 | 0.903 | 0.947 | 0.979 | 0.996 | 0.185 | 0.754 | 0.924 |
 |  | PECOS XR-Linear, our features | 0.786 | 0.772 | 0.836 | 0.902 | 0.839 | 0.296 | 0.669 | 0.908 |
-| NLM-Chem (179,696, 11029/11200; n 6751/941/3337) | XMR4EL | 0.842 | 0.829 | 0.871 | 0.909 | 0.940 | 0.758 | 0.668 | 0.876 |
-|  | SapBERT 1-NN | 0.853 | 0.840 | 0.896 | 0.949 | 0.980 | 0.438 | 0.714 | 0.892 |
-|  | char TF-IDF 1-NN (reference) | 0.843 | 0.830 | 0.880 | 0.931 | 0.980 | 0.438 | 0.678 | 0.881 |
+| NLM-Chem (179,696, 11029/11200; n 6751/941/3337) | XMR4EL (`14-58-54`) | 0.840 | 0.827 | 0.869 | 0.907 | 0.934 | 0.781 | 0.667 | 0.870 |
+|  | SapBERT 1-NN | 0.853 | 0.840 | 0.896 | 0.949 | 0.980 | 0.438 | 0.714 | 0.884 |
+|  | char TF-IDF 1-NN | 0.843 | 0.830 | 0.880 | 0.931 | 0.980 | 0.438 | 0.678 | 0.873 |
 |  | PECOS XR-Linear, our features | 0.723 | 0.712 | 0.772 | 0.843 | 0.805 | 0.762 | 0.547 | 0.835 |
-| MedMentions st21pv (18,520, 31085/40157; n 11290/10768/9027) | XMR4EL | 0.744 | 0.576 | 0.808 | 0.912 | 0.933 | 0.769 | 0.479 | 0.747 |
-|  | char TF-IDF 1-NN (reference) | 0.594 | 0.460 | 0.702 | 0.877 | 0.932 | 0.410 | 0.390 | 0.721 |
+| MedMentions st21pv (18,520, 31085/40157; n 11290/10768/9027) | XMR4EL (`15-38-51`) | 0.744 | 0.576 | 0.808 | 0.912 | 0.933 | 0.769 | 0.479 | 0.747 |
+|  | char TF-IDF 1-NN | 0.594 | 0.460 | 0.702 | 0.877 | 0.932 | 0.410 | 0.390 | 0.721 |
 |  | PECOS XR-Linear, our features | 0.694 | 0.537 | 0.760 | 0.864 | 0.863 | 0.777 | 0.383 | 0.719 |
 |  | scispaCy UMLS linker (restricted) | 0.681 | 0.527 | 0.747 | 0.850 | 0.866 | 0.642 | 0.495 | 0.751 |
-| BC5CDR-disease (11,744, 4399/4410; n 3284/174/941) | XMR4EL | 0.922 | 0.920 | 0.943 | 0.976 | 0.985 | 0.770 | 0.732 | 0.925 |
-|  | char TF-IDF 1-NN (reference) | 0.892 | 0.889 | 0.921 | 0.968 | 0.984 | 0.603 | 0.621 | 0.902 |
+| BC5CDR-disease (11,744, 4399/4410; n 3284/174/941) | XMR4EL (`14-12-26`) | 0.922 | 0.920 | 0.943 | 0.976 | 0.985 | 0.770 | 0.732 | 0.925 |
+|  | char TF-IDF 1-NN | 0.892 | 0.889 | 0.921 | 0.968 | 0.984 | 0.603 | 0.621 | 0.902 |
 |  | PECOS XR-Linear, our features | 0.865 | 0.863 | 0.901 | 0.955 | 0.931 | 0.718 | 0.661 | 0.910 |
 
-Rows, XMR4EL vs SapBERT 1-NN (dev / test): NCBI-disease +22 / +20, BioRED disease +3 / +5, BC5CDR-chemical -114 / -111,
-BioRED chemical -39 / -6, NLM-Chem +150 / -118.
+Cost (server, peak RSS from `outputs/g1/peak_rss.tsv`, CUDA leaf matchers): disease sets train 136-141 s (encoding 87-88 s,
+hierarchy 45-48 s), train+dev 6.1-6.2 GB; chemical sets (~180k labels) train 1395-1435 s (encoding 490-513 s with the SapBERT
+cache hit, label embeddings ~35 s, root node ~565 s incl. clustering, 128 leaves ~300 s), train+dev 28.4-29.5 GB, test eval
+18.0-19.6 GB; MedMentions train 510 s (encoding 405 s, not cached; hierarchy 96 s), train+dev 29.3 GB, test eval 27.8 GB.
+Predict: diseases 5-7 s, chemicals 17-74 s, MedMentions 221 / 203 s (31.5k / 31.1k rows; routing 45 s, leaf ranking 53 s,
+knn 115 s on dev). 1-NN baselines 3.3-3.4 GB (diseases), 15-17 GB (chemicals), 6.2-6.3 GB (MedMentions).
 
-- Diseases (13k labels): XMR4EL is ahead of SapBERT 1-NN on dev and test. The gain is mentions whose string appears in
-  training under several labels (context decides them) and unseen strings; seen-once strings are level.
-- Chemicals (180k labels): XMR4EL is behind SapBERT 1-NN except NLM-Chem dev. It still wins `seen, >1` on five of six splits but
-  loses seen-once strings, and R@cand is 0.92-0.97 (diseases 0.98-0.99): part of the loss is routing (gold not among the
-  candidates). See `docs/future_work.md`.
-- PECOS is below XMR4EL on every set and split (vs the trees in the table): diseases -3.1 / -3.9 pt dev (NCBI / BioRED),
-  -6.7 / -5.3 test; chemicals -11.9 to -18.6 pt; MedMentions -5.3 / -5.0; BC5CDR-disease -4.8 / -5.7. On chemicals it
-  misses exact training names (seen once 0.80-0.85 vs 0.94-0.98). Same rows and feature design, but PECOS has no knn
-  re-scoring.
-- MedMentions st21pv (18.5k labels, no dictionary, 77% of rows in vocabulary): 64% of the rows are `seen, >1` or unseen
-  strings, so context decides more here than on any other set. XMR4EL 0.741 / 0.744 vs PECOS 0.688 / 0.694 and scispaCy
-  0.683 / 0.681; scispaCy is better on unseen strings (0.509 / 0.495 vs 0.480 / 0.479) and its hybrid is above XMR4EL's.
-- Context: zeroing the query's context block drops BC5CDR-chemical dev `seen, >1` from 0.632 to 0.015 and NCBI dev from
-  0.941 to 0.235.
-- Cost (one GPU server, peak RSS train + dev): chemicals 22 GB, ~13 min hierarchy + ~8 min encoding (SapBERT embeddings
-  cached between runs); diseases 5 GB, ~2 min. 1-NN baselines 15 GB on chemicals.
+- Retrain on the CUDA-leaf code: every one of the five G1 sets gives the same acc@1, R@cand and group counts row for row as
+  the 2026-10-12 trees (MRR differs by <= 2e-4); chemical train time 5929-6175 s -> 1395-1435 s, diseases 239-247 -> 136-141 s.
+  The PECOS score logs are identical too (same exported features).
+- Diseases (13k labels): XMR4EL beats SapBERT 1-NN on dev and test (rows: NCBI +22 / +25,
+  BioRED +17 / +3). The gain is seen >1 (context; NCBI dev 0.941 vs 0.176) and unseen strings; seen 1 is level.
+- Chemicals (180k labels): XMR4EL is below SapBERT 1-NN on BC5CDR-chemical (dev -123, test -96 rows), BioRED
+  chemical (dev -36, test -5) and NLM-Chem test (-141); NLM-Chem dev +158. It still wins seen >1 everywhere (NLM-Chem
+  test +323 rows) but loses seen 1 (BC5CDR-chemical dev 0.976 vs 0.996, -89 rows; NLM-Chem test 0.934 vs 0.980,
+  -310) and most unseen groups. R@cand is 0.92-0.97 on chemicals vs 0.98-0.99 on diseases, so at least part of the
+  loss is routing (gold not among the 1000 candidates); not yet split per row.
+- MedMentions st21pv (18.5k labels, no dictionary, 77% of rows in vocabulary): XMR4EL 0.741 / 0.744, PECOS 0.688 / 0.694, scispaCy
+  0.683 / 0.681. 64% of the rows are seen >1 or unseen strings (diseases 26-39%), so context decides more here than on any other set. scispaCy is
+  better on unseen strings (0.509 / 0.495 vs 0.480 / 0.479) and its hybrid is above XMR4EL's (0.752 / 0.751 vs 0.743 / 0.747).
+  R@cand 0.947 / 0.949. cov x acc 0.572 / 0.576: 23% of the rows have a CUI with no training text.
+- Hybrid (exact train string -> its majority label, else the system) vs the SapBERT 1-NN hybrid: diseases above on dev and
+  test (NCBI 0.929 / 0.904 vs 0.914 / 0.894, BioRED 0.894 / 0.886 vs 0.880 / 0.883); chemicals mixed (BC5CDR-chemical
+  0.966 / 0.957 vs 0.974 / 0.957, BioRED chemical 0.892 / 0.927 vs 0.920 / 0.926, NLM-Chem 0.877 / 0.870 vs 0.852 / 0.884).
+- PECOS is below XMR4EL on every set and split: diseases -3.1 / -5.3 pt (dev, NCBI / BioRED) and -7.2 / -5.0 (test);
+  chemicals -11.7 to -18.8 pt; MedMentions -5.3 / -5.0. On chemicals it misses exact training names (seen 1 0.80-0.85 vs
+  0.93-0.98); the hybrid lifts it to 0.80-0.96. Same features and rows, but PECOS has no knn re-scoring (beta 10 was +4.3 pt
+  on BC5CDR-disease test, 2026-10-08), so this is XR-Linear vs tree + leaf matcher + knn; the 2026-10-06 tie predates knn.
+- PECOS cost: train 28.5-29.5 s (diseases, hierarchy 16 -> 256 -> labels) / 260-274 s (chemicals, 8 -> 128 -> 2048 -> labels) /
+  54 s (MedMentions, 16 -> 256 -> labels) vs XMR4EL 136-141 / 1395-1435 / 510 s; peak 3.8-3.9 / 26.9-28.0 / 6.6 GB
+  (`outputs/g2/peak_rss.tsv`).
+- BC5CDR-disease (11.7k labels) (no SapBERT 1-NN row, see above): XMR4EL 0.900 / 0.922 (dev / test), hybrid 0.904 / 0.925.
+  PECOS -4.9 / -5.8 pt (train 33 s vs 309 s, peak 3.4 GB).
 
-## Datasets
+## 2026-10-16: second-audit Phase C retrain, the five G1 sets (dev + test)
 
-Corpora and CTD are not in the repository. Sources:
+`bash scripts/run_g1.sh` on the server, commit `ed8d745` (clean): label-block classifier fit (every G1 fit is one block),
+`research.pkl` split, SapBERT revision pinned to `090663c3`, torch 2.14.1+cu126. Config, rows and labels as the 2026-10-13
+G1 rows above; run dirs `outputs/runs/2026-10-16_*_<set>[_test]`, logs `outputs/g1/` (the 2026-10-12 bundle is
+`outputs/g1_2026-10-12/`). XMR4EL acc@1, 2026-10-13 G1 tree -> this retrain (rows moved):
 
-- NCBI-disease: PubTator release (`NCBI{train,develop,test}set_corpus.zip`, ncbi.nlm.nih.gov/CBBresearch/Dogan/DISEASE).
-- BioRED: `BioRED.zip` (ftp.ncbi.nlm.nih.gov/pub/lu/BioRED), PubTator files `{Train,Dev,Test}.PubTator`.
-- BC5CDR: BioCreative V CDR corpus `CDR_Data.zip` (`CDR.Corpus.v010516`).
-- NLM-Chem: `ftp.ncbi.nlm.nih.gov/pub/lu/NLMChem/NLM-Chem-corpus.zip`.
-- CTD: `ctdbase.org/reports/CTD_diseases.tsv.gz`, `ctdbase.org/reports/CTD_chemicals.tsv.gz`.
+| dataset | dev | test |
+|---|---|---|
+| NCBI-disease | 0.9246 -> 0.9246 (0) | 0.9014 -> 0.9014 (0) |
+| BioRED disease | 0.8975 -> 0.8975 (0) | 0.8794 -> 0.8794 (0) |
+| BC5CDR-chemical | 0.9446 -> 0.9446 (0) | 0.9332 -> 0.9338 (+3) |
+| BioRED chemical | 0.8742 -> 0.8716 (-2) | 0.9135 -> 0.9093 (-3) |
+| NLM-Chem | 0.8769 -> 0.8755 (-7) | 0.8402 -> 0.8412 (+11) |
 
-Conversion into `datasets/` (the paths the specs in `configs/experiments/` expect):
+Disease trees reproduce every metric (MRR within 0.0002). Chemical moves are within earlier same-code GPU retrains
+(~10-20 rows); R@cand moves the same way (BioRED chem dev 0.9615 -> 0.9589, NLM-Chem test 0.9221 -> 0.9240). Both 1-NN
+baselines are unchanged on every set and split (same SapBERT embeddings under the pinned commit). Hierarchy training
+868-893 s -> 785-812 s on the chemical sets (45-49 s diseases); encoding 490-513 s -> 1160-1232 s (88 -> 200 s
+diseases) because the revision joined the embedding cache key (no cache hit this run, one-off). Peak RAM train+dev
+6.6-6.8 GB diseases, 29.8-30.5 GB chemicals (G1: 6 / 30 GB).
+
+## 2026-10-20: float32 + dense-feature retrain, the five G1 sets (dev + test)
+
+`bash scripts/run_g1.sh` on the server, commit `b10a922` (clean): PIFA Z and clustering prices in float32 (code-quality
+audit #6), dense float32 features (sixth audit #3), sentence-transformers replaced by HF `AutoModel` pooling. Config, rows and
+labels as above; run dirs `outputs/runs/2026-10-20_*_<set>[_test]`, logs `outputs/g1/`. Encoding hit the embedding cache on
+every set (key unchanged). XMR4EL acc@1, Phase C -> this retrain (rows moved):
+
+| dataset | dev | test | R@cand dev / test |
+|---|---|---|---|
+| NCBI-disease | 0.9246 -> 0.9246 (0) | 0.9014 -> 0.8960 (-5) | 0.9835 / 0.9859 |
+| BioRED disease | 0.8975 -> 0.8828 (-14) | 0.8794 -> 0.8816 (+2) | 0.9822 / 0.9900 |
+| BC5CDR-chemical | 0.9446 -> 0.9463 (+9) | 0.9338 -> 0.9303 (-18) | 0.9682 / 0.9692 |
+| BioRED chemical | 0.8716 -> 0.8703 (-1) | 0.9093 -> 0.9121 (+2) | 0.9576 / 0.9437 |
+| NLM-Chem | 0.8755 -> 0.8753 (-1) | 0.8412 -> 0.8423 (+12) | 0.9309 / 0.9238 |
+
+- Net -14 rows over ten splits; disease trees no longer reproduce Phase C bit for bit (the rounding of Z and the features
+  changed), so BioRED disease dev -14 is the size of a different-but-equal tree, not a measured loss.
+- Peak RAM train+dev 22.2-22.4 GB chemicals (Phase C 29.8-30.5, -25%), 5.1-5.2 GB diseases (6.6-6.8); 1-NN baselines
+  14.6 GB chemicals (16.8-16.9). Hierarchy 703-819 s chemicals, 40-43 s diseases; encoding 454-475 s / 78 s (cache hit).
+- 1-NN baselines rerun eval-only on these trees (`bash scripts/run_nn.sh`, commit `19bf6cc`, bundle `outputs/nn.tar.gz`):
+  SapBERT 1-NN now scores raw `Transformer.transform` mention embeddings (equal strings bit-equal, exact ties -> lower label
+  index, the TF-IDF rule); it was X's mention block, where float rounding broke the ties. Char TF-IDF 1-NN is identical on
+  every split. SapBERT seen 1 is unchanged; its seen >1 now equals TF-IDF's on every split (the same tie rule picks the same
+  label), and unseen moves only on NCBI (dev 0.760 -> 0.726, test 0.700 -> 0.685: the nearest training string is shared by
+  several labels). acc@1 G1 -> now: NCBI 0.905 / 0.885 -> 0.894 / 0.874, BioRED disease 0.878 / 0.874 -> 0.880 / 0.876,
+  BC5CDR-chemical 0.965 / 0.944 -> 0.968 / 0.952, BioRED chemical 0.905 / 0.920 -> 0.920 / 0.920, NLM-Chem 0.845 / 0.861 ->
+  0.845 / 0.853 (dev / test). The G1 tables above carry the new rows.
+- XMR4EL (these trees) vs SapBERT 1-NN, rows dev / test: NCBI +22 / +20, BioRED disease +3 / +5, BC5CDR-chemical -114 /
+  -111, BioRED chemical -39 / -6, NLM-Chem +150 / -118. Same picture as G1: ahead on diseases, behind on chemicals except
+  NLM-Chem dev.
+- Context ablation on these trees (`bash scripts/run_ctx.sh`, `scripts/diagnose_context.py`, commit `19bf6cc`, bundle
+  `outputs/ctx.tar.gz`, dev): `ctx 0` zeroes the query's context block and renormalises (= the encoder's empty-context
+  rows). Full search acc@1 as is -> ctx 0: BC5CDR-chemical 0.946 -> 0.912 (seen >1 0.632 -> 0.015), NLM-Chem 0.875 ->
+  0.794 (seen 1 0.963 -> 0.841, R@cand 0.931 -> 0.814; unseen 0.723 -> 0.747), NCBI 0.925 -> 0.886 (seen >1 0.941 ->
+  0.235). Context is what separates labels that share a string: without it seen >1 collapses (NLM-Chem 0.636 -> 0.353).
+  NLM-Chem unseen strings gain without context (root recall@1 0.673 -> 0.725): ~96% of its training rows are dictionary
+  rows with an empty context. Root recall moves little elsewhere (all rows @1: 0.766 -> 0.746, 0.763 -> 0.762, 0.916 ->
+  0.901). Clusters with a context row 98 / 118 / 117 of 128; dev golds in a dictionary-only cluster 71 / 1 / 0.
+
+## 2026-10-13: equivalence test, XMR4EL tree vs PECOS XR-Linear (NCBI-disease dev)
+
+`bash scripts/run_eq.sh` on the server (code `6f98d9c`, CUDA leaves since `0189936`). NCBI-disease dev, 729/757 rows,
+13,385 labels, beam 10, top 100. PECOS gets the tree's exported features and rows. `-chain` = the tree's own hierarchy
+(128 -> labels, from `pecos_compare.py export`). `agree` compares the two systems row by row with knn off. Logs are in
+`outputs/eq/`, run dirs in `outputs/runs/2026-10-13_*_ncbi_eq_{a,c,d}`. The three trees have the same chain: PECOS
+on each export gives the same predictions to every digit.
+
+- A: G1 tree `15-32-01`, `class_weight` balanced, routing features on.
+- C: new tree `11-25-58`, `class_weight` null (PECOS's objective).
+- D: new tree `11-28-44`, C plus `routing_features` false (leaves see the root's X, as PECOS does).
+- PECOS lr: `L2R_LR_DUAL` + `sigmoid` = the same logistic objective (C 1, bias as a regularised constant 1), the same
+  negatives (rows of the parent cluster) and the same path product.
+
+| tree | PECOS variant | acc@1 tree (knn 0) | acc@1 PECOS | top-1 agree | top-10 overlap | mean / max score diff | tree acc@1, knn 10 |
+|---|---|---|---|---|---|---|---|
+| A | own hierarchy, default (sq. hinge, l3-hinge) | 0.890 | 0.894 | 0.892 | 0.306 | 0.326 / 0.920 | 0.925 |
+| A | tree chain, default | 0.890 | 0.904 | 0.912 | 0.420 | 0.323 / 0.920 | 0.925 |
+| A | tree chain, lr | 0.890 | 0.866 | 0.878 | 0.542 | 0.280 / 0.846 | 0.925 |
+| C | tree chain, lr | 0.792 | 0.866 | 0.893 | 0.651 | 0.044 / 0.489 | 0.885 |
+| D | tree chain, lr | 0.863 | 0.866 | 0.964 | 0.839 | 0.024 / 0.349 | 0.899 |
+| D | tree chain, lr, eps 0.001 | 0.863 | 0.866 | 0.964 | 0.839 | 0.024 / 0.349 | 0.899 |
+
+R@cand: A 0.988, C and D 0.977.
+
+Train time on the server (CUDA leaves):
+
+| step | XMR4EL C / D | PECOS |
+|---|---|---|
+| encoding | 90 s | not counted (gets the features) |
+| label embeddings | 5 s | - |
+| root clustering | 19-21 s | not counted (gets the chain) |
+| root matcher | 11-13 s | - |
+| 128 leaves | 9-10 s | - |
+| total | 137-138 s | - |
+| rankers | - | 51-52 s (CPU; eps 0.001: 77 s) |
+
+The tree's own matchers (root + leaves) take 21-23 s.
+
+- At the same hierarchy, objective, negatives and score, the tree is close to PECOS but not identical (D). The two
+  agree on 96.4 % of top-1 predictions and differ by 2 correct rows (0.863 vs 0.866). Mean score difference is 0.024.
+  Tightening PECOS's tolerance (eps 0.1 -> 0.001) changes nothing, so PECOS has converged. The rest is on the tree's
+  side: L-BFGS in float32 at tol 1e-3.
+- Routing features on, without class weights (C), cost 7.1 pt against D (0.792 vs 0.863, knn off).
+- A (balanced weights + routing features) is +2.7 pt over D with knn off (0.890 vs 0.863). It also has higher R@cand
+  (0.988 vs 0.977). These runs do not separate the two components: there is no "balanced, routing off" tree.
+- knn beta 10 adds 3.5 pt on A (0.890 -> 0.925) and 3.6 pt on D. PECOS has no such step.
+- With knn off, PECOS's default squared hinge on the tree's chain (0.904) beats tree A (0.890) and PECOS's own
+  hierarchy (0.894). The XMR4EL lead in the G2 tables (0.925 vs 0.894) is therefore knn re-scoring, not the matchers.
+- Speed: the CUDA matchers (21-23 s) are faster than PECOS's CPU rankers (52 s) on the same chain. XMR4EL's training
+  time is mostly feature encoding (90 s) plus clustering (20 s), which PECOS's time does not include. The G1 disease
+  trains (239-247 s) predate the CUDA fix. This is at 13k labels; at 180k labels (1404 labels per leaf) it is not yet
+  measured.
+
+## 2026-10-14: plan I1/I2, where the 180k-label loss comes from (chemical sets, dev, eval-only)
+
+`bash scripts/run_i.sh` on the server, commit `e470f62` (clean), the 2026-10-13 chemical trees (`13-52-04`, `14-27-36`,
+`14-58-54`), specs `configs/experiments/i1_<set>.json`, run dirs `outputs/runs/2026-10-14_*_i1_<set>`. Same rows as the
+2026-10-13 dev rows. Not routed = gold not among the candidates (beam x 100 leaf labels: each visited leaf gives its 100
+labels with the highest matcher probability, `LEAF_CANDIDATES`); ranked wrong = gold among the candidates, not top-1.
+Rows: not routed / ranked wrong per group (seen 1 / seen >1 / unseen).
+
+| set | search | acc@1 | R@cand | errors | not routed | ranked wrong | not routed by group | ranked wrong by group |
+|---|---|---|---|---|---|---|---|---|
+| BC5CDR-chemical (5181) | beam 10, knn 10 | 0.945 | 0.968 | 287 | 164 | 123 | 83 / 2 / 79 | 24 / 20 / 79 |
+|  | beam 10, knn 0 | 0.582 | 0.968 | 2165 | 164 | 2001 | 83 / 2 / 79 | 1656 / 26 / 319 |
+|  | beam 20, knn 10 | 0.951 | 0.981 | 253 | 100 | 153 | 57 / 1 / 42 | 27 / 21 / 105 |
+|  | beam 50, knn 10 | 0.951 | 0.983 | 253 | 86 | 167 | 56 / 0 / 30 | 28 / 22 / 117 |
+|  | beam 128 (all leaves), knn 10 | 0.951 | 0.983 | 253 | 86 | 167 | 56 / 0 / 30 | 28 / 22 / 117 |
+| BioRED chemical (779) | beam 10, knn 10 | 0.874 | 0.962 | 98 | 30 | 68 | 16 / 0 / 14 | 1 / 1 / 66 |
+|  | beam 10, knn 0 | 0.502 | 0.962 | 388 | 30 | 358 | 16 / 0 / 14 | 262 / 15 / 81 |
+| NLM-Chem (4907) | beam 10, knn 10 | 0.877 | 0.928 | 604 | 354 | 250 | 42 / 17 / 295 | 77 / 44 / 129 |
+|  | beam 10, knn 0 | 0.621 | 0.928 | 1861 | 354 | 1507 | 42 / 17 / 295 | 889 / 73 / 545 |
+
+- knn re-scoring carries the 180k-label trees: +36.3 / +37.2 / +25.6 pt (knn 0 -> 10). Without it the leaf matchers
+  rank an exact training string's label first for only 0.61 / 0.56 / 0.71 of the seen-1 rows.
+- At beam 10, routing loses 57% of the BC5CDR-chemical errors and 59% of NLM-Chem's (mostly unseen strings there: 295 of
+  354); BioRED chemical's loss is ranking of unseen strings (66 of 98 errors).
+- Beam 20 recovers 34 rows on BC5CDR-chemical (0.945 -> 0.951); beam 50 and 128 add candidates but no top-1 row. At beam
+  128 every leaf is visited and 86 golds (56 seen 1) are still not candidates: the cap is the leaf's top 100, not the beam.
+- vs SapBERT 1-NN (0.968, 5017 rows): beam 20 is still -89 rows, of them seen 1 -66 (4381 vs 4447); 57 of beam 20's 84
+  seen-1 errors are golds outside their leaf's top 100.
+
+## 2026-10-15: plan I3, latency and memory (dev, server GPU, beam 10, knn 10)
+
+`bash scripts/run_i.sh i3` on the server (`scripts/bench_latency.py`, code with the once-per-XModel knn index,
+`abc2176`), bundle `outputs/i3.tar.gz`. Trees: NCBI `13-22-39`, MedMentions `15-38-51`, BC5CDR-chemical `13-52-04`,
+NLM-Chem `14-58-54` (all `xmodel_2026-10-13_*`). Batch = all dev rows, ms/query; single = one row per call, median over
+100 rows. Search = from encoded queries (XMR4EL `predict_encoded`; SapBERT 1-NN = GPU brute force on the tree's
+training rows' SapBERT block, query embeddings precomputed); TF-IDF 1-NN = char TF-IDF on CPU, incl. vectorizing.
+Encode = XMR4EL query features (SapBERT + 2 TF-IDF/SVD blocks), batch; single-row encode was slowed by the SVD
+projection (fixed 2026-10-15 in `reduction.py`), not reported. RSS = process after loading the tree / after XMR4EL predict.
+
+| set | labels | train rows | dev rows | encode batch ms/q | XMR4EL search batch ms/q / single ms | SapBERT 1-NN batch / single ms | TF-IDF 1-NN batch / single ms | tree dir GB | RSS GB | SapBERT index GB / VRAM GB | knn index build s |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| NCBI-disease | 13,385 | 95,831 | 729 | 0.36 | 4.4 / 19.3 | 0.05 / 1.3 | 4.8 / 5.6 | 1.7 | 2.4 / 2.8 | 0.29 / 0.58 | 1.8 |
+| MedMentions st21pv | 18,520 | 122,241 | 31,564 | 0.23 | 6.3 / 24.6 | 0.04 / 1.6 | 3.3 / 4.0 | 2.9 | 3.6 / 5.8 | 0.38 / 0.98 | 2.5 |
+| BC5CDR-chemical | 179,709 | 474,854 | 5,181 | 0.32 | 6.1 / 25.0 | 0.17 / 5.7 | 19.2 / 21.6 | 10.2 | 10.9 / 12.7 | 1.46 / 3.43 | 6.8 |
+| NLM-Chem | 179,696 | 489,229 | 4,907 | 0.52 | 6.9 / 26.0 | 0.17 / 5.9 | 17.1 / 17.2 | 10.5 | 11.2 / 12.9 | 1.50 / 3.53 | 11.5 |
+
+- XMR4EL search is nearly flat in the label count: 13k -> 180k labels = 4.4 -> 6.9 ms/q batch, 19 -> 26 ms single.
+- SapBERT 1-NN search on GPU is ~35-150x faster in batch and 4-15x faster single, with a 7x smaller index (1.5 vs
+  10.2-10.5 GB tree). XMR4EL has no speed or memory advantage over it at these scales; it beats CPU TF-IDF 1-NN only
+  at 180k labels (6.1 / 6.9 vs 19.2 / 17.1 ms/q).
+- Tree load 2-14 s (BC5CDR-chemical 93 s: cold disk, the same 10 GB size as NLM-Chem's 14 s).
+
+## 2026-10-16: leaf_candidates > 100 at beam 10 (BC5CDR-chemical dev, eval-only)
+
+`bash scripts/run_lc.sh` on the server, commit `e699f99` (clean), tree `xmodel_2026-10-13_13-52-04` (the I1 tree),
+run dir `outputs/runs/2026-10-16_09-16-20_lc_bc5cdr_chemical`, latency `outputs/lc/bc5cdr_chemical.json`. Beam 10, knn 10;
+leaf candidates = labels each visited leaf contributes (100 = every earlier row). lc 100 and beam 20 rows = the I1 run.
+Search ms = `bench_latency.py`, all three lc values in one process (lc 100 here 8.0 ms/q vs 6.1 in I3: server load).
+Rows correct / gold among the candidates per group (seen 1 n=4465 / seen >1 n=68 / unseen n=648).
+
+| search | acc@1 | rows | R@cand | candidates/q | seen 1 | seen >1 | unseen | search batch ms/q / single ms |
+|---|---|---|---|---|---|---|---|---|
+| beam 10, lc 100 | 0.945 | 4894 | 0.968 | 1000 | 4358 / 4382 | 46 / 66 | 490 / 569 | 8.0 / 26.3 |
+| beam 10, lc 200 | 0.949 | 4919 | 0.975 | 2000 | 4374 / 4400 | 46 / 66 | 499 / 585 | 9.7 / 32.8 |
+| beam 10, lc 500 | 0.952 | 4931 | 0.980 | 5000 | 4384 / 4417 | 46 / 66 | 501 / 592 | 14.6 / 53.7 |
+| beam 20, lc 100 (I1) | 0.951 | 4928 | 0.981 | 2000 | 4381 / 4408 | 46 / 67 | 501 / 606 | not timed |
+
+- lc 200: +25 rows for +21% search time; lc 500: +37 rows (= beam 20, +3) for +84% batch / +104% single.
+- Seen-1 golds outside the candidates: 83 -> 65 -> 48; lc 500 brings 35 of them in, 26 then ranked first.
+- vs SapBERT 1-NN (5017 rows, 0.17 ms/q batch): lc 500 is still -86 rows, seen 1 -63 (4384 vs 4447). A larger leaf
+  share does not close the gap: the remaining seen-1 loss is mostly ranking (33 routed, not first) plus 48 not routed.
+
+## 2026-10-16: where routing loses the gold (root vs leaf), and the empty-context dictionary rows (dev, eval-only)
+
+`bash scripts/run_ctx.sh` on the server (`scripts/diagnose_context.py`, commit `ccfea30`), bundle `outputs/ctx.tar.gz`.
+Trees: BC5CDR-chemical `13-52-04`, NLM-Chem `14-58-54` (`xmodel_2026-10-13_*`), NCBI-disease = latest plain run tree.
+Beam 10, leaf candidates 100, knn 10. Every error is counted once: root lost = gold cluster not in the root's top 10;
+leaf cut = gold cluster visited, gold not in that leaf's top 100; ranked wrong = gold a candidate, not top-1.
+
+| set (dev rows) | group (n) | root lost | leaf cut | ranked wrong | correct |
+|---|---|---|---|---|---|
+| BC5CDR-chemical (5181) | seen 1 (4465) | 29 | 54 | 24 | 4358 |
+|  | seen >1 (68) | 2 | 0 | 20 | 46 |
+|  | unseen (648) | 54 | 25 | 79 | 490 |
+| NLM-Chem (4907) | seen 1 (3168) | 34 | 8 | 77 | 3049 |
+|  | seen >1 (173) | 15 | 2 | 44 | 112 |
+|  | unseen (1566) | 245 | 50 | 129 | 1142 |
+| NCBI-disease (729) | seen 1 (537) | 0 | 0 | 17 | 520 |
+|  | seen >1 (17) | 0 | 0 | 1 | 16 |
+|  | unseen (175) | 9 | 0 | 28 | 138 |
+
+- Context shift (CTD rows have an empty context, so a zero context block: 98.9% of BC5CDR-chemical training rows) is not
+  the loss: 99 / 118 / 117 of 128 clusters hold a corpus row with context, and only 61 / 1 / 0 dev golds sit in a
+  dictionary-only cluster.
+- BC5CDR-chemical seen 1 (the gap to SapBERT 1-NN): the root keeps the gold cluster for 4436 of 4465 (0.994); 78 of the
+  107 errors are inside the leaf (54 outside the leaf's top 100 of ~1400 labels, 24 ranked wrong).
+- NLM-Chem: the root is the loss, on unseen strings: 245 of 1566 (15.6%) never reach their cluster (root recall@1 0.68).
+- Root top-1 cluster accuracy is low on the chemical sets (0.765 / 0.771 vs NCBI 0.912); beam 10 hides it for seen strings.
+
+## Commands
 
 ```bash
-P=.venv/bin/python; T=scripts/to_pubtator.py
-N=datasets/ncbi_disease; for s in train:trainset dev:developset test:testset; do $P $T filter -input $N/NCBI_pubtator/NCBI${s#*:}_corpus.txt -out $N/${s%%:*}.pubtator -types SpecificDisease DiseaseClass Modifier CompositeMention; done
-B=datasets/BioRED; mkdir -p $B/disease $B/chemical; for s in train:Train dev:Dev test:Test; do $P $T filter -input $B/BioRED/${s#*:}.PubTator -out $B/disease/${s%%:*}.pubtator -types DiseaseOrPhenotypicFeature; $P $T filter -input $B/BioRED/${s#*:}.PubTator -out $B/chemical/${s%%:*}.pubtator -types ChemicalEntity; done
-C=datasets/BC5CDR; mkdir -p $C/chemical; for s in train:TrainingSet dev:DevelopmentSet test:TestSet; do $P $T filter -input $C/CDR_Data/CDR.Corpus.v010516/CDR_${s#*:}.PubTator.txt -out $C/chemical/${s%%:*}.pubtator -types Chemical; done
-L=datasets/nlm_chem; for s in train dev test; do $P $T bioc -input_dir $L/FINAL_v1/ALL -pmcids $L/FINAL_v1/pmcids_$s.txt -out $L/$s.pubtator; done
-$P scripts/dict_to_pubtator.py -ctd_path datasets/CTD/CTD_diseases.tsv.gz -out datasets/CTD/ctd_disease_omim.pubtator -type Disease -omim
-$P scripts/dict_to_pubtator.py -ctd_path datasets/CTD/CTD_chemicals.tsv.gz -out datasets/CTD/ctd_chemical.pubtator -type Chemical
-cat $N/train.pubtator datasets/CTD/ctd_disease_omim.pubtator > $N/train_plus_ctd.pubtator
-cat $B/disease/train.pubtator datasets/CTD/ctd_disease_omim.pubtator > $B/disease/train_plus_ctd.pubtator
-for d in $B/chemical $C/chemical $L; do cat $d/train.pubtator datasets/CTD/ctd_chemical.pubtator > $d/train_plus_ctd.pubtator; done
+# train (500-label diagnosis scale)
+.venv/bin/python scripts/train.py \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
+  -model_config configs/xmr4el_base_config.json -ds_len 500
+
+# eval (all in-vocabulary dev rows; base-config trees: -alpha 0 -path_score = leaf matcher x path probability)
+.venv/bin/python scripts/evaluate.py -xmodel_path outputs/saved_trees/<run> \
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -beam_size 2 -topk 0 -alpha 0 -path_score \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt
+# -alpha 1 without -path_score = pure cosine to leaf z (Session 8-9 tree rows and the cosine rows after);
+# alpha in (0, 1) mixes in the leaf matcher's cluster probability. -scorer ranker uses the trained rankers
+# (Session 7 rows before the cosine rows)
+
+# routing / flat / dictionary diagnostic on the same rows as eval
+.venv/bin/python scripts/diagnose_routing.py -xmodel_path outputs/saved_trees/<run> \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -max_rows 100000
+
+# flat feature screen, no training (vocabulary/rows of the given tree)
+.venv/bin/python scripts/experiments/screen_features.py -xmodel_path outputs/saved_trees/<run> \
+  -train_path datasets/MedMentions/st21pv/data/corpus_pubtator_train.txt \
+  -test_path datasets/MedMentions/st21pv/data/corpus_pubtator_dev.txt -features <list>
 ```
 
-Two more sets: BC5CDR-disease (`configs/experiments/bc5cdr.json`; `$P $T filter ... -types Disease`
-into `datasets/BC5CDR/disease/`, train + `ctd_disease.pubtator` from `dict_to_pubtator.py` without `-omim`) and
-MedMentions st21pv (github.com/chanzuckerberg/MedMentions, `configs/experiments/medmentions_st21pv.json`; `scripts/split_pubtator.py` with the release's
-`corpus_pubtator_pmids_{trng,dev,test}.txt`, no dictionary).
-
-## Reproduce
-
-```bash
-# one set: train + dev, then test on the same tree (eval-only)
-.venv/bin/python scripts/run_experiment.py -spec configs/experiments/bc5cdr_chemical.json
-.venv/bin/python scripts/run_experiment.py -spec configs/experiments/bc5cdr_chemical_test.json -xmodel_path outputs/saved_trees/<tree>
-
-# 1-NN baselines on the tree's training rows
-.venv/bin/python scripts/baselines/nn_baselines.py -xmodel_path outputs/saved_trees/<tree> \
-  -test_path datasets/BC5CDR/chemical/dev.pubtator -train_path datasets/BC5CDR/chemical/train_plus_ctd.pubtator -out nn.json
-```
-
-Run directories (`outputs/runs/`) record the spec, config, git state, input hashes and metrics.
+Synthetic checks: see `docs/pipeline.md`.

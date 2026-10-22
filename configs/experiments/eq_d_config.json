@@ -1,0 +1,84 @@
+{
+    "vectorizer_config": {
+        "type": "tfidf",
+        "kwargs": {
+            "analyzer": "char_wb",
+            "ngram_range": [
+                2,
+                4
+            ],
+            "sublinear_tf": true,
+            "max_df": 1.0
+        }
+    },
+    "transformer_config": {
+        "type": "sapbert",
+        "kwargs": {
+            "batch_size": 2000
+        }
+    },
+    "dimension_config": {
+        "type": "sklearntruncatedsvd",
+        "kwargs": {
+            "n_components": 768,
+            "algorithm": "randomized",
+            "n_iter": 5,
+            "n_oversamples": 10,
+            "power_iteration_normalizer": "auto",
+            "random_state": 42,
+            "tol": 0.0
+        }
+    },
+    "context_vectorizer_config": {
+        "type": "tfidf",
+        "kwargs": {
+            "ngram_range": [
+                1,
+                1
+            ],
+            "stop_words": "english",
+            "sublinear_tf": true,
+            "max_df": 1.0
+        }
+    },
+    "context_dimension_config": {
+        "type": "sklearntruncatedsvd",
+        "kwargs": {
+            "n_components": 768,
+            "algorithm": "randomized",
+            "n_iter": 5,
+            "n_oversamples": 10,
+            "power_iteration_normalizer": "auto",
+            "random_state": 42,
+            "tol": 0.0
+        }
+    },
+    "context_window": 10,
+    "abbrev_expansion": "append",
+    "clustering_config": {
+        "type": "balancedkmeans",
+        "kwargs": {
+            "n_clusters": 128,
+            "iter_limit": 20
+        }
+    },
+    "matcher_config": {
+        "type": "jointlogisticregression",
+        "kwargs": {
+            "C": 1.0,
+            "class_weight": null,
+            "tol": 0.001
+        }
+    },
+    "min_leaf_size": 5,
+    "cut_half_cluster": true,
+    "depth": 2,
+    "verbose": 1,
+    "features": "sapbert_char_context",
+    "predict_config": {
+        "beam_size": 10,
+        "topk": 0,
+        "knn_beta": 10.0
+    },
+    "routing_features": false
+}

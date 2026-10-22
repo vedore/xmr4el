@@ -1,4 +1,4 @@
-"""Cross-encoder reranker over the tree's top-K candidates.
+"""Cross-encoder reranker over the tree's top-K candidates (STATUS.md § R).
 
 One shared model scores every (query text, label text) pair, so logits compare across labels.
 Query text = the PubTator row "mention [SEP] context"; label text = `label_texts`."""

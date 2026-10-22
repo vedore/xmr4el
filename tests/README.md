@@ -53,4 +53,4 @@ Inspect collection without executing tests, or stop at the first failure:
 ```
 
 Use `-s` to show captured prints or `-vv` for individual test names.
-For script self-checks and training/evaluation commands, see the [README](../README.md).
+For script self-checks and training/evaluation commands, see [scripts](../scripts/README.md).

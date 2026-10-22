@@ -1,0 +1,11 @@
+{
+  "name": "ncbi_eq_a",
+  "evals": [
+    {
+      "split": "dev_knn0",
+      "test_path": "datasets/ncbi_disease/dev.pubtator",
+      "train_path": "datasets/ncbi_disease/train_plus_ctd.pubtator",
+      "knn_beta": 0
+    }
+  ]
+}

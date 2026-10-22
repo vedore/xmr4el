@@ -1,0 +1,16 @@
+{
+  "name": "i1_nlm_chem",
+  "evals": [
+    {
+      "split": "dev",
+      "test_path": "datasets/nlm_chem/dev.pubtator",
+      "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator"
+    },
+    {
+      "split": "dev_knn0",
+      "test_path": "datasets/nlm_chem/dev.pubtator",
+      "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator",
+      "knn_beta": 0
+    }
+  ]
+}

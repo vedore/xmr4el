@@ -74,3 +74,12 @@ def test_nn_baselines_script(tmp_path):
                           "-test_path", "train.pubtator", "-baselines", "tfidf", "-out", "nn0.json"],
                          cwd=tmp_path, capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
+    # PECOS export pairs xm.X with the reloaded texts: same rows/labels but other text must be refused
+    (tmp_path / "edited.pubtator").write_text((tmp_path / "train.pubtator").read_text().replace("clear", "vague"))
+    export = lambda train, out: subprocess.run(
+        [sys.executable, str(ROOT / "scripts/baselines/pecos_compare.py"), "export", "-xmodel_path", tree,
+         "-train_path", train, "-test_path", "train.pubtator", "-out", out], cwd=tmp_path, capture_output=True, text=True)
+    res = export("train.pubtator", "ok")
+    assert res.returncode == 0, res.stderr
+    res = export("edited.pubtator", "edited")
+    assert res.returncode != 0 and "training texts" in res.stderr
