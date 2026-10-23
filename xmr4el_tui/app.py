@@ -3,13 +3,14 @@ import json
 import os
 import socket
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from textual import work
 from textual.app import App
 from textual.binding import Binding
 
-from xmr4el_tui import runs
+from xmr4el_tui import procinfo, process, runs
 from xmr4el_tui.screens import RunsChanged, RunsScreen
 
 RESCAN_SECONDS = 5
@@ -36,11 +37,14 @@ class XMR4ELApp(App):
         self.runs, self.runs_found = self.scan()
 
     def scan(self):
-        """(runs, outputs/runs exists)."""
+        """(runs, outputs/runs exists); recorded-running runs carry their live state (§9)."""
         try:
-            return runs.scan(self.root, self.cache), True
+            found = runs.scan(self.root, self.cache)
         except FileNotFoundError:
             return [], False
+        here = procinfo.runtime()
+        return [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r
+                for r in found], True
 
     def on_mount(self):
         try:

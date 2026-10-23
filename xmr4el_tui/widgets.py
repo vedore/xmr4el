@@ -10,7 +10,7 @@ from textual.widgets import Log, Static
 
 from xmr4el_tui import fmt, runs
 from xmr4el_tui.compare import RECALL
-from xmr4el_tui.progress import read_events, stages
+from xmr4el_tui.progress import event_time, read_events, stages
 
 STATE_STYLE = {"RUNNING": "bold blue", "UNVERIFIED": "yellow", "LOST": "red", "COMPLETED": "green",
                "FAILED": "red", "STOPPED": "yellow", "UNKNOWN": ""}
@@ -28,8 +28,18 @@ def bold_heads(t, *heads):
 
 
 def state_word(run):
-    """Shown state. Recorded running is UNVERIFIED until the runner records process identity (increment 2)."""
-    return "UNVERIFIED" if run.recorded == "running" else run.recorded.upper()
+    """Shown state: the live check for recorded-running runs (UNVERIFIED without one), else the recorded state."""
+    if run.recorded == "running":
+        return run.live.state if run.live else "UNVERIFIED"
+    return run.recorded.upper()
+
+
+def heartbeat_age(run, now=None):
+    """Seconds since the runner last touched `heartbeat`, None without one."""
+    try:
+        return (now or datetime.now()).timestamp() - (run.path / "heartbeat").stat().st_mtime
+    except OSError:
+        return None
 
 
 def state_text(run):
@@ -67,7 +77,8 @@ def stage_list(run):
     if not path.exists():
         return None
     events, _ = read_events(path)
-    return stages(events, run.kind, [e.split for e in run.evals], run.recorded)
+    recorded = "failed" if state_word(run) == "LOST" else run.recorded  # a lost run's current stage failed
+    return stages(events, run.kind, [e.split for e in run.evals], recorded)
 
 
 class TopBar(Static):
@@ -144,7 +155,22 @@ def banner_text(run):
     if word == "STOPPED":
         return Text(f"Stopped by {run.error or 'a signal'} at {fmt.stamp(run.finished, long=True)}. "
                     "Completed stages and saved files are kept.", style="yellow")
+    if word == "LOST":
+        events, _ = read_events(run.path / "events.jsonl")
+        last = next((e for e in reversed(events) if e.get("stage") and event_time(e)), None)
+        where = f" Last event: {last['stage']} at {fmt.stamp(event_time(last), long=True)}." if last else ""
+        return Text(f"Process {run.identity['pid']} is gone and wrote no final status (killed, e.g. out of "
+                    f"memory).{where}", style="red")
     if word == "UNVERIFIED":
+        age = heartbeat_age(run)
+        beat = f" Heartbeat {fmt.duration(age)} ago." if age is not None else ""
+        if run.live and run.live.other_runtime:
+            return Text(f"Recorded running on {run.identity.get('host') or 'another host'}, another machine or "
+                        f"container.{beat}", style="yellow")
+        if run.identity:
+            reason = run.live.reason if run.live else "not checked"
+            return Text(f"Recorded running here, but the process cannot be inspected ({reason}). "
+                        f"Stop unavailable.{beat}", style="yellow")
         return Text("Recorded running, but this run records no process identity (written before the runner "
                     "change), so liveness cannot be checked.", style="yellow")
     if word == "UNKNOWN":

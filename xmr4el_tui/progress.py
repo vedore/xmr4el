@@ -44,7 +44,7 @@ def read_events(path, offset=0):
     return events, offset + end
 
 
-def _t(event):
+def event_time(event):
     try:
         return datetime.fromisoformat(event["t"])
     except (KeyError, TypeError, ValueError):
@@ -73,7 +73,7 @@ def stages(events, kind, splits, recorded):
     parts, part_start, part_end, part_detail, bar = [], {}, {}, {}, {}
     layer = node = None
     for ev in events:
-        stage, phase, t = ev.get("stage"), ev.get("phase"), _t(ev)
+        stage, phase, t = ev.get("stage"), ev.get("phase"), event_time(ev)
         if stage in ("layer", "node"):  # hierarchy detail only
             if phase == "start":
                 layer, node = (ev, None) if stage == "layer" else (layer, ev)
@@ -128,5 +128,5 @@ def stages(events, kind, splits, recorded):
 
 def last_event_age(events, now):
     """Seconds since the last event with a readable time, None without one."""
-    t = next((t for t in map(_t, reversed(events)) if t), None)
+    t = next((t for t in map(event_time, reversed(events)) if t), None)
     return _seconds(t, now)

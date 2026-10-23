@@ -224,7 +224,7 @@ One commit each on `tui`:
 1. Runner: `-check`, `-run_dir`, `-model_config_sha256`, `-tree_id`, exit 3; model config read once. Done.
 2. `procinfo.py`; identity in `status.json`, `stopped` on SIGTERM/Ctrl+C, `heartbeat`. Done (`error` = `SIGTERM` / `SIGINT`).
 3. `events.jsonl` handler; `extra={"event": ...}` on the stage log calls, encoder parts, transformer ticks. Done (`xmr4el.progress(**event)` for part/tick/runner events; the runner emits load, save, eval).
-4. `process.py` (`check`, `spawn`, `derived_state`, `stop`); Runs/Run show RUNNING/LOST from it.
+4. `process.py` (`check`, `spawn`, `derived_state`, `stop`); Runs/Run show RUNNING/LOST from it. Done (`Run.live` = `process.Live`, set by the app's scan for recorded-running runs; `rejection` reads the exit-3 line).
 5. Setup + Review screens, spawn (§5.5-5.7).
 6. Stop modal (§5.9).
 

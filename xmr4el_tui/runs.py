@@ -42,6 +42,7 @@ class Run:
     evals: tuple[Eval, ...]   # spec order
     identity: dict | None     # pid/host/... from status.json (§9), None for old runs
     problems: tuple[str, ...] # "metrics_dev.json: invalid JSON", ...
+    live: object = None       # process.Live of a recorded-running run (set by the app's scan), else None
 
     def spec(self):
         return read_json(self.path / "spec.json")[0]
