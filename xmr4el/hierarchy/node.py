@@ -31,26 +31,12 @@ class MLModel():
         self.is_last_layer = is_last_layer
         self.layer = layer
         
-        self._local_to_global_idx = None  # see the setter
-        self.global_to_local_idx = None
+        self.local_to_global_idx = None
         
         self.cluster_model = None  # Clustering; a leaf holds identity C
         self.matcher_model = None
         self.fused_scores = None  # internal node: matcher cluster scores on its train rows (n x K), consumed by prepare_layer; not saved
         self.label_embeddings = None  # internal node: normalised Z (L x d); not saved
-    
-    @property
-    def local_to_global_idx(self):
-        return self._local_to_global_idx
-    
-    @local_to_global_idx.setter
-    def local_to_global_idx(self, arr: np.ndarray):
-        """
-        arr[i] should be the global KB label ID for local label index i.
-        """
-        self._local_to_global_idx = arr
-        # build inverse map
-        self.global_to_local_idx = {g: i for i, g in enumerate(arr)}
     
     @property
     def is_empty(self):
@@ -112,7 +98,7 @@ class MLModel():
             f"Matcher Model: {self.matcher_model or 'None'}\n"
         )
     
-    def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
+    def train(self, X_train, Y_train, Z_train, local_to_global):
         """Train one node: X_train (n x d), Y_train (n x L, the node's labels), Z_train (L x d, PIFA rows of
         those labels); local_to_global[j] = global label index of local label j. An internal node clusters Z
         into C (L x K) and trains its matcher on Y @ C; a leaf uses identity C (L x L)."""
@@ -124,10 +110,7 @@ class MLModel():
             self.label_embeddings = Z_train
         del Z_train
         
-        self.global_to_local_idx = global_to_local
         self.local_to_global_idx = np.array(local_to_global, dtype=int)
-        
-        del global_to_local
         
         cluster_model = Clustering()
         if not self.is_last_layer:  # a leaf uses identity C below, so it is never clustered
@@ -159,11 +142,8 @@ class MLModel():
         matcher_model = Matcher()  
         matcher_model.train(X_train, 
                             Y_train, 
-                            local_to_global_idx=self.local_to_global_idx, 
-                            global_to_local_idx=self.global_to_local_idx, 
                             C=C,
                             matcher_config=self.matcher_config,
-                            dtype=np.float32
                             )     
          
         self.matcher_model = matcher_model 

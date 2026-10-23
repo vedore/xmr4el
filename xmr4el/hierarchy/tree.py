@@ -23,12 +23,11 @@ from xmr4el.hierarchy.node import MLModel
 
 class NodeInput(NamedTuple):
     """Training input of one tree node: X (n x d), Y (n x L, the node's label columns), Z (L x d),
-    local_to_global[j] = global label index of local label j, global_to_local its inverse."""
+    local_to_global[j] = global label index of local label j."""
     X: object
     Y: object
     Z: object
     local_to_global: np.ndarray
-    global_to_local: dict
 
 
 def augment_features(X, selected, total, maximum):
@@ -189,7 +188,6 @@ class HierarchicalMLModel():
                 continue
 
             local_to_global_next = local_to_global_idx[local_idxs]
-            global_to_local_next = {g: i for i, g in enumerate(local_to_global_next)}
 
             Y_sub = Y[:, local_idxs]
             mention_mask = (Y_sub.sum(axis=1).A1 > 0)
@@ -207,16 +205,16 @@ class HierarchicalMLModel():
             X_aug = augment_features(X_node, feat_c, feat_sum, feat_max) if self.routing_features else X_node
 
             Z_node = normalize(Z[local_idxs, :], norm="l2", axis=1)
-            children.append((c, NodeInput(X_aug, Y_node, Z_node, local_to_global_next, global_to_local_next)))
+            children.append((c, NodeInput(X_aug, Y_node, Z_node, local_to_global_next)))
 
         return children
             
-    def train(self, X_train, Y_train, Z_train, local_to_global, global_to_local):
+    def train(self, X_train, Y_train, Z_train, local_to_global):
         """Train the tree layer by layer: X_train (n x d), Y_train (n x L), Z_train (L x d).
 
         Each node is saved to a temporary folder once trained (only the next layer's inputs stay in memory),
         then all nodes are reloaded into `hmodel`."""
-        inputs = [NodeInput(X_train, Y_train, Z_train, local_to_global, global_to_local)]
+        inputs = [NodeInput(X_train, Y_train, Z_train, local_to_global)]
         clustering_config = deepcopy(self.clustering_config)
         last_layer_index = self.layers - 1
 
@@ -235,8 +233,7 @@ class HierarchicalMLModel():
                 is_last_layer = (layer == last_layer_index)
 
                 if self.cut_half_cluster and layer > 0:
-                    # A new dict per layer: ClusteringModel.train replaces config["kwargs"], and the
-                    # caller's config (saved with the tree) must keep the configured n_clusters
+                    # Keep the saved caller config's n_clusters while halving it below the root.
                     kw = clustering_config["kwargs"]
                     clustering_config = {**clustering_config,
                                          "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
@@ -258,8 +255,7 @@ class HierarchicalMLModel():
                         X_train=node.X,
                         Y_train=node.Y,
                         Z_train=node.Z,
-                        local_to_global=node.local_to_global,
-                        global_to_local=node.global_to_local
+                        local_to_global=node.local_to_global
                     )
 
                     if ml.is_empty:  # only internal nodes can be empty; leaves use identity C

@@ -560,7 +560,7 @@ def test_transformer_rejects_nul_texts():
 def test_training_arrays_are_float32(xm):
     """#6 / user 2026-10-20: trees train in float32 (int64 Y @ float32 X used to build a float64 PIFA)."""
     assert xm.X.dtype == xm.Z.dtype == np.float32
-    assert all(n.matcher_model.model.model.model.W_.dtype == np.float32 for layer in xm.model.hmodel for n in layer)
+    assert all(n.matcher_model.model.model.W_.dtype == np.float32 for layer in xm.model.hmodel for n in layer)
     X = np.random.default_rng(0).random((2000, 300), dtype=np.float32)
     Y, _ = LabelEmbeddingFactory.label_binarizer([[i % 1000] for i in range(2000)])
     tracemalloc.start()

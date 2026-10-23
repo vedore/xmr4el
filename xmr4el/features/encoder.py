@@ -76,21 +76,20 @@ class TextEncoder():
         
         # Load models
         model_files = {
-            "vectorizer_model": Vectorizer if hasattr(Vectorizer, "load") else None,
-            "dimension_model": DimensionModel if hasattr(DimensionModel, "load") else None,
+            "vectorizer_model": Vectorizer,
+            "dimension_model": DimensionModel,
             "context_vectorizer_model": Vectorizer,
             "context_dimension_model": DimensionModel,
         }
         
         for model_name, model_class in model_files.items():
             model_path = os.path.join(load_dir, model_name)
-            if os.path.exists(model_path) and model_class is not None:
+            if model_name.startswith("context_") and model.features != "sapbert_char_context":
+                continue
+            if os.path.exists(model_path):
                 setattr(model, model_name, model_class.load(model_path))
             else:
-                if model_name.startswith("context_") and model.features != "sapbert_char_context":
-                    setattr(model, model_name, None)
-                else:
-                    raise Exception("Something with the loading the models is not right")
+                raise FileNotFoundError(f"Missing fitted encoder component: {model_path}")
             
         return model
     
@@ -104,18 +103,8 @@ class TextEncoder():
         
         model = DimensionModel.fit(X_emb, dim_config)
         
-        if model is None:
-            return X_emb, None
-        
         reduced_emb = model.transform(X_emb)
         return reduced_emb, model
-    
-    @staticmethod 
-    def _predict_dimension(X_emb: csr_matrix, dim_model: DimensionModel) -> csr_matrix:
-        """Project embeddings using an existing dimensionality reduction model."""
-        if dim_model is None:
-            raise AttributeError("No model found in dim_model")
-        return dim_model.transform(X_emb)
     
     @staticmethod
     def _encode_text_using_text_vectorizer(
@@ -128,15 +117,6 @@ class TextEncoder():
         model = Vectorizer.fit(X_test, vec_config)
         sparse_emb = model.transform(X_test) # CSR_MATRIX    
         return sparse_emb, model
-    
-    @staticmethod
-    def _predict_text_using_text_vectorizer(
-        X_test: Sequence[str], vec_model: Vectorizer
-    ) -> csr_matrix:
-        """Transform texts using an existing vectorizer."""
-        if vec_model is None:
-            raise AttributeError("No model found in vec_model")
-        return vec_model.transform(X_test)
     
     @staticmethod
     def _encode_text_using_transformer(
@@ -157,9 +137,9 @@ class TextEncoder():
             setattr(self, f"{prefix}vectorizer_model", vec)
             setattr(self, f"{prefix}dimension_model", dim)
             return X
-        X = self._predict_text_using_text_vectorizer(texts, getattr(self, f"{prefix}vectorizer_model"))
+        X = getattr(self, f"{prefix}vectorizer_model").transform(texts)
         dim = getattr(self, f"{prefix}dimension_model")
-        return X if dim is None else self._predict_dimension(X, dim)
+        return dim.transform(X)
 
     def _validate_features(self):
         if self.features not in FEATURES:

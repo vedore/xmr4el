@@ -17,7 +17,7 @@ from typing import Optional
 from xmr4el.features.label_embeddings import LabelEmbeddingFactory
 from xmr4el.data.readers import Preprocessor
 from xmr4el.features.encoder import FEATURES, TextEncoder
-from xmr4el.hierarchy.clusterers import BalancedKMeans
+from xmr4el.hierarchy.clusterers import ClusteringModel
 from xmr4el.hierarchy.tree import HierarchicalMLModel, rank_rows
 from xmr4el.learning.classifiers import ClassifierModel
 from xmr4el.learning.scoring import knn_index, label_max_cos
@@ -113,8 +113,8 @@ class XModel:
         # learner settings fail here, not after encoding
         if matcher_config:
             ClassifierModel.init_model(matcher_config)
-        if (clustering_config or {}).get("type") == "balancedkmeans":
-            BalancedKMeans.check_config(clustering_config.get("kwargs", {}))
+        if clustering_config:
+            ClusteringModel.check_config(clustering_config)
         
         self.min_leaf_size = min_leaf_size
         self.cut_half_cluster = cut_half_cluster
@@ -172,7 +172,7 @@ class XModel:
                     n = len(obj)
                     return f"{type(obj).__name__}(len={n})"
                     
-                # for numpy arrays / pandas objects show shape/len if possible
+                # Arrays show shape without printing their contents.
                 if hasattr(obj, "shape"):
                     return f"{type(obj).__name__}(shape={getattr(obj, 'shape')})"
                 
@@ -365,7 +365,6 @@ class XModel:
 
         n_labels = self.Z.shape[0]
         local_to_global = np.arange(n_labels, dtype=int)
-        global_to_local = {g: i for i, g in enumerate(local_to_global)}
 
         hierarchy_start = time.perf_counter()
         self.logger.info("Hierarchy started: depth=%d labels=%d", self.depth, n_labels)
@@ -383,8 +382,7 @@ class XModel:
             X_train=self.X,
             Y_train=self.Y,
             Z_train=self.Z,
-            local_to_global=local_to_global,
-            global_to_local=global_to_local
+            local_to_global=local_to_global
         )
 
         self.model = hml

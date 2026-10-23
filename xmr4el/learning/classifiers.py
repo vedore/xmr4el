@@ -5,7 +5,6 @@ import numbers
 import pickle
 import warnings
 import numpy as np
-from abc import ABCMeta
 import torch
 from scipy.sparse import csr_matrix, hstack as sp_hstack, issparse
 from scipy.special import expit
@@ -13,102 +12,61 @@ from threadpoolctl import threadpool_limits
 from xmr4el import torch_device
 
 
-classifier_dict = {}
 logger = logging.getLogger(__name__)
 
 
-
-class ClassifierMeta(ABCMeta):
-    """
-    Metaclass for tracking all subclasses of ClassifierModel.
-    Automatically registers each subclass in classifier_dict.
-    """
-    def __new__(cls, name, bases, attr):
-        new_cls = super().__new__(cls, name, bases, attr)
-        if name != "ClassifierModel":
-            classifier_dict[name.lower()] = new_cls
-        return new_cls
-
-
-class ClassifierModel(metaclass=ClassifierMeta):
-    """Wrapper for all classifier models"""
+class ClassifierModel:
+    """Configured joint OvR logistic estimator and its persisted weights."""
 
     def __init__(self, config, model):
         self.config = config
         self.model = model
 
-    def save(self, classifier_folder):
-        """Save classifier model to disk."""
-        os.makedirs(classifier_folder, exist_ok=True)
-        with open(
-            os.path.join(classifier_folder, "classifier_config.json"),
-            "w",
-            encoding="utf-8",
-        ) as fout:
-            fout.write(json.dumps(self.config))
-        self.model.save(classifier_folder)
+    @staticmethod
+    def check_config(config):
+        if config.get("type") != "jointlogisticregression":
+            raise ValueError(f"invalid classifier type {config.get('type')!r}; expected 'jointlogisticregression'")
+
+    def save(self, save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+        with open(os.path.join(save_dir, "classifier_config.json"), "w", encoding="utf-8") as fout:
+            json.dump(self.config, fout)
+        with open(os.path.join(save_dir, "classifier_model.pkl"), "wb") as fout:
+            pickle.dump(self.model, fout)
 
     @classmethod
-    def load(cls, classifier_folder):
-        """Load a saved classifier model from disk."""
-        with open(os.path.join(classifier_folder, "classifier_config.json"), "r", encoding="utf-8") as fin:
-            config = json.loads(fin.read())
-
-        classifier_type = config.get("type", None)
-        if classifier_type not in classifier_dict:
-            raise ValueError(f"{classifier_folder}: invalid classifier type {classifier_type}")
-        model = classifier_dict[classifier_type].load(classifier_folder, config)
-        return cls(config, model)
+    def load(cls, load_dir):
+        with open(os.path.join(load_dir, "classifier_config.json"), encoding="utf-8") as fin:
+            config = json.load(fin)
+        cls.check_config(config)
+        with open(os.path.join(load_dir, "classifier_model.pkl"), "rb") as fin:
+            return cls(config, pickle.load(fin))
 
     @classmethod
-    def init_model(cls, config, onevsrest=False):
-        """
-        Initialize (but do not fit) a classifier, returning a ClassifierModel wrapper.
-        """
-        classifier_type = config.get("type", None)
-        if classifier_type is None:
-            raise ValueError(f"config {config} should contain a key 'type' for the classifier type")
-
-        kwargs = config.get("kwargs", {})
-        # delegate to the subclass's init_model (required for all subclasses)
-        model = classifier_dict[classifier_type].init_model(kwargs, onevsrest=onevsrest)
-        # keep the possibly-updated kwargs from the subclass instance
-        out_cfg = {"type": classifier_type, "kwargs": model.config}
-        return cls(out_cfg, model)
+    def init_model(cls, config):
+        cls.check_config(config)
+        kwargs = {"C": 1.0, "class_weight": "balanced", "tol": 1e-3, "max_iter": 500, **config.get("kwargs", {})}
+        return cls({"type": "jointlogisticregression", "kwargs": kwargs}, JointOvRLogistic(**kwargs))
 
     @classmethod
-    def train(cls, X_train, y_train, config, dtype=np.float32, onevsrest=False):
-        """
-        Train using the already-initialized model from init_model().
-        Works regardless of whether you call ClassifierModel.train(...) or a subclass's train(...).
-        """
-        classifier_type = config.get("type", None)
-        if classifier_type is None:
-            raise ValueError(f"config {config} should contain a key 'type' for the classifier type")
-
-        # Initialize via subclass init_model, then fit.
-        wrapper = cls.init_model(config, onevsrest=onevsrest)
-        # dtype is unused here, but retained for API compatibility
+    def train(cls, X_train, y_train, config):
+        wrapper = cls.init_model(config)
         with threadpool_limits(limits=1):
-            wrapper.model.model.fit(X_train, y_train)
-        # sync any updated params back
-        wrapper.config["kwargs"] = wrapper.model.config
+            wrapper.model.fit(X_train, y_train)
         return wrapper
 
-    # Delegations to underlying model object
-    def predict(self, predict_input):
-        return self.model.predict(predict_input)
+    def predict(self, X):
+        return self.model.predict(X)
 
-    def decision_function(self, predict_input):
-        return self.model.decision_function(predict_input)
+    def decision_function(self, X):
+        return self.model.decision_function(X)
 
-    def predict_proba(self, predict_input):
-        return self.model.predict_proba(predict_input)
+    def predict_proba(self, X):
+        return self.model.predict_proba(X)
 
     def classes(self):
-        return self.model.classes()
+        return self.model.classes_
 
-    
 
 # ---------------------------
 # Joint one-vs-rest L2 logistic regression
@@ -267,45 +225,3 @@ class JointOvRLogistic:
 
     def predict(self, X):
         return self.classes_[self.decision_function(X).argmax(axis=1)]
-
-
-class JointLogisticRegression(ClassifierModel):
-    """Config type "jointlogisticregression": `JointOvRLogistic` (kwargs C, class_weight, tol, max_iter). Always
-    one-vs-rest, so `onevsrest` is ignored."""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
-
-    def save(self, save_dir):
-        os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, "classifier_model.pkl"), "wb") as fout:
-            pickle.dump(self.model, fout)
-
-    @classmethod
-    def load(cls, load_dir, config):
-        with open(os.path.join(load_dir, "classifier_model.pkl"), "rb") as fin:
-            return cls(config, pickle.load(fin))
-
-    @classmethod
-    def init_model(cls, config, onevsrest=False):
-        cfg = {"C": 1.0, "class_weight": "balanced", "tol": 1e-3, "max_iter": 500, **(config or {})}
-        return cls(cfg, JointOvRLogistic(**cfg))
-
-    @classmethod
-    def train(cls, X_train, y_train, config=None, dtype=np.float32, onevsrest=False):
-        wrapper = cls.init_model(config or {}, onevsrest=onevsrest)
-        wrapper.model.fit(X_train, y_train)
-        return wrapper
-
-    def predict(self, X):
-        return self.model.predict(X)
-
-    def predict_proba(self, X):
-        return self.model.predict_proba(X)
-
-    def decision_function(self, X):
-        return self.model.decision_function(X)
-
-    def classes(self):
-        return self.model.classes_

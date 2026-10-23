@@ -23,8 +23,7 @@ def train(X, Y, Z, cfg, min_leaf_size=2, n_clusters=3, layer=2, cut_half=False, 
     caller_config = hml.clustering_config
     original = deepcopy(caller_config)
     with patch.object(hml, "prepare_layer", wraps=hml.prepare_layer) as prepare:
-        hml.train(X_train=X, Y_train=Y, Z_train=Z, local_to_global=np.arange(L),
-                  global_to_local={i: i for i in range(L)})
+        hml.train(X_train=X, Y_train=Y, Z_train=Z, local_to_global=np.arange(L))
     assert caller_config == original == hml.clustering_config, "training mutated clustering settings"
     assert prepare.call_count == sum(len(nodes) for nodes in hml.hmodel[:-1]), "prepared children of leaves"
     assert all(m.fused_scores is None for m in hml.hmodel[-1])
@@ -114,4 +113,3 @@ def test_tree():
     assert np.allclose(deep.predict(Xq, **kw).toarray(), restored.predict(Xq, **kw).toarray())
 
     print("ok")
-

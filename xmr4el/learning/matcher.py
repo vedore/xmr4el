@@ -1,185 +1,36 @@
-import os
-import pickle
+"""Train node matchers against local cluster or label targets."""
 import numpy as np
-import scipy.sparse as sp
-from typing import Any, Dict, List, Tuple, Optional
+
 from xmr4el.learning.classifiers import ClassifierModel
 
 
-class MatcherTrainer():
-    
-    # Y = Y_binary
-    @staticmethod
-    def train(
-        X: np.ndarray,
-        Y: sp.csr_matrix,
-        local_to_global_idx: List[int],
-        global_to_local_idx: Dict[int, int],
-        C: sp.csr_matrix,
-        config: Dict[str, Any],
-        dtype: Any = np.float32,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, ClassifierModel]:
-        """Train the matcher classifier.
-
-        Parameters
-        ----------
-        X:
-            Features, n x d.
-        Y:
-            Labels, n x L (sparse, one-hot rows).
-        local_to_global_idx:
-            Mapping of local label indices to global indices.
-        global_to_local_idx:
-            Mapping of global label indices to local indices.
-        C:
-            Label-to-cluster assignment, L x K (sparse); the matcher's targets are Y @ C (n x K).
-        config:
-            Configuration dictionary for the classifier.
-        dtype:
-            Data type for internal numpy arrays.
-
-        Returns
-        -------
-        Tuple[np.ndarray, np.ndarray, np.ndarray, ClassifierModel]
-            Filtered feature matrix, filtered label matrix, matching matrix and the trained classifier model.
-        """
-    
-        label_indices_local = [global_to_local_idx[g] for g in local_to_global_idx]
-        Y_sub = Y[:, label_indices_local]
-        
-        keep_mask = np.asarray(Y_sub.sum(axis=1)).flatten() > 0
-        
-        X_node = X[keep_mask]
-        Y_node = Y_sub[keep_mask]
-        
-        M_raw = Y_node @ C
-        M = (M_raw > 0).astype(int)
-        
-        model = ClassifierModel.train(X_node, M, config, dtype, onevsrest=True)
-        
-        return X_node, Y_node, M, model
-    
-
-
-
 class Matcher:
-    """Matcher pipeline that encapsulates model training and inference."""
+    def __init__(self):
+        self.model = None
 
-    def __init__(
-        self,
-    ) -> None:
-        """Initialize the matcher pipeline.
+    def save(self, save_dir):
+        if not callable(getattr(self.model, "save", None)):
+            raise TypeError(f"matcher model ({type(self.model).__name__}) has no save()")
+        self.model.save(save_dir)
 
-        Parameters
-        ----------
-        matcher_config:
-            Optional configuration dictionary for the matcher.
-        dtype:
-            Desired data type for internal numpy arrays.
-        """
-
-        self.model: Optional[ClassifierModel] = None
-        
-    def save(self, save_dir: str) -> None:
-        """Persist the matcher object to disk.
-
-        Parameters
-        ----------
-        save_dir:
-            Directory where the model and state will be saved.
-        """
-
-        model = self.model
-        if model is not None and not callable(getattr(model, "save", None)):
-            raise TypeError(f"matcher model ({type(model).__name__}) has no save()")
-        os.makedirs(save_dir, exist_ok=True)
-
-        state = self.__dict__.copy()
-        if model is not None:
-            model.save(os.path.join(save_dir, "matcher"))
-            state.pop("model", None)
-
-        with open(os.path.join(save_dir, "matcher.pkl"), "wb") as fout:
-            pickle.dump(state, fout)
-            
     @classmethod
-    def load(cls, load_dir: str) -> "Matcher":
-        """Load a matcher object from disk.
-
-        Parameters
-        ----------
-        load_dir:
-            Directory containing the saved matcher state.
-
-        Returns
-        -------
-        Matcher
-            Reconstructed matcher instance.
-        """
-        
-        matcher_path = os.path.join(load_dir, "matcher.pkl")
-        if not os.path.exists(matcher_path):
-            raise FileNotFoundError(f"Matcher path {matcher_path} does not exist")
-
-        with open(matcher_path, "rb") as fin:
-            model_data = pickle.load(fin)
-
+    def load(cls, load_dir):
         model = cls()
-        model.__dict__.update(model_data)
-        
-        model_path = os.path.join(load_dir, "matcher")
-        matcher = ClassifierModel.load(model_path)
-        model.model = matcher
-        
+        model.model = ClassifierModel.load(load_dir)
         return model
-    
-    
-    def train(
-        self,
-        X: np.ndarray,
-        Y: sp.csr_matrix,
-        local_to_global_idx: List[int],
-        global_to_local_idx: Dict[int, int],
-        C: sp.csr_matrix,
-        matcher_config: Optional[Dict[str, Any]] = None,
-        dtype: Any = np.float32,
-    ) -> None:
-        """Train the matcher model.
 
-        Parameters
-        ----------
-        X:
-            Features, n x d.
-        Y:
-            Labels, n x L (sparse, one-hot rows).
-        local_to_global_idx:
-            Mapping of local label indices to global indices.
-        global_to_local_idx:
-            Mapping of global label indices to local indices.
-        C:
-            Label-to-cluster assignment, L x K (sparse); the matcher's targets are Y @ C (n x K).
-        """
+    def train(self, X, Y, C, matcher_config):
+        """Y columns already follow the node's local label order; C maps them to matcher targets.
+        Rows without a local positive are excluded, as in hierarchy child preparation."""
+        keep = np.asarray(Y.sum(axis=1)).ravel() > 0
+        targets = ((Y[keep] @ C) > 0).astype(int)
+        self.model = ClassifierModel.train(X[keep], targets, matcher_config)
 
-        _, _, _, model = MatcherTrainer.train(
-            X=X,
-            Y=Y,
-            local_to_global_idx=local_to_global_idx,
-            global_to_local_idx=global_to_local_idx,
-            C=C,
-            config=matcher_config,
-            dtype=dtype,
-        )
-        
-        self.model = model
-        
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict labels for the given feature matrix."""
+    def predict(self, X):
         return self.model.predict(X)
-    
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predict label probabilities for the given feature matrix."""
+
+    def predict_proba(self, X):
         return self.model.predict_proba(X)
-    
-    def classes(self) -> np.ndarray:
-        """Return the classes predicted by the classifier."""
+
+    def classes(self):
         return self.model.classes()

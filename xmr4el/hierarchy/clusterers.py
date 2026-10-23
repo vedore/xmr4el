@@ -5,143 +5,55 @@ import pickle
 import numpy as np
 import logging
 import torch
-from abc import ABCMeta
 from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple, Counter
 from numpy import ones
 from scipy.sparse import csr_matrix
 
 
-cluster_dict = {}
-
-
-class ClusterMeta(ABCMeta):
-    """
-    Metaclass for tracking all subclasses of ClusteringModel.
-    Automatically registers each subclass in the cluster_dict.
-    """
-
-    def __new__(cls, name, bases, attr):
-        new_cls = super().__new__(cls, name, bases, attr)
-        if name != "ClusteringModel":
-            cluster_dict[name.lower()] = new_cls
-        return new_cls
-
-
-class ClusteringModel(metaclass=ClusterMeta):
-    """Wrapper to all clustering models"""
+class ClusteringModel:
+    """Configured balanced k-means assignments; no runtime backend registry."""
 
     def __init__(self, config, model):
         self.config = config
         self.model = model
 
-    def save(self, clustering_folder):
-        """Save clustering model to disk.
-
-        Args:
-            clustering_folder (str): Folder to save to.
-        """
-
-        os.makedirs(clustering_folder, exist_ok=True)
-        with open(
-            os.path.join(clustering_folder, "cluster_config.json"),
-            "w",
-            encoding="utf-8",
-        ) as fout:
-            fout.write(json.dumps(self.config))
-        self.model.save(clustering_folder)
-
-    @classmethod
-    def load(cls, clustering_folder):
-        """Load a saved clustering model from disk.
-
-        Args:
-            clustering_folder (str): Folder where `ClusteringModel` was saved to using `ClusteringModel.save`.
-
-        Returns:
-            ClusteringModel: The loaded object.
-        """
-
-        with open(os.path.join(clustering_folder, "cluster_config.json"), "r", encoding="utf-8") as fin:
-            config = json.loads(fin.read())
-
-        cluster_type = config.get("type", None)
-        if cluster_type not in cluster_dict:
-            raise ValueError(f"{clustering_folder}: invalid cluster type {cluster_type}")
-        model = cluster_dict[cluster_type].load(clustering_folder, config["kwargs"])
-        return cls(config, model)
-
-    @classmethod
-    def train(cls, trn_corpus, config, dtype=np.float32):
-        """Train on a corpus.
-
-        Args:
-            trn_corpus (list or str): Training corpus in the form of a list of strings or path to text file.
-            config (dict, optional): Dict with key `"type"` and value being the lower-cased name of the specific cluster
-            class to use.
-                Also contains keyword arguments to pass to the specified cluster. Default behavior is to use kmeans cluster with default arguments.
-            dtype (type, optional): Data type. Default is `numpy.float32`.
-
-        Returns:
-            ClusteringModel: Trained cluster model.
-        """
-
-        config = deepcopy(config)
-        cluster_type = config.get("type", None)
-        if cluster_type is None:
-            raise ValueError(f"config {config} should contain a key 'type' for the cluster type")
-        model = cluster_dict[cluster_type].train(
-            trn_corpus, config=config["kwargs"], dtype=dtype
-        )
-        config["kwargs"] = model.config
-        return cls(config, model)
-
-    def labels(self):
-        return self.model.labels()
-
-
-
-class BalancedKMeans(ClusteringModel):
-    """PECOS-style balanced spherical k-means: recursive 2-means whose split is the n_l best-scoring points
-    (sizes differ by at most 1 at each split), then joint balanced refinement over all k clusters."""
-
-    def __init__(self, config=None, model=None):
-        self.config = config
-        self.model = model
+    @staticmethod
+    def check_config(config):
+        if config.get("type") != "balancedkmeans":
+            raise ValueError(f"invalid cluster type {config.get('type')!r}; expected 'balancedkmeans'")
+        BalancedKMeans.check_config(config.get("kwargs", {}))
 
     def save(self, save_dir):
-        """Save trained Balanced KMeans model to disk.
-
-        Args:
-            save_dir (str): Folder to store serialized object in.
-        """
-
         os.makedirs(save_dir, exist_ok=True)
+        with open(os.path.join(save_dir, "cluster_config.json"), "w", encoding="utf-8") as fout:
+            json.dump(self.config, fout)
         with open(os.path.join(save_dir, "clustering.pkl"), "wb") as fout:
             pickle.dump(self.model, fout)
 
     @classmethod
-    def load(cls, load_dir, config):
-        """Load a saved Balanced KMeans model from disk.
+    def load(cls, load_dir):
+        with open(os.path.join(load_dir, "cluster_config.json"), encoding="utf-8") as fin:
+            config = json.load(fin)
+        cls.check_config(config)
+        with open(os.path.join(load_dir, "clustering.pkl"), "rb") as fin:
+            return cls(config, pickle.load(fin))
 
-        Args:
-            load_dir (str): Folder inside which the model is loaded.
-
-        Returns:
-            BalancedKMeans: The loaded object.
-        """
-
-        clustering_path = os.path.join(load_dir, "clustering.pkl")
-        if not os.path.exists(clustering_path):
-            raise FileNotFoundError(f"clustering path {clustering_path} does not exist")
-
-        with open(clustering_path, "rb") as fin:
-            model_data = pickle.load(fin)
-        model = cls(config, model_data)
-        return model
+    @classmethod
+    def train(cls, trn_corpus, config):
+        cls.check_config(config)
+        config = deepcopy(config)
+        config["kwargs"] = {**BalancedKMeans.DEFAULTS, **config.get("kwargs", {})}
+        return cls(config, BalancedKMeans.train(trn_corpus, config["kwargs"]))
 
     def labels(self):
-        return self.model["cluster_labels"]
+        return self.model
+
+
+class BalancedKMeans:
+    """Balanced spherical k-means: recursive 2-means followed by joint balanced refinement."""
+
+    DEFAULTS = {"n_clusters": 8, "iter_limit": 20, "refine_iter": 20, "seed": 0}
 
     @staticmethod
     def check_config(config):
@@ -154,9 +66,10 @@ class BalancedKMeans(ClusteringModel):
             raise ValueError("balancedkmeans: " + "; ".join(bad))
 
     @classmethod
-    def train(cls, trn_corpus, config={}, dtype=np.float32):
+    def train(cls, trn_corpus, config=None):
+        config = config or {}
         cls.check_config(config)
-        config = {"n_clusters": 8, "iter_limit": 20, "refine_iter": 20, "seed": 0, **config}
+        config = {**cls.DEFAULTS, **config}
         Z = np.asarray(trn_corpus, dtype=np.float32)
         Z = Z / (np.linalg.norm(Z, axis=1, keepdims=True) + 1e-12)  # zero rows stay (one label per row)
         rs = np.random.RandomState(config["seed"])
@@ -193,7 +106,7 @@ class BalancedKMeans(ClusteringModel):
             if (new == labels).all():
                 break
             labels = new
-        return cls(config, {"cluster_labels": labels})
+        return labels
 
 
 def _balanced_assign(S, cap, steps=300):
@@ -243,7 +156,7 @@ class ClusteringTrainer:
             return None, None
 
         # Train clustering model
-        clustering_model = ClusteringModel.train(Z, config, dtype)
+        clustering_model = ClusteringModel.train(Z, config)
         cluster_labels = clustering_model.labels()
         cluster_counts = Counter(cluster_labels)
 

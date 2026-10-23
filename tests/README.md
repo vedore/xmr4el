@@ -16,9 +16,9 @@ small classifiers/hierarchies, so the project ML dependencies are still required
 | Path | Checks |
 | --- | --- |
 | `data/` | PubTator/grouped TSV readers, label alignment, training CLI inputs, BC5CDR `-1`/composite ids, split CLI output, CTD dictionary conversion (synonym columns by header, `-omim`), `to_pubtator.py` (type filter, id normalisation, BioC offsets). |
-| `features/` | Text encoding, feature-block normalization, embedding row order, CUDA/MPS out-of-memory recovery. |
+| `features/` | Adapter config validation and persistence, text encoding, feature-block normalization, embedding row order, CUDA/MPS out-of-memory recovery. |
 | `hierarchy/` | Cluster reassignment, balanced k-means, layer preparation, tree training. |
-| `learning/` | Joint logistic classifier, mention-kNN label scores (`label_max_cos`). |
+| `learning/` | Joint logistic classifier, local node target order and unlabeled-row filtering, mention-kNN label scores (`label_max_cos`). |
 | `integration/` | Config preservation, import behavior, label mapping, pipeline persistence. |
 | `test_eval.py` | Ranking metric self-check and known metric values. |
 | `test_run_experiment.py` | Tracked run wrapper on a synthetic spec: run dir files (status, provenance hashes, git untracked), metrics = `evaluate_tree`, eval-only reuse, spec errors (names, search values, missing inputs, bad model config), no overwrite, empty eval fails the run, log handler removed. |

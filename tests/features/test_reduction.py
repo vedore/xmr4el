@@ -9,4 +9,4 @@ def test_svd_transform_matches_sklearn():
     X = sp.random(300, 2000, density=0.01, format="csr", random_state=0)
     dim = DimensionModel.fit(X, {"type": "sklearntruncatedsvd", "kwargs": {"n_components": 20}})
     for Q in (X[:1], X[5:6], X):
-        assert np.array_equal(dim.transform(Q), dim.model.model.transform(Q))
+        assert np.array_equal(dim.transform(Q), dim.model.transform(Q))
