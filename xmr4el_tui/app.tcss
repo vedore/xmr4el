@@ -144,3 +144,40 @@ TabPane {
 #review-buttons Button {
     margin: 0 4 0 0;
 }
+
+.row Select {
+    width: 48;
+}
+
+.row Checkbox {
+    width: 48;
+}
+
+.row #tree {
+    width: auto;
+}
+
+SpecPicker {
+    align: center middle;
+}
+
+#picker {
+    width: 70;
+    height: 24;
+    padding: 1 2;
+    background: $panel;
+    border: round $primary;
+}
+
+#pick-list {
+    height: 1fr;
+    margin: 1 0 0 0;
+}
+
+#trees {
+    height: 1fr;
+}
+
+#tree-details {
+    padding: 1 2;
+}

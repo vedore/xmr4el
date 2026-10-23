@@ -1,5 +1,6 @@
-"""Setup -> -check -> Review -> spawn (tui.md §5.5-5.7) against a fake runner: stale checks never enable Review,
-form errors stop at the field, Start opens the new run, exit 3 returns to Setup to revalidate."""
+"""Setup -> -check -> Review -> spawn (tui.md §5.5-5.7) against a fake runner: dataset/split pickers and arrow keys,
+stale checks never enable Review, form errors stop at the field, Start opens the new run, exit 3 returns to Setup,
+ctrl+o picker loads a spec unchanged, Trees `e` evaluates a tree on this machine only."""
 import json
 from pathlib import Path
 
@@ -11,8 +12,8 @@ from fake_runs import make_run  # noqa: E402
 from test_screens import run_app, text  # noqa: E402
 from textual.widgets import Input, Static  # noqa: E402
 from xmr4el_tui import process  # noqa: E402
-from xmr4el_tui.launch import ReviewScreen, SetupScreen  # noqa: E402
-from xmr4el_tui.screens import RunScreen, RunsScreen  # noqa: E402
+from xmr4el_tui.launch import ReviewScreen, SetupScreen, SpecPicker  # noqa: E402
+from xmr4el_tui.screens import RunScreen, RunsScreen, TreesScreen  # noqa: E402
 
 # -check: effective search over beam 10 / the eval's keys; FAIL_CHECK fails it. Run: exit 3 when REJECT exists,
 # else create -run_dir with status.json running (recorded spec + argv) and exit.
@@ -39,11 +40,21 @@ json.dump({"status": "running", "started": "2026-10-23T15:00:00"}, open(os.path.
 """
 
 
+SYN = {"name": "syn", "model_config": "configs/c.json", "train_path": "datasets/x/train_plus_ctd.pubtator",
+       "evals": [{"split": "dev_knn0", "test_path": "datasets/x/dev.pubtator",
+                  "train_path": "datasets/x/train_plus_ctd.pubtator", "knn_beta": 0}]}
+
+
 def fake_root(tmp_path):
     make_run(tmp_path, "ncbi_disease", tree_here=True)
-    for f in ("configs/c.json", "datasets/x/train.pubtator", "datasets/x/dev.pubtator"):
+    make_run(tmp_path, "gone", stamp="2026-10-19_10-00-00", tree_id="feedbeef")
+    files = ["configs/c.json", *[f"datasets/x/{f}.pubtator" for f in ("train", "train_plus_ctd", "dev", "test")],
+             "datasets/y/train.pubtator", "datasets/y/dev.pubtator"]
+    for f in files:
         Path(tmp_path, f).parent.mkdir(parents=True, exist_ok=True)
         Path(tmp_path, f).write_text(json.dumps({"predict_config": {"knn_beta": 10.0}}))
+    Path(tmp_path, "configs/experiments").mkdir()
+    Path(tmp_path, "configs/experiments/syn.json").write_text(json.dumps(SYN))
     Path(tmp_path, "outputs/saved_trees/xmodel_8528b624aaaa/xmodel.json").write_text(json.dumps(
         {"tree_id": "8528b624aaaa", "predict_config": {"beam_size": 10}, "initial_labels": {"type": "list", "len": 13385}}))
     Path(tmp_path, process.RUNNER).parent.mkdir(parents=True, exist_ok=True)
@@ -69,19 +80,37 @@ def test_setup_review_start(tmp_path):
     async def check(app, pilot):
         await pilot.press("n")
         setup = app.screen
-        assert isinstance(setup, SetupScreen)
-        await fill(pilot, setup, {"name": "syn", "model_config": "configs/c.json", "train_path": "nope",
-                                  "e1-test_path": "datasets/x/dev.pubtator", "e1-beam_size": "x"})
+        assert isinstance(setup, SetupScreen) and app.focused.id == "name"
+        assert setup.value("name") == "x" and setup.chosen("dataset") == "datasets/x"
+        assert setup.chosen("train_file") == "datasets/x/train_plus_ctd.pubtator"
+        await pilot.press("down", "down")
+        assert app.focused.id == "dataset", "up/down move between fields"
+        await pilot.press("right")  # cycle to datasets/y: training file and default name follow
+        await pilot.pause()
+        assert setup.chosen("dataset") == "datasets/y" and setup.value("name") == "y"
+        assert setup.chosen("train_file") == "datasets/y/train.pubtator" and setup.chosen("e1-split") == "datasets/y/dev.pubtator"
+        await pilot.press("left")
+        await pilot.pause()
+        assert setup.chosen("dataset") == "datasets/x" and setup.value("name") == "x"
+        await pilot.press("down", "down", "down")  # training file, Remove, split
+        assert app.focused.id == "e1-split"
+        await pilot.press("right")  # train -> dev -> test
+        await pilot.pause()
+        assert setup.chosen("e1-split") == "datasets/x/test.pubtator"
+        assert "Evaluation test" in text(setup.query_one("#head-1"))
+        await fill(pilot, setup, {"name": "", "e1-beam_size": "x"})
         await pilot.press("ctrl+s")
-        assert app.focused.id == "train_path", "ctrl+s focuses the first invalid field"
+        assert app.focused.id == "name", "ctrl+s focuses the first invalid field"
         assert text(setup.query_one("#err-e1-beam_size", Static)) == "an integer"
-        await fill(pilot, setup, {"train_path": "datasets/x/train.pubtator", "e1-beam_size": "5"})
+        await fill(pilot, setup, {"name": "syn", "e1-beam_size": "5"})
         await pilot.press("ctrl+s")  # waits for the check, then opens Review
         await settle(pilot, setup, lambda: isinstance(app.screen, ReviewScreen))
-        review = app.screen
-        body = text(review.query_one("#review-text", Static))
-        assert '"beam_size": 5' in body and "dev: beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10.0" in body
-        assert "sha256 cccccccc…" in body
+        assert app.screen.spec == {"name": "syn", "model_config": "configs/c.json",
+                                   "train_path": "datasets/x/train.pubtator",
+                                   "evals": [{"split": "test", "test_path": "datasets/x/test.pubtator",
+                                              "train_path": "datasets/x/train.pubtator", "beam_size": 5}]}
+        body = text(app.screen.query_one("#review-text", Static))
+        assert "test: beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10.0" in body and "sha256 cccccccc…" in body
         await pilot.press("escape")
         assert app.screen is setup
         assert text(setup.query_one("#hint-e1-knn_beta", Static)) == "config 10.0"
@@ -100,8 +129,7 @@ def test_setup_review_start(tmp_path):
 
 def test_stale_check_and_rejection(tmp_path):
     async def check(app, pilot):
-        app.setup({"name": "syn", "model_config": "configs/c.json", "train_path": "datasets/x/train.pubtator",
-                   "evals": [{"split": "dev", "test_path": "datasets/x/dev.pubtator"}]})
+        app.push_screen(SetupScreen(SYN, loaded=True))
         await pilot.pause()
         setup = app.screen
         await settle(pilot, setup, lambda: setup.result is not None)
@@ -130,22 +158,41 @@ def test_stale_check_and_rejection(tmp_path):
     run_app(fake_root(tmp_path), check)
 
 
-def test_evaluate_tree_prefilled(tmp_path):
+def test_load_picker(tmp_path):
     async def check(app, pilot):
-        await pilot.press("e")
+        await pilot.press("n", "ctrl+o")
+        assert isinstance(app.screen, SpecPicker)
+        await pilot.press(*"syn", "enter")
+        await pilot.pause()
         setup = app.screen
-        assert isinstance(setup, SetupScreen) and not setup.train
-        assert setup.query_one("#tree", Input).value == "outputs/saved_trees/xmodel_8528b624aaaa"
-        assert setup.query_one("#e1-test_path", Input).value == "datasets/x/dev.pubtator"
-        assert text(setup.query_one("#tree-info", Static)) == "trained by ncbi_disease · 13,385 labels · on this machine"
+        assert isinstance(setup, SetupScreen) and setup.draft[0] == SYN, "a loaded spec round-trips unchanged"
+        assert "Evaluation dev_knn0" in text(setup.query_one("#head-1"))
+        await pilot.press("ctrl+o", *"ncbi_disease", "down", "enter")  # the recorded spec of the eval run
+        await pilot.pause()
+        assert app.screen.xmodel_path is None and app.screen.chosen("train_file") == "datasets/x/train.pubtator"
+    run_app(fake_root(tmp_path), check)
+
+
+def test_trees_evaluate(tmp_path):
+    async def check(app, pilot):
+        await pilot.press("t")
+        trees = app.screen
+        assert isinstance(trees, TreesScreen) and [t.id for t in trees.trees] == ["8528b624aaaa", "feedbeef"]
+        await pilot.press("down", "e")
+        assert app.screen is trees, "a tree not on this machine is not evaluated"
+        await pilot.press("up", "e")
+        setup = app.screen
+        assert isinstance(setup, SetupScreen) and setup.xmodel_path == "outputs/saved_trees/xmodel_8528b624aaaa"
+        assert text(setup.query_one("#tree-info", Static)) == \
+            "trained by ncbi_disease on datasets/x/train.pubtator · 13,385 labels · on this machine"
         assert "Evaluate tree 8528b624" in text(setup.query_one("#top"))
+        assert setup.chosen("e1-split") == "datasets/x/test.pubtator" and setup.value("name") == "ncbi_disease_eval"
         await settle(pilot, setup, lambda: setup.result is not None)
         assert text(setup.query_one("#hint-e1-beam_size", Static)) == "tree 10"
         await pilot.press("ctrl+s")
         await settle(pilot, setup, lambda: isinstance(app.screen, ReviewScreen))
-        assert "Evaluates tree 8528b624 (outputs/saved_trees/xmodel_8528b624aaaa) on dev." in \
+        assert app.screen.spec["evals"] == [{"split": "test", "test_path": "datasets/x/test.pubtator",
+                                             "train_path": "datasets/x/train.pubtator"}]
+        assert "Evaluates tree 8528b624 (outputs/saved_trees/xmodel_8528b624aaaa) on test." in \
             text(app.screen.query_one("#review-text", Static))
-        await pilot.press("escape")
-        await pilot.press("escape")
-        assert isinstance(app.screen, RunsScreen)
     run_app(fake_root(tmp_path), check)

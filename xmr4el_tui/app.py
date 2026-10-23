@@ -11,7 +11,6 @@ from textual.app import App
 from textual.binding import Binding
 
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.launch import SetupScreen
 from xmr4el_tui.screens import RunsChanged, RunScreen, RunsScreen
 
 RESCAN_SECONDS = 5
@@ -72,22 +71,6 @@ class XMR4ELApp(App):
                         else "Rescanned: outputs/runs/ not found", timeout=2)
         for screen in self.screen_stack:
             screen.post_message(RunsChanged())
-
-    def setup(self, spec=None, xmodel_path=None):
-        """Setup for a new training run, or for evaluating the tree at xmodel_path (§5.5, §5.6)."""
-        self.push_screen(SetupScreen(spec, xmodel_path))
-
-    def evaluate_tree(self, run):
-        """`e`: Setup with the run's tree and evaluations (no search overrides)."""
-        if not run.tree_path:
-            self.notify(f"{run.name} has no saved tree", severity="warning")
-        elif not run.tree_here:
-            self.notify(f"tree {run.tree_id and run.tree_id[:8]} not on this machine\nmissing: "
-                        f"{run.tree_path}/xmodel.pkl", severity="warning")
-        else:
-            evals = [{k: v for k, v in (("split", e.split), ("test_path", e.test_path), ("train_path", e.train_path))
-                      if v} for e in run.evals]
-            self.setup({"name": run.name, "evals": evals or [{"split": "dev"}]}, run.tree_path)
 
     async def started(self, run_id):
         """Review -> the new run's screen once its status.json exists (Setup and Review leave the stack)."""

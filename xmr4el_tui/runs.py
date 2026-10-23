@@ -13,6 +13,10 @@ RUNS_DIR = Path("outputs", "runs")
 SEARCH_KEYS = ("beam_size", "topk", "knn_beta", "leaf_candidates")
 RUN_ID = re.compile(r"(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})_(.+)")
 RECORDED_STATES = {"running", "completed", "failed", "stopped"}
+TREES_DIR = Path("outputs", "saved_trees")
+# <dataset>/{train,dev,test}.pubtator, MedMentions <dataset>/corpus_pubtator_{train,dev,test}.txt
+SPLIT_FILE = re.compile(r"(?:.*[_-])?(train|dev|test)\.pubtator|.*pubtator[_-](train|dev|test)\.txt")
+SPLITS = ("train", "dev", "test")
 # status.json keys that are not process identity (§9)
 STATUS_KEYS = {"status", "started", "finished", "error"}
 
@@ -174,6 +178,81 @@ def previous_completed(runs, run):
     older = [r for r in runs if r.name == run.name and r.recorded == "completed" and r.id != run.id
              and r.started and run.started and r.started < run.started]
     return max(older, key=lambda r: r.started, default=None)
+
+
+@dataclass(frozen=True)
+class Tree:
+    id: str | None
+    path: str                 # outputs/saved_trees/xmodel_<stamp>
+    here: bool                # xmodel.pkl on this machine
+    trained_by: Run | None    # None: training run not synced, or trained outside run_experiment
+    used_by: tuple[Run, ...]  # every run on this tree, newest first (trained_by included)
+    labels: int | None
+
+    def train_path(self):
+        """Training file of the tree (its training run's spec), or None."""
+        spec = self.trained_by.spec() if self.trained_by else None
+        return spec.get("train_path") if isinstance(spec, dict) else None
+
+
+def trees(root, all_runs):
+    """Saved trees: those runs point at (tree.json), then tree directories no run mentions (xmodel.json), newest
+    use first. No pickle is read."""
+    found = {}
+    for r in all_runs:  # newest first
+        if r.tree_path:
+            found.setdefault(r.tree_path, []).append(r)
+    out = []
+    for path, used in found.items():
+        labels = next((e.metrics.get("labels") for r in used for e in r.evals if e.metrics), None)
+        out.append(Tree(id=used[0].tree_id, path=path, here=tree_on_disk(root, path),
+                        trained_by=next((r for r in used if r.kind == "train"), None), used_by=tuple(used),
+                        labels=labels if isinstance(labels, int) else None))
+    on_disk = sorted(Path(root, TREES_DIR).glob("*/xmodel.json")) if Path(root, TREES_DIR).is_dir() else []
+    for view_path in reversed(on_disk):
+        path = str(view_path.parent.relative_to(root))
+        if path not in found:
+            view = read_json(view_path)[0]
+            view = view if isinstance(view, dict) else {}
+            n = (view.get("initial_labels") or {}).get("len") if isinstance(view.get("initial_labels"), dict) else None
+            out.append(Tree(id=view.get("tree_id"), path=path, here=tree_on_disk(root, path), trained_by=None,
+                            used_by=(), labels=n if isinstance(n, int) else None))
+    return out
+
+
+def model_configs(root):
+    """configs/*.json (experiment specs live in configs/experiments/)."""
+    return [str(p.relative_to(root)) for p in sorted(Path(root, "configs").glob("*.json"))]
+
+
+def experiment_specs(root):
+    return [str(p.relative_to(root)) for p in sorted(Path(root, "configs", "experiments").glob("*.json"))]
+
+
+def split_files(root, dataset):
+    """{split: path} of a dataset directory, in SPLITS order."""
+    try:
+        names = sorted(p.name for p in Path(root, dataset).iterdir() if p.is_file())
+    except OSError:
+        return {}
+    found = {m[m.lastindex]: str(Path(dataset, n)) for n in names if (m := SPLIT_FILE.fullmatch(n))}
+    return {s: found[s] for s in SPLITS if s in found}
+
+
+def training_files(root, dataset):
+    """Files of a dataset usable for training: names with "train" (train, train_plus_ctd)."""
+    try:
+        return [str(Path(dataset, p.name)) for p in sorted(Path(root, dataset).iterdir())
+                if p.is_file() and "train" in p.stem and (p.suffix == ".pubtator" or "pubtator" in p.stem)]
+    except OSError:
+        return []
+
+
+def datasets(root):
+    """Directories under datasets/ with a dev or test file."""
+    found = {str(p.parent.relative_to(root)) for p in Path(root, "datasets").rglob("*")
+             if (m := SPLIT_FILE.fullmatch(p.name)) and m[m.lastindex] != "train"} if Path(root, "datasets").is_dir() else ()
+    return sorted(found, key=str.lower)
 
 
 def normalize_spec(recorded):

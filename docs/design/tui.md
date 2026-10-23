@@ -64,7 +64,7 @@ age (§9); the laptop never signals anything.
 | Task | Keys |
 | --- | --- |
 | Train and evaluate | Runs `n` -> Setup -> Review -> `enter` start -> Run |
-| Evaluate a tree again (other split, other search) | Runs or Run `e` -> Setup (tree prefilled) -> Review -> start |
+| Evaluate a tree again (other split, other search) | Runs `t` -> Trees `e` -> Setup (tree prefilled) -> Review -> start |
 | Repeat with edits | Run `d` duplicate -> Setup (copied fields) -> Review -> start |
 | Watch a run | Runs `enter` on a RUNNING row -> Overview |
 | Recover from a failure | Run (banner shows error) -> `2` log -> `d` duplicate, edit, start |
@@ -296,6 +296,14 @@ d duplicate and edit  e evaluate tree  2 log  esc runs  ? help
 
 ### 5.5 Setup: new training run
 
+User 2026-10-23 (supersedes the path fields below): files are picked, not typed. `model_config` = select of
+`configs/*.json` (`ctrl+e` edits the chosen one); `dataset` = select of `datasets/` directories with dev / test
+files; `training file` = select of that dataset's `train*` files (default `train_plus_ctd`); each evaluation's
+`split` = select of the dataset's train / dev / test files (`test_path` follows), `breakdown` = checkbox (the
+evaluation's `train_path` = the training file, or the tree's). The default name follows the dataset. A loaded value
+discovery does not find is kept as an extra option; a loaded split label that is not the file's split
+(`dev_knn0` on `dev.pubtator`) is kept until the split changes. A form that differs from the loaded spec says where.
+
 ```text
 XMR4EL  New training run                                  gpu01-xmr4el
  name             [ nlm_chem_beam5                               ]
@@ -510,7 +518,8 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |
 | Runs | `n` | New training run. |
-| Runs, Run | `e` | Evaluate the selected run's tree. |
+| Runs | `t` | Trees: saved trees (runs' `tree.json` + `outputs/saved_trees/`), trained by, training file, labels, runs, on this machine. |
+| Trees | `e` / `enter` | Evaluate the selected tree (refused with the reason when it is not on this machine). |
 | Runs, Run | `d` | Duplicate setup. |
 | Runs | `space` | Mark (at most two; the footer shows `mark n/2`). |
 | Runs | `c` | Compare the marked runs. |
@@ -527,6 +536,8 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Log | `/` `n` `N` | Search, next, previous. |
 | Log | `end` / `pgup` | Follow / stop following. |
 | Setup | `ctrl+s` | Review. `enter` in a field never starts anything. |
+| Setup | `up` / `down` | Previous / next field. In a select: `left` / `right` cycle, `enter` / `space` open the list. |
+| Setup | `ctrl+o` | Spec picker: `configs/experiments/*.json`, then runs' recorded specs (newest first); type to filter. |
 | Review | `enter` / `a` | Start run / save spec as a file. |
 
 - Printable keys never act inside text fields.

@@ -9,7 +9,8 @@ from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
 
-from xmr4el_tui import compare, fmt
+from xmr4el_tui import compare, fmt, runs
+from xmr4el_tui.launch import SetupScreen
 from xmr4el_tui.widgets import (LogView, TopBar, acc1, details_text, elapsed, inputs_text, overview_text,
                                 split_cell, state_text, state_word)
 
@@ -50,7 +51,7 @@ class RunTable(DataTable):
 
 
 class RunsScreen(Screen):
-    BINDINGS = [Binding("enter", "open", "open"), Binding("n", "new", "new run"), Binding("e", "evaluate", "evaluate"),
+    BINDINGS = [Binding("enter", "open", "open"), Binding("n", "new", "new run"), Binding("t", "trees", "trees"),
                 Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
                 Binding("slash", "filter", "filter"),
                 Binding("o", "sort", "sort", show=False), Binding("ctrl+r", "rescan", "rescan", show=False),
@@ -167,11 +168,10 @@ class RunsScreen(Screen):
             self.app.push_screen(RunScreen(rid))
 
     def action_new(self):
-        self.app.setup()
+        self.app.push_screen(SetupScreen())
 
-    def action_evaluate(self):
-        if (run := self.selected()) is not None:
-            self.app.evaluate_tree(run)
+    def action_trees(self):
+        self.app.push_screen(TreesScreen())
 
     def action_mark(self):
         rid = self.selected_id()
@@ -226,7 +226,7 @@ class RunsScreen(Screen):
 class RunScreen(Screen):
     BINDINGS = [Binding("1", "tab('overview')", "overview"), Binding("2", "tab('log')", "log"),
                 Binding("3", "tab('inputs')", "inputs"), Binding("w", "warnings", "warnings"),
-                Binding("y", "copy", "copy path"), Binding("e", "evaluate", "evaluate", show=False),
+                Binding("y", "copy", "copy path"),
                 Binding("escape", "app.pop_screen", "runs")]
 
     def __init__(self, run_id):
@@ -283,12 +283,92 @@ class RunScreen(Screen):
         on = self.query_one(LogView).toggle_warnings()
         self.notify("Log: warnings and errors only" if on else "Log: all lines")
 
-    def action_evaluate(self):
-        self.app.evaluate_tree(self.run)
-
     def action_copy(self):
         self.app.copy_to_clipboard(str(self.run.path))
         self.notify(f"Copied {self.run.path}")
+
+
+class TreesScreen(Screen):
+    """Saved trees (from the runs' tree.json and outputs/saved_trees/); enter evaluates the selected one (§5.6)."""
+    BINDINGS = [Binding("e", "evaluate", "evaluate"), Binding("enter", "evaluate", show=False),
+                Binding("escape", "app.pop_screen", "runs")]
+
+    def compose(self) -> ComposeResult:
+        yield TopBar(id="top")
+        yield RunTable(id="trees", cursor_type="row")
+        with VerticalScroll(classes="side-panel"):
+            yield Static(id="tree-details")
+        yield Footer()
+
+    def on_mount(self):
+        self.set_class((self.size.width or self.app.size.width) < NARROW, "-narrow")
+        self.rebuild()
+
+    def on_resize(self, _):
+        self.set_class((self.size.width or self.app.size.width) < NARROW, "-narrow")
+
+    def on_runs_changed(self, _):
+        self.rebuild()
+
+    def rebuild(self):
+        table = self.query_one(DataTable)
+        keep = self.selected()
+        self.trees = runs.trees(self.app.root, self.app.runs)
+        table.clear(columns=True)
+        for c in ("Tree", "Trained by", "Training file", "Labels", "Runs", "Here"):
+            table.add_column(c, key=c)
+        for t in self.trees:
+            train = t.train_path()
+            table.add_row(fmt.tree(t.id), t.trained_by.name if t.trained_by else fmt.DASH,
+                          train.removeprefix("datasets/").rsplit(".", 1)[0] if train else fmt.DASH,
+                          Text(fmt.count(t.labels), justify="right"), Text(str(len(t.used_by)), justify="right"),
+                          Text("yes", style="green") if t.here else Text("no", style="dim"), key=t.path)
+        paths = [t.path for t in self.trees]
+        if keep and keep.path in paths:
+            table.move_cursor(row=paths.index(keep.path))
+        self.query_one(TopBar).set(f"Trees  {len(self.trees)}", f"{sum(t.here for t in self.trees)} on this machine"
+                                                               f" · {self.app.host}")
+        self.update_details()
+
+    def selected(self):
+        table = self.query_one(DataTable)
+        if not table.row_count:
+            return None
+        path = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value
+        return next((t for t in getattr(self, "trees", ()) if t.path == path), None)
+
+    def update_details(self):
+        t = self.selected()
+        details = self.query_one("#tree-details", Static)
+        if t is None:
+            details.update("No saved trees: runs that train write one (n), or sync outputs/saved_trees/.")
+            return
+        out = Text()
+        out.append(f"{t.id or 'no tree id'}\n{t.path}\n", style="bold")
+        out.append("on this machine\n\n" if t.here else f"not on this machine\nmissing: {t.path}/xmodel.pkl\n\n",
+                   style="green" if t.here else "yellow")
+        if t.trained_by:
+            out.append(f"Trained by {t.trained_by.name}\n{t.train_path() or ''}\n\n")
+        for r in t.used_by:
+            out.append(f"{fmt.stamp(r.started)}  {r.name}  {split_cell(r)} {fmt.metric(acc1(r))}\n")
+        details.update(out)
+
+    def on_data_table_row_highlighted(self, _):
+        self.update_details()
+
+    def on_data_table_row_selected(self, _):
+        self.action_evaluate()
+
+    def action_evaluate(self):
+        t = self.selected()
+        if t is None:
+            return
+        if not t.here:
+            self.notify(f"tree {fmt.tree(t.id)} not on this machine\nmissing: {t.path}/xmodel.pkl",
+                        severity="warning")
+            return
+        name = f"{t.trained_by.name}_eval" if t.trained_by else f"tree_{fmt.tree(t.id)}"
+        self.app.push_screen(SetupScreen({"name": name}, t.path))
 
 
 class CompareScreen(Screen):
