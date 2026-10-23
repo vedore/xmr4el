@@ -177,11 +177,14 @@ def run(spec, xmodel_path=None):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("-spec", required=True, help="configs/experiments/<name>.json")
+    parser.add_argument("-spec", required=True, help="configs/experiments/<name>.json, or - for stdin")
     parser.add_argument("-xmodel_path", help="evaluate this saved tree instead of training")
     args = parser.parse_args()
-    with open(args.spec) as f:
-        spec = json.load(f)
+    if args.spec == "-":
+        spec = json.load(sys.stdin)
+    else:
+        with open(args.spec) as f:
+            spec = json.load(f)
     # SIGTERM (kill, docker stop) -> SystemExit, so run() marks the run failed; SIGKILL still leaves "running"
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     run(spec, args.xmodel_path)

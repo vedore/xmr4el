@@ -14,6 +14,7 @@ import pytest
 
 from xmr4el.eval import evaluate_tree
 from xmr4el.xmodel import XModel
+from xmr4el_tui import runs
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/run_experiment.py"
@@ -35,8 +36,9 @@ def write_pubtator(path, n_docs, seed):
             f.write(f"{d}|t|{title}\n{d}|a|Results were clear.\n{d}\t{s}\t{s + len(m)}\t{m}\tDisease\tL{j}\n\n")
 
 
-def run(tmp, *args):
-    return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=tmp, capture_output=True, text=True)
+def run(tmp, *args, stdin=None):
+    return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=tmp, capture_output=True, text=True,
+                          input=stdin)
 
 
 def load_script():
@@ -87,13 +89,21 @@ def test_run_experiment(tmp_path):
     for k in ("acc@1", "MRR", "R@5", "R@cand", "hybrid", "strings", "search", "rows"):
         assert dev[k] == want[k], k
 
-    # eval only: the saved tree is reused, nothing trained
-    r = run(tmp_path, "-spec", "spec.json", "-xmodel_path", tree_path)
+    # eval only, spec on stdin: the saved tree is reused, nothing trained
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", tree_path, stdin=json.dumps(spec))
     assert r.returncode == 0, r.stderr
     assert len(list((tmp_path / "outputs/saved_trees").iterdir())) == 1
     again = max((tmp_path / "outputs/runs").iterdir())
     assert again != run_dir and not (again / "model_config.json").exists()
-    assert json.loads((again / "metrics_dev.json").read_text())["acc@1"] == dev["acc@1"]
+    again_dev = json.loads((again / "metrics_dev.json").read_text())
+    assert again_dev["acc@1"] == dev["acc@1"] and again_dev["population_sha256"] == dev["population_sha256"]
+
+    # the TUI reads both real run dirs
+    trained, evaluated = sorted(runs.scan(tmp_path), key=lambda x: x.id)
+    assert (trained.kind, evaluated.kind, trained.recorded) == ("train", "eval", "completed")
+    assert trained.tree_id == evaluated.tree_id and trained.tree_here and not trained.problems
+    assert [e.split for e in trained.evals] == ["dev", "dev_beam1"] and trained.evals[1].overrides["beam_size"] == 1
+    assert runs.training_run([trained, evaluated], evaluated.tree_id) == trained
 
     # spec errors before any work
     (tmp_path / "bad.json").write_text(json.dumps({**spec, "extra": 1}))
