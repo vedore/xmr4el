@@ -5,6 +5,7 @@ from pathlib import Path
 import runpy
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+import pytest
 from xmr4el.data.readers import Preprocessor
 from xmr4el.xmodel import XModel
 
@@ -88,3 +89,25 @@ def test_bc5cdr_ids():
         d = Preprocessor.load_pubtator_file(str(path))
         assert [t.split(" [SEP]")[0] for t in d["corpus"]] == ["Ocular toxicity", "auditory toxicity", "A", "Ocular"]
         assert d["labels"] == ["D1", "D2", "D4", "D3"] and d["spans"] == [(0, 28), (0, 28), (0, 28), (0, 6)]
+
+
+def test_tsv_numeric_order_and_quoted_text(tmp_path):
+    tsv, labels = tmp_path / "train.tsv", tmp_path / "labels.txt"
+    tsv.write_text('10\tNULL\n2\t"alias\twith tab"\n\n2\t"two\nlines"\n-1\t\n10\tNA\n3\n')
+    labels.write_text("A\nB\nC\nD\n")
+    expected = {"corpus": [[""], ["alias\twith tab", "two\nlines"], [""], ["NULL", "NA"]],
+                "labels": ["A", "B", "C", "D"]}
+    assert Preprocessor.load_data_labels_from_file(tsv, labels) == expected
+    assert Preprocessor.load_data_labels_from_file(tsv, labels, truncate_data=2) == {
+        key: values[:2] for key, values in expected.items()}
+
+
+@pytest.mark.parametrize("row, message", [("x\ttext\n", "group_id must be an integer"),
+                                          ("0\ttext\textra\n", "expected group_id")])
+def test_tsv_rejects_invalid_rows(tmp_path, row, message):
+    tsv, labels = tmp_path / "train.tsv", tmp_path / "labels.txt"
+    tsv.write_text(row)
+    labels.write_text("A\n")
+    with pytest.raises(ValueError, match=message) as err:
+        Preprocessor.load_data_labels_from_file(tsv, labels)
+    assert f"{tsv}:1:" in str(err.value)

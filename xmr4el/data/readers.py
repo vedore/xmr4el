@@ -2,7 +2,7 @@
 import re
 import os
 import logging
-import pandas as pd
+import csv
 from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -25,24 +25,26 @@ class Preprocessor:
     ) -> Dict[str, List[List[str]]]:
         """Load texts and their corresponding labels from file."""
         
-        train_df = pd.read_csv(
-            train_filepath,
-            header=None,
-            names=["group_id", "text"],
-            delimiter="\t",
-            dtype={"group_id": int, "text": str},
-            keep_default_na=False,  # "NA", "NULL", ... are mention strings here
-        )
-        
-        train_df["text"] = train_df["text"].fillna("")
-
-        grouped_texts = train_df.groupby("group_id")["text"].apply(list).reset_index()
+        groups = defaultdict(list)
+        with open(train_filepath, encoding="utf-8", newline="") as fin:
+            reader = csv.reader(fin, delimiter="\t", strict=True)
+            for row in reader:
+                if not row or (len(row) == 1 and not row[0].strip()):
+                    continue
+                if len(row) not in (1, 2):
+                    raise ValueError(f"{train_filepath}:{reader.line_num}: expected group_id<TAB>text")
+                try:
+                    group_id = int(row[0])
+                except ValueError as err:
+                    raise ValueError(f"{train_filepath}:{reader.line_num}: group_id must be an integer") from err
+                groups[group_id].append(row[1] if len(row) == 2 else "")
+        grouped_texts = [groups[group_id] for group_id in sorted(groups)]
         
         with open(labels_filepath, 'r') as f:
             raw_labels = [line.strip() for line in f if line.strip()]
 
         if truncate_data > 0:
-            grouped_texts = grouped_texts.head(truncate_data)
+            grouped_texts = grouped_texts[:truncate_data]
             raw_labels = raw_labels[:truncate_data]
 
         if len(raw_labels) > len(grouped_texts):
@@ -54,13 +56,9 @@ class Preprocessor:
                 f"Mismatch: Not enough labels ({len(raw_labels)}) for text groups ({len(grouped_texts)})"
             )
 
-        grouped_texts["concept_id"] = raw_labels
-
-        grouped_texts["original_texts"] = grouped_texts["text"]
-
         return {
-            "corpus": grouped_texts["original_texts"].tolist(),
-            "labels": grouped_texts["concept_id"].tolist(),
+            "corpus": grouped_texts,
+            "labels": raw_labels,
         }
 
     @staticmethod
