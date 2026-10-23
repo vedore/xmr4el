@@ -1,0 +1,276 @@
+"""Widgets and the text blocks screens show (tui.md §4, §5.1-5.4)."""
+import json
+import os
+from datetime import datetime
+
+from rich.text import Text
+from textual.widgets import Log, Static
+
+from xmr4el_tui import fmt, runs
+from xmr4el_tui.compare import RECALL
+from xmr4el_tui.progress import read_events, stages
+
+STATE_STYLE = {"RUNNING": "bold blue", "UNVERIFIED": "yellow", "LOST": "red", "COMPLETED": "green",
+               "FAILED": "red", "STOPPED": "yellow", "UNKNOWN": ""}
+LOG_TAIL = 256 * 1024
+STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
+
+
+def state_word(run):
+    """Shown state. Recorded running is UNVERIFIED until the runner records process identity (increment 2)."""
+    return "UNVERIFIED" if run.recorded == "running" else run.recorded.upper()
+
+
+def state_text(run):
+    word = state_word(run)
+    return Text(word, style=STATE_STYLE[word])
+
+
+def elapsed(run, now=None):
+    end = run.finished or (now or datetime.now() if run.recorded == "running" else None)
+    return (end - run.started).total_seconds() if end and run.started else None
+
+
+def first_eval(run):
+    return run.evals[0] if run.evals else None
+
+
+def acc1(run):
+    e = first_eval(run)
+    return e.metrics.get("acc@1") if e and e.metrics else None
+
+
+def split_cell(run):
+    if not run.evals:
+        return fmt.DASH
+    return run.evals[0].split + (f" +{len(run.evals) - 1}" if len(run.evals) > 1 else "")
+
+
+def tree_place(run):
+    return "on this machine" if run.tree_here else "not on this machine"
+
+
+def stage_list(run):
+    """Stages from events.jsonl, or None when the run has no events file (written before the runner change)."""
+    path = run.path / "events.jsonl"
+    if not path.exists():
+        return None
+    events, _ = read_events(path)
+    return stages(events, run.kind, [e.split for e in run.evals], run.recorded)
+
+
+class TopBar(Static):
+    """`XMR4EL  <place>` left, state · host right (§4)."""
+
+    def __init__(self, **kwargs):
+        super().__init__("", **kwargs)
+        self.left, self.right = "", Text()
+
+    def set(self, left, right):
+        self.left, self.right = left, right if isinstance(right, Text) else Text(right)
+        self.refresh()
+
+    def render(self):
+        left = Text(f"XMR4EL  {self.left}", style="bold")
+        gap = max(1, self.size.width - left.cell_len - self.right.cell_len)
+        return Text.assemble(left, " " * gap, self.right)
+
+
+def details_text(run, all_runs):
+    """The details block under the Runs table (§5.1)."""
+    t = Text()
+    word = state_word(run)
+    when = f"started {fmt.stamp(run.started, long=True)} · {fmt.duration(elapsed(run))} so far" \
+        if run.recorded == "running" else f"{fmt.stamp(run.started, long=True)} · {fmt.duration(elapsed(run))}"
+    e = first_eval(run)
+    m = e.metrics if e else None
+    features = f" · {m['features']}" if m and m.get("features") else ""
+    t.append(f" {run.name} · {run.kind} · {when}{features} · ")
+    t.append(word, style=STATE_STYLE[word])
+    also = runs.same_tree(all_runs, run)
+    if run.tree_id:
+        labels = f" · {fmt.count(m['labels'])} labels" if m and "labels" in m else ""
+        t.append(f"\n tree {fmt.tree(run.tree_id)}{labels} · {tree_place(run)}")
+        if also:
+            t.append(" · also: " + ", ".join(r.name for r in also))
+    if run.recorded == "running":
+        prev = runs.previous_completed(all_runs, run)
+        t.append("\n stage  " + ("not recorded (no events.jsonl)" if stage_list(run) is None else "see run (enter)"))
+        if prev:
+            t.append(f" · previous {prev.name} took {fmt.duration(elapsed(prev))}")
+    for e in run.evals:
+        if e.metrics:
+            em = e.metrics
+            t.append(f"\n {e.split}  acc@1 {fmt.metric(em.get('acc@1'))} · acc@1_all {fmt.metric(em.get('acc@1_all'))}"
+                     f" · {fmt.count(em.get('rows'))} / {fmt.count(em.get('rows_total'))} rows in vocabulary")
+        else:
+            t.append(f"\n {e.split}  no metrics")
+    if run.error:
+        t.append(f"\n {fmt.marker('failed', fmt.use_ascii())} {run.error}", style="red")
+    if run.problems:
+        t.append("\n problems: " + "; ".join(run.problems), style="yellow")
+    return t
+
+
+def banner_text(run):
+    """§5.4 banner for runs that did not complete, or None."""
+    word = state_word(run)
+    if word == "FAILED":
+        return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", "red"),
+                             f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}    2 full log")
+    if word == "STOPPED":
+        return Text(f"Stopped by SIGTERM at {fmt.stamp(run.finished, long=True)}. "
+                    "Completed stages and saved files are kept.", style="yellow")
+    if word == "UNVERIFIED":
+        return Text("Recorded running, but this run records no process identity (written before the runner "
+                    "change), so liveness cannot be checked.", style="yellow")
+    if word == "UNKNOWN":
+        reason = next((p for p in run.problems if p.startswith("status.json")), "status.json: missing")
+        return Text(f"status.json is missing or unreadable: {reason.split(': ', 1)[1]}. "
+                    "Showing the files that exist.")
+    return None
+
+
+def _stages_text(run):
+    found = stage_list(run)
+    if found is None:
+        return Text(f"Stages not recorded (run predates events.jsonl) · total {fmt.duration(elapsed(run))}")
+    if not found:
+        return Text(f"{fmt.marker('pending', fmt.use_ascii())} Starting…")
+    if run.recorded == "completed":
+        return Text("Took   " + " · ".join(f"{s.key.replace(':', ' ')} {fmt.duration(s.seconds)}" for s in found))
+    ascii = fmt.use_ascii()
+    lines = []
+    for s in found:
+        lines.append(f"{fmt.marker(s.state, ascii)} {s.key.replace(':', ' ')}  {s.detail}".rstrip()
+                     + (f"  {fmt.duration(s.seconds)}" if s.seconds is not None else ""))
+        lines += [f"  {fmt.marker(p.state, ascii)} {p.key}  {p.detail}".rstrip() for p in s.parts]
+    return Text("\n".join(lines))
+
+
+def metrics_text(m, split):
+    """Evaluation block of §5.3 for one metrics dict."""
+    if not m:
+        return Text(f"{split}: no metrics (not produced yet)")
+    search = m.get("search") or {}
+    lines = ["Search      " + " · ".join(f"{k} {v}" for k, v in search.items()),
+             f"Rows        {fmt.count(m.get('rows'))} / {fmt.count(m.get('rows_total'))} have a gold label in the "
+             f"tree ({fmt.pct(m.get('rows'), m.get('rows_total'))}) · {fmt.count(m.get('labels'))} labels", ""]
+    cells = [(k, m.get(k)) for k in ("acc@1", "acc@1_all", "MRR", *[k for k in RECALL if k in m], "R@cand")]
+    if "hybrid" in m:
+        cells += [("hybrid", m.get("hybrid")), ("hybrid_all", m.get("hybrid_all"))]
+    row = []
+    for k, v in cells:
+        row.append(f"{k:<10} {fmt.metric(v):>6}")
+        if len(row) == 3:
+            lines.append("    ".join(row))
+            row = []
+    lines += ["    ".join(row)] if row else []
+    lines += [f"{fmt.ms(m.get('ms_per_query'))}, batch incl. encoding", ""]
+    strings = m.get("strings")
+    if strings:
+        lines.append(f"{'Mention strings':<16} {'n':>6}  {'tree':>6}  {'dict':>6}  {'either':>6}  {'routed':>6}")
+        for g in STRING_GROUPS:
+            s = strings.get(g, {})
+            lines.append(f"{g:<16} {fmt.count(s.get('n')):>6}  " + "  ".join(
+                f"{fmt.metric(s.get(k)):>6}" for k in ("tree", "dict", "either", "routed")))
+    else:
+        lines.append("Mention strings  not recorded (no train_path in this evaluation)")
+    return Text("\n".join(lines))
+
+
+def overview_text(run, all_runs, split):
+    """Overview tab (§5.2-5.4) for the selected evaluation `split`."""
+    t = Text()
+    banner = banner_text(run)
+    if banner:
+        t.append_text(banner)
+        t.append("\n\n")
+    if run.tree_id:
+        also = runs.same_tree(all_runs, run)
+        t.append(f"Tree   {fmt.tree(run.tree_id)} · {'trained here' if run.kind == 'train' else 'evaluated'}"
+                 f" · {tree_place(run)}" + (" · also: " + ", ".join(r.name for r in also) if also else "") + "\n")
+    else:
+        t.append(f"Tree   {fmt.DASH} (no tree saved yet)\n")
+    t.append_text(_stages_text(run))
+    t.append("\n\n")
+    e = run.eval(split)
+    if e:
+        t.append(f"Evaluation  {e.split}  {e.test_path or ''}\n")
+        t.append_text(metrics_text(e.metrics, e.split))
+    else:
+        t.append("No evaluations in spec.json")
+    if run.problems:
+        t.append("\n\nproblems: " + "; ".join(run.problems), style="yellow")
+    return t
+
+
+def inputs_text(run):
+    """Inputs tab: what was run, with the equivalent command (§10 round trip)."""
+    lines = [f"Run dir      {run.path}", f"Run id       {run.id}",
+             f"Tree id      {run.tree_id or fmt.DASH}", f"Tree path    {run.tree_path or fmt.DASH} ({tree_place(run)})"]
+    spec = run.spec()
+    if isinstance(spec, dict):
+        normalized, xmodel_path = runs.normalize_spec(spec)
+        lines += ["", "Command", runs.command_line(normalized, xmodel_path)]
+    prov = run.provenance() or {}
+    if prov:
+        lines += ["", "Inputs (sha256)"] + [f"  {sha[:12]}  {p}" for p, sha in (prov.get("inputs") or {}).items()]
+        lines.append(f"Python {prov.get('python')} · {prov.get('platform')} · device {prov.get('torch_device')}")
+        lines.append("Packages     " + " · ".join(f"{k} {v}" for k, v in (prov.get("packages") or {}).items()))
+    git = run.git() or {}
+    if git:
+        lines.append(f"Git          {git.get('commit')} · {'dirty' if git.get('dirty') else 'clean'}"
+                     + (f" · untracked: {', '.join(git['untracked'])}" if git.get("untracked") else ""))
+    cfg = run.model_config()
+    if cfg is not None:
+        lines += ["", "Model config", json.dumps(cfg, indent=2)]
+    return Text("\n".join(lines))
+
+
+class LogView(Log):
+    """Bounded tail of run.log (last 256 KB), polled every second; `warnings` keeps WARNING/ERROR lines only."""
+
+    def __init__(self, path, **kwargs):
+        super().__init__(highlight=False, **kwargs)
+        self.path, self.read_pos, self.lines_seen, self.warnings = path, None, [], False
+
+    def on_mount(self):
+        self.poll()
+        self.set_interval(1, self.poll)
+
+    def poll(self):
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            if self.read_pos is None:
+                self.write_line(f"{self.path.name} not found")
+                self.read_pos = 0
+            return
+        if self.read_pos is None or size < self.read_pos:  # first read or truncated: tail
+            self.read_pos, skip = max(0, size - LOG_TAIL), size > LOG_TAIL
+            self.lines_seen = []
+            self.clear()
+        else:
+            skip = False
+        if size == self.read_pos:
+            return
+        with open(self.path, "rb") as f:
+            f.seek(self.read_pos)
+            data = f.read(size - self.read_pos)
+        end = data.rfind(b"\n") + 1
+        lines = data[:end].decode("utf-8", "replace").splitlines()
+        self.read_pos += end
+        if skip and lines:  # the first line of a tail starts mid-line
+            lines = lines[1:]
+        self.lines_seen += lines
+        self.write_lines([ln for ln in lines if self.keep(ln)])
+
+    def keep(self, line):
+        return not self.warnings or "[WARNING]" in line or "[ERROR]" in line or "[CRITICAL]" in line
+
+    def toggle_warnings(self):
+        self.warnings = not self.warnings
+        self.clear()
+        self.write_lines([ln for ln in self.lines_seen if self.keep(ln)])
+        return self.warnings

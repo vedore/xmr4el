@@ -19,7 +19,7 @@ small classifiers/hierarchies, so the project ML dependencies are still required
 | `features/` | Adapter config validation and persistence, text encoding, feature-block normalization, embedding row order, CUDA/MPS out-of-memory recovery. |
 | `hierarchy/` | Cluster reassignment, balanced k-means, layer preparation, tree training. |
 | `learning/` | Joint logistic classifier, local node target order and unlabeled-row filtering, mention-kNN label scores (`label_max_cos`). |
-| `tui/` | Terminal UI (`xmr4el_tui`): run-directory scan on fake runs (`fake_runs.py`), stage list from `events.jsonl`, comparison rules, formats; app start-up (skipped without the `tui` extra). |
+| `tui/` | Terminal UI (`xmr4el_tui`): run-directory scan on fake runs (`fake_runs.py`), stage list from `events.jsonl`, comparison rules, formats; Runs and Run screens through Textual `run_test` (skipped without the `tui` extra). |
 | `integration/` | Config preservation, import behavior, label mapping, pipeline persistence. |
 | `test_eval.py` | Ranking metric self-check and known metric values. |
 | `test_run_experiment.py` | Tracked run wrapper on a synthetic spec: run dir files (status, provenance hashes, git untracked), metrics = `evaluate_tree`, eval-only reuse, spec errors (names, search values, missing inputs, bad model config), no overwrite, empty eval fails the run, log handler removed. |

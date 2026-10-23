@@ -1,3 +1,40 @@
-Screen {
-    background: $surface;
+TopBar {
+    dock: top;
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+}
+
+#runs {
+    height: 1fr;
+}
+
+#filter {
+    height: 3;
+}
+
+Rule {
+    margin: 0;
+}
+
+#details {
+    height: auto;
+    max-height: 8;
+    padding: 0 0 0 0;
+}
+
+#overview-text, #inputs-text {
+    padding: 0 1;
+}
+
+#split {
+    width: 30;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
 }
