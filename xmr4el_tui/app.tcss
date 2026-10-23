@@ -38,3 +38,16 @@ TabbedContent {
 TabPane {
     padding: 0;
 }
+
+.side {
+    height: auto;
+}
+
+.side Static {
+    width: auto;
+    padding: 0;
+}
+
+.side Select {
+    width: 24;
+}

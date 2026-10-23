@@ -4,12 +4,12 @@ from datetime import datetime
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Rule, Select, Static, TabbedContent, TabPane
 
-from xmr4el_tui import fmt
+from xmr4el_tui import compare, fmt
 from xmr4el_tui.widgets import (LogView, TopBar, acc1, details_text, elapsed, inputs_text, overview_text,
                                 split_cell, state_text, state_word)
 
@@ -48,7 +48,8 @@ class RunTable(DataTable):
 
 
 class RunsScreen(Screen):
-    BINDINGS = [Binding("enter", "open", "open"), Binding("space", "mark", "mark"), Binding("slash", "filter", "filter"),
+    BINDINGS = [Binding("enter", "open", "open"), Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
+                Binding("slash", "filter", "filter"),
                 Binding("o", "sort", "sort"), Binding("r", "rescan", "rescan"),
                 Binding("escape", "clear_filter", "clear filter", show=False)]
 
@@ -171,6 +172,14 @@ class RunsScreen(Screen):
             self.query_one(DataTable).update_cell(rid, "mark", "*" if rid in self.marked else " ")
         self.update_top()
 
+    def action_compare(self):
+        ids = {r.id for r in self.app.runs}
+        self.marked = [rid for rid in self.marked if rid in ids]
+        if len(self.marked) < 2:
+            self.notify("Mark one more run (space)." if self.marked else "Mark two runs (space), then c.")
+            return
+        self.app.push_screen(CompareScreen(*self.marked))
+
     def action_filter(self):
         box = self.query_one("#filter", Input)
         box.display = True
@@ -260,3 +269,65 @@ class RunScreen(Screen):
     def action_copy(self):
         self.app.copy_to_clipboard(str(self.run.path))
         self.notify(f"Copied {self.run.path}")
+
+
+class CompareScreen(Screen):
+    """Two marked runs, one selected evaluation each (§5.8); deltas only where §11 allows them."""
+    BINDINGS = [Binding("x", "swap", "swap"), Binding("escape", "app.pop_screen", "runs")]
+
+    def __init__(self, a_id, b_id):
+        super().__init__()
+        self.ids = [a_id, b_id]
+        self.splits = list(compare.default_splits(*self.sides()))
+
+    def sides(self):
+        by_id = {r.id: r for r in self.app.runs}
+        return by_id.get(self.ids[0]), by_id.get(self.ids[1])
+
+    def compose(self) -> ComposeResult:
+        yield TopBar(id="top")
+        for i, (side, run) in enumerate(zip("AB", self.sides())):
+            with Horizontal(classes="side"):
+                yield Static(f" {side}  {run.name:<22} tree {fmt.tree(run.tree_id)}   Evaluation ", classes="who")
+                if len(run.evals) > 1:
+                    yield Select([(e.split, e.split) for e in run.evals], value=self.splits[i], allow_blank=False,
+                                 id=f"sel-{i}")
+                else:
+                    yield Static(self.splits[i] or fmt.DASH)
+        with VerticalScroll():
+            yield Static(id="compare-text")
+        yield Footer()
+
+    def on_mount(self):
+        self.query_one(TopBar).set("Compare", self.app.host)
+        self.render_compare()
+
+    def on_runs_changed(self, _):
+        self.render_compare()
+
+    def on_select_changed(self, event):
+        self.splits[int(event.select.id[-1])] = event.value
+        self.render_compare()
+
+    async def action_swap(self):
+        self.ids.reverse()
+        self.splits.reverse()
+        await self.recompose()
+        self.on_mount()
+
+    def render_compare(self):
+        a, b = self.sides()
+        body = self.query_one("#compare-text", Static)
+        if a is None or b is None:
+            body.update("A compared run directory is gone (esc returns to runs).")
+            return
+        v = compare.verdict(a, self.splits[0], b, self.splits[1], self.app.runs)
+        lines = ["", *(f" {r}" for r in v.reasons)]
+        if v.differs:
+            lines.append(" Differs: " + ", ".join(v.differs))
+        ea, eb = a.eval(self.splits[0]), b.eval(self.splits[1])
+        if ea and ea.metrics and eb and eb.metrics:
+            rows = compare.rows(ea.metrics, eb.metrics, v)
+            lines += ["", f" {'':<13}{'A':>11}{'B':>11}" + ("   B - A" if any(d for *_, d in rows) else "")]
+            lines += [f" {k:<13}{x:>11}{y:>11}   {d}".rstrip() for k, x, y, d in rows]
+        body.update(Text("\n".join(lines)))

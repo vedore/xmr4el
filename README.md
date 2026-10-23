@@ -126,6 +126,18 @@ mentions whose gold label has training text (coverage is reported); `acc@1_all` 
 the run (spec, metrics, git state, input hashes, package versions) under `outputs/runs/`. Recorded results
 are in `docs/results.md`.
 
+Browse and compare recorded runs in the terminal (optional `tui` extra; reads `outputs/runs/` only, never
+loads a tree):
+
+```bash
+uv sync --locked --extra tui
+.venv/bin/python -m xmr4el_tui            # or xmr4el-tui; --root <repo> when started elsewhere
+```
+
+Runs: `enter` open, `space` mark two then `c` compare, `/` filter, `o` sort. Run: `1` `2` `3` overview, log,
+inputs. Compare computes differences only for the same evaluation file, preprocessing and evaluated
+population (`docs/design/tui.md` §11).
+
 ## Configuration
 
 Model configs are JSON: `configs/xmr4el_base_config.json` (MedMentions) and

@@ -7,7 +7,7 @@ pytest.importorskip("textual")
 from fake_runs import make_run  # noqa: E402
 from textual.widgets import DataTable, Static, TabbedContent  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
-from xmr4el_tui.screens import RunScreen, RunsScreen, columns_for  # noqa: E402
+from xmr4el_tui.screens import CompareScreen, RunScreen, RunsScreen, columns_for  # noqa: E402
 from xmr4el_tui.widgets import LogView  # noqa: E402
 
 
@@ -111,3 +111,29 @@ def test_narrow_and_empty(tmp_path):
     async def empty(app, pilot):
         assert "No runs in outputs/runs/" in text(app.screen.query_one("#details", Static))
     run_app(tmp_path / "empty", empty)
+
+
+def test_compare_selection_and_swap(tmp_path):
+    hashed = {"preprocessing": {"context_window": None, "abbrev_expansion": None}, "population_sha256": "p"}
+    make_run(tmp_path, "both", splits=("dev", "test"), metrics={"dev": hashed, "test": hashed})
+    make_run(tmp_path, "test_only", stamp="2026-10-21_00-00-00", kind="eval", splits=("test",),
+             metrics={"test": {**hashed, "acc@1": 0.9}})
+
+    async def check(app, pilot):
+        await pilot.press("c")  # nothing marked: refused
+        assert isinstance(app.screen, RunsScreen)
+        await pilot.press("space", "down", "space", "c")
+        screen = app.screen
+        assert isinstance(screen, CompareScreen) and screen.splits == ["test", "test"]
+        assert not screen.query("#sel-0") and screen.query("#sel-1")  # selector only on the 2-eval side
+        body = text(screen.query_one("#compare-text", Static))
+        assert "hashes match" in body and "+0.0246" in body  # A = test_only (newest, marked first)
+        screen.query_one("#sel-1").value = "dev"  # different file: no deltas
+        await pilot.pause()
+        body = text(screen.query_one("#compare-text", Static))
+        assert "Not comparable" in body and "B - A" not in body
+        await pilot.press("x")
+        assert app.screen.splits == ["dev", "test"] and app.screen.query_one("#sel-0").value == "dev"
+        await pilot.press("escape")
+        assert isinstance(app.screen, RunsScreen)
+    run_app(tmp_path, check)
