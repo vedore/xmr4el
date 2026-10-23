@@ -1,4 +1,6 @@
 """Evaluation metrics shared by the evaluate, run_experiment and diagnostic scripts."""
+import hashlib
+import json
 import time
 from collections import Counter, defaultdict
 
@@ -90,9 +92,14 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
     test = Preprocessor.load_pubtator_file(test_path, window=xm.context_window, abbrev=abbrev)
     gold, texts = filter_labels_and_inputs(test["corpus"], test["labels"], xm.initial_labels)
     labels = np.array(xm.initial_labels)
+    # Evaluated population: [loaded row position, gold label] of every kept row, in order (TUI comparability)
+    allowed = set(xm.initial_labels)
+    population = [[i, y] for i, y in enumerate(test["labels"]) if y in allowed]
     m = {"tree": tree, "test_path": test_path, "train_path": train_path, "labels": len(labels),
          "features": xm.features, "rows": len(gold), "rows_total": len(test["labels"]),
-         "distinct_gold": len(set(gold))}
+         "distinct_gold": len(set(gold)),
+         "population_sha256": hashlib.sha256(json.dumps(population).encode()).hexdigest(),
+         "preprocessing": {"context_window": xm.context_window, "abbrev_expansion": abbrev}}
     m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta,
                                             leaf_candidates=leaf_candidates)
     if not gold:
