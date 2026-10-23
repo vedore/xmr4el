@@ -13,10 +13,11 @@ from torch import no_grad
 from torch.cuda import OutOfMemoryError, empty_cache
 from huggingface_hub import HfApi, snapshot_download
 from transformers import AutoModel, AutoTokenizer
-from xmr4el import torch_device
+from xmr4el import progress, torch_device
 
 
 logger = logging.getLogger(__name__)
+TICK_SECONDS = 5  # progress ticks (events=True) at most this often, plus the final count
 
 # Short config `type` names -> checkpoints (configs and saved trees use these). Any other model:
 # "kwargs": {"model_name": "<HF id or local directory>"}, optionally "pooling", "max_seq_length" and
@@ -95,9 +96,10 @@ class Transformer:
     """Embeds texts with a frozen transformer; config = {"type": <MODEL_NAMES key>, "kwargs": {...}}."""
 
     @classmethod
-    def transform(cls, trn_corpus, config=None, dtype=np.float32):
+    def transform(cls, trn_corpus, config=None, dtype=np.float32, events=False):
         """Returns (run config, embeddings ndarray). kwargs: model_name (overrides type), pooling,
-        max_seq_length, revision, batch_size, max_oom_retries."""
+        max_seq_length, revision, batch_size, max_oom_retries. events=True (training encode): cache_hit / tick
+        progress events of the "transformer" encode part."""
         config = config if config is not None else {"type": "sentencetbiobert", "kwargs": {}}
         kwargs = {"batch_size": 1000, "dtype": dtype, "max_oom_retries": 3, **config.get("kwargs", {})}
         model_name = kwargs.pop("model_name", None) or MODEL_NAMES.get(config.get("type"))
@@ -113,7 +115,7 @@ class Transformer:
         if any("\0" in t for t in uniq):  # "\0" joins the cache key fields
             raise ValueError("Transformer.transform: texts must not contain NUL")
         if os.environ.get("XMR4EL_TRANSFORMER_CACHE", "1") == "0":
-            return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs)[inv.ravel()]
+            return kwargs, cls._predict(model_name, uniq.tolist(), **kwargs, events=events)[inv.ravel()]
         # revision joins the key when set (always after training resolves it)
         rev = [f"revision={kwargs['revision']}"] if kwargs.get("revision") else []
         key = "\0".join([model_name, *rev, str(kwargs.get("pooling")), str(kwargs.get("max_seq_length")),
@@ -123,8 +125,10 @@ class Transformer:
             emb = np.load(path)
             assert emb.shape[0] == len(uniq), f"cached embeddings {path} have {emb.shape[0]} rows, expected {len(uniq)}"
             logger.info("Transformer cache hit: model=%s rows=%d path=%s", model_name, len(uniq), path)
+            if events:
+                progress(stage="encode", part="transformer", phase="cache_hit", distinct=len(uniq))
         else:
-            emb = cls._predict(model_name, uniq.tolist(), **kwargs)
+            emb = cls._predict(model_name, uniq.tolist(), **kwargs, events=events)
             try:  # a read-only install cannot cache: keep the computed embeddings
                 os.makedirs(CACHE_DIR, exist_ok=True)
                 # write-then-rename: an interrupted save leaves no partial cache file; a private tmp per writer
@@ -154,6 +158,7 @@ class Transformer:
         pooling=None,
         max_seq_length=None,
         revision=None,
+        events=False,
     ):
         """
         Optimized function for efficient memory usage during CPU or GPU-based embedding extraction.
@@ -174,6 +179,7 @@ class Transformer:
         # Process batches in row order with OOM recovery; a batch size reduced by an OOM is kept
         batches = []
         start = 0
+        last_tick = time.perf_counter()
 
         while start < len_corpus:
             end = min(start + batch_size, len_corpus)
@@ -182,6 +188,10 @@ class Transformer:
             try:
                 batches.append(array(encode(trn_corpus[start:end]), dtype=dtype))
                 start = end
+                if events and (start == len_corpus or time.perf_counter() - last_tick >= TICK_SECONDS):
+                    progress(stage="encode", part="transformer", phase="tick", unit="distinct_mentions",
+                             done=start, total=len_corpus)
+                    last_tick = time.perf_counter()
 
             except RuntimeError as oom:
                 if not isinstance(oom, OutOfMemoryError) and "MPS backend out of memory" not in str(oom):

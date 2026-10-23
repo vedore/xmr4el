@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple, Sequence
 import numpy as np
 from scipy.sparse import csr_matrix, hstack, issparse
 from sklearn.preprocessing import normalize
+from xmr4el import progress
 from xmr4el.features.vectorizers import Vectorizer
 from xmr4el.features.reduction import DimensionModel
 from xmr4el.features.transformers import Transformer, resolve_revision
@@ -120,12 +121,12 @@ class TextEncoder():
     
     @staticmethod
     def _encode_text_using_transformer(
-        X_test: Sequence[str], transformer_config: Optional[Dict[str, Any]]
+        X_test: Sequence[str], transformer_config: Optional[Dict[str, Any]], events: bool = False
     ) -> Any:
         """Embed texts with the configured transformer (no fitting: same call for train and query)."""
         if transformer_config is None:
             raise AttributeError("features 'sapbert_char_context' needs a transformer_config")
-        _, transformer_embeddings = Transformer.transform(X_test, transformer_config)
+        _, transformer_embeddings = Transformer.transform(X_test, transformer_config, events=events)
         return transformer_embeddings
 
     def _tfidf_block(self, texts: Sequence[str], prefix: str, fit: bool):
@@ -140,6 +141,16 @@ class TextEncoder():
         X = getattr(self, f"{prefix}vectorizer_model").transform(texts)
         dim = getattr(self, f"{prefix}dimension_model")
         return dim.transform(X)
+
+    @staticmethod
+    def _part(fit, name, step):
+        """step() as encode part `name`: start/complete progress events when fitting (prediction emits none)."""
+        if fit:
+            progress(stage="encode", part=name, phase="start")
+        out = step()
+        if fit:
+            progress(stage="encode", part=name, phase="complete")
+        return out
 
     def _validate_features(self):
         if self.features not in FEATURES:
@@ -156,17 +167,23 @@ class TextEncoder():
         """
         self._validate_features()
         if self.features == "tfidf":
-            return normalize(self._tfidf_block(X_text, "", fit))
+            return self._part(fit, "mention_tfidf", lambda: normalize(self._tfidf_block(X_text, "", fit)))
         if any("[SEP]" not in t for t in X_text):
             raise ValueError("features 'sapbert_char_context' needs 'mention [SEP] context' input")
         mentions, contexts = zip(*(t.split("[SEP]", 1) for t in X_text)) if X_text else ((), ())
         if fit:  # the saved encoder keeps the commit it was fitted with
             self.transformer_config = resolve_revision(self.transformer_config)
         # TF-IDF first: an empty vocabulary (e.g. every context empty) fails before the transformer encodes
-        char, context = self._tfidf_block(list(mentions), "", fit), self._tfidf_block(list(contexts), "context_", fit)
-        blocks = [self._encode_text_using_transformer(list(mentions), self.transformer_config), char, context]
+        char = self._part(fit, "mention_tfidf", lambda: self._tfidf_block(list(mentions), "", fit))
+        context = self._part(fit, "context_tfidf", lambda: self._tfidf_block(list(contexts), "context_", fit))
+        blocks = [self._part(fit, "transformer", lambda: self._encode_text_using_transformer(
+            list(mentions), self.transformer_config, events=fit)), char, context]
         if fit:  # an SVD can be skipped or give fewer columns than its n_components
             self.block_widths = [b.shape[1] for b in blocks]
+        return self._part(fit, "assemble", lambda: self._assemble(blocks))
+
+    @staticmethod
+    def _assemble(blocks):
         blocks = [normalize(b) for b in blocks]
         X = hstack(blocks, format="csr") if any(issparse(b) for b in blocks) else np.hstack(blocks)
         return normalize(X, copy=False)

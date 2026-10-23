@@ -18,7 +18,7 @@ import pytest
 
 from xmr4el.eval import evaluate_tree
 from xmr4el.xmodel import XModel
-from xmr4el_tui import runs
+from xmr4el_tui import progress, runs
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/run_experiment.py"
@@ -95,6 +95,14 @@ def test_run_experiment(tmp_path):
     assert checked["search"] == {"dev": dev["search"], "dev_beam1": beam1["search"]}
     assert (run_dir / "model_config.json").read_bytes() == (tmp_path / "cfg.json").read_bytes()
     assert "acc@1" in (run_dir / "run.log").read_text(), "eval report in the log"
+    assert "'stage'" not in (run_dir / "run.log").read_text(), "progress events stay out of run.log"
+    events, _ = progress.read_events(run_dir / "events.jsonl")
+    stages = progress.stages(events, "train", ["dev", "dev_beam1"], "completed")
+    assert [x.key for x in stages] == ["load", "encode", "labels", "hierarchy", "save", "eval:dev", "eval:dev_beam1"]
+    assert all(x.state == "done" and x.seconds is not None for x in stages), stages
+    assert [x.key for x in stages[1].parts] == ["mention_tfidf"] and stages[1].detail == "120 rows"
+    assert stages[2].detail == "8 labels" and stages[3].detail.startswith("layer 2/2")
+    assert stages[5].detail == f"acc@1 {dev['acc@1']:.4f}"
 
     # metrics = evaluate.py's function on the saved tree, minus timings
     want, _ = evaluate_tree(XModel.load(str(tmp_path / tree_path)), Path(tree_path).name,
@@ -116,6 +124,9 @@ def test_run_experiment(tmp_path):
     assert r.returncode == 0, r.stderr
     assert len(list((tmp_path / "outputs/saved_trees").iterdir())) == 1
     assert len(list((tmp_path / "outputs/runs").iterdir())) == 2 and not (again / "model_config.json").exists()
+    events, _ = progress.read_events(again / "events.jsonl")
+    assert [(x.key, x.state) for x in progress.stages(events, "eval", ["dev", "dev_beam1"], "completed")] == \
+        [("load", "done"), ("eval:dev", "done"), ("eval:dev_beam1", "done")]
     again_dev = json.loads((again / "metrics_dev.json").read_text())
     assert again_dev["acc@1"] == dev["acc@1"] and again_dev["population_sha256"] == dev["population_sha256"]
 

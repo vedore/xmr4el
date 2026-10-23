@@ -224,7 +224,9 @@ class HierarchicalMLModel():
 
             for layer in range(self.layers):
                 layer_start = time.perf_counter()
-                self.logger.info("Layer started: layer=%d/%d nodes=%d", layer + 1, self.layers, len(inputs))
+                self.logger.info("Layer started: layer=%d/%d nodes=%d", layer + 1, self.layers, len(inputs),
+                                 extra={"event": {"stage": "layer", "phase": "start", "layer": layer + 1,
+                                                  "layers": self.layers, "nodes": len(inputs)}})
                 
                 next_inputs: list[NodeInput] = []
                 ml_list: list[str] = []
@@ -241,7 +243,9 @@ class HierarchicalMLModel():
                 for node_idx, node in enumerate(inputs):
                     node_start = time.perf_counter()
                     self.logger.info("Node started: layer=%d node=%d/%d rows=%d labels=%d leaf=%s",
-                                     layer + 1, node_idx + 1, len(inputs), node.X.shape[0], node.Z.shape[0], is_last_layer)
+                                     layer + 1, node_idx + 1, len(inputs), node.X.shape[0], node.Z.shape[0], is_last_layer,
+                                     extra={"event": {"stage": "node", "phase": "start", "layer": layer + 1,
+                                                      "i": node_idx + 1, "n": len(inputs), "rows": node.X.shape[0]}})
                     
                     ml = MLModel(
                         clustering_config=clustering_config,

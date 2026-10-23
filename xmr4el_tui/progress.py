@@ -100,6 +100,8 @@ def stages(events, kind, splits, recorded):
             end[key] = t
             if "acc@1" in ev:
                 detail[key] = f"acc@1 {ev['acc@1']:.4f}"
+            elif _detail(key, ev):
+                detail[key] = _detail(key, ev)
     if layer:
         detail["hierarchy"] = " · ".join(
             [f"layer {layer.get('layer')}/{layer.get('layers')}"]

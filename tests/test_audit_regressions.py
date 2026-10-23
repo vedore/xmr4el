@@ -416,7 +416,7 @@ def test_resolve_revision_pins_commit(monkeypatch):
     enc = TextEncoder(features="sapbert_char_context", transformer_config=cfg,
                       vectorizer_config={"type": "tfidf", "kwargs": {}},
                       context_vectorizer_config={"type": "tfidf", "kwargs": {}})
-    with patch.object(TextEncoder, "_encode_text_using_transformer", staticmethod(lambda t, c: np.ones((len(t), 2)))):
+    with patch.object(TextEncoder, "_encode_text_using_transformer", staticmethod(lambda t, c, events=False: np.ones((len(t), 2)))):
         enc.encode(["aspirin [SEP] fever dose", "tumour [SEP] doc one"])
     assert enc.transformer_config["kwargs"]["revision"] == "b" * 40
 
@@ -580,7 +580,7 @@ def test_zero_context_equals_empty_context():
                       transformer_config={"type": "stub", "kwargs": {}}, features="sapbert_char_context",
                       context_vectorizer_config={"type": "tfidf", "kwargs": {"ngram_range": [1, 1], "max_df": 1.0}},
                       context_dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2}})
-    fake = staticmethod(lambda texts, _c: np.array([[10.0 * len(t), 30.0, 1.0] for t in texts], dtype=np.float32))
+    fake = staticmethod(lambda texts, _c, events=False: np.array([[10.0 * len(t), 30.0, 1.0] for t in texts], dtype=np.float32))
     with patch.object(TextEncoder, "_encode_text_using_transformer", fake), \
             patch("xmr4el.features.encoder.resolve_revision", side_effect=lambda c: c):
         enc.encode(["aspirin [SEP] doc one", "tumour [SEP] another doc", "fever [SEP] doc dose"])

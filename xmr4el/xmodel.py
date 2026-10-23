@@ -317,7 +317,8 @@ class XModel:
         X_processed, Y_label_to_indices = Preprocessor.prepare_data(X_text, Y_text)
         
         start = time.perf_counter()
-        self.logger.info("Encoding started: rows=%d features=%s", len(X_processed), self.features)
+        self.logger.info("Encoding started: rows=%d features=%s", len(X_processed), self.features,
+                         extra={"event": {"stage": "encode", "phase": "start", "rows": len(X_processed)}})
         
         # Encode X_processed
         text_encoder = TextEncoder(
@@ -333,10 +334,11 @@ class XModel:
         
         X_emb = text_encoder.encode(X_processed)
         self.transformer_config = text_encoder.transformer_config  # revision resolved to the commit
-        self.logger.info("Encoding completed: shape=%s elapsed=%.1fs", X_emb.shape, time.perf_counter() - start)
+        self.logger.info("Encoding completed: shape=%s elapsed=%.1fs", X_emb.shape, time.perf_counter() - start,
+                         extra={"event": {"stage": "encode", "phase": "complete"}})
 
         start = time.perf_counter()
-        self.logger.info("Label embeddings started: method=PIFA")
+        self.logger.info("Label embeddings started: method=PIFA", extra={"event": {"stage": "labels", "phase": "start"}})
         
         Y_label_matrix = LabelEmbeddingFactory.generate_label_matrix(Y_label_to_indices)
         
@@ -346,7 +348,8 @@ class XModel:
         self.initial_labels = classes.tolist()
         Z = LabelEmbeddingFactory.generate_PIFA(X_emb, Y_binary)
         self.logger.info("Label embeddings completed: labels=%d shape=%s elapsed=%.1fs",
-                         len(classes), Z.shape, time.perf_counter() - start)
+                         len(classes), Z.shape, time.perf_counter() - start,
+                         extra={"event": {"stage": "labels", "phase": "complete", "labels": len(classes)}})
         
         return X_emb, Y_binary, Z
     
@@ -367,7 +370,8 @@ class XModel:
         local_to_global = np.arange(n_labels, dtype=int)
 
         hierarchy_start = time.perf_counter()
-        self.logger.info("Hierarchy started: depth=%d labels=%d", self.depth, n_labels)
+        self.logger.info("Hierarchy started: depth=%d labels=%d", self.depth, n_labels,
+                         extra={"event": {"stage": "hierarchy", "phase": "start", "labels": n_labels}})
 
         hml = HierarchicalMLModel(
             clustering_config=self.clustering_config,
@@ -386,7 +390,8 @@ class XModel:
         )
 
         self.model = hml
-        self.logger.info("Hierarchy completed: elapsed=%.1fs", time.perf_counter() - hierarchy_start)
+        self.logger.info("Hierarchy completed: elapsed=%.1fs", time.perf_counter() - hierarchy_start,
+                         extra={"event": {"stage": "hierarchy", "phase": "complete"}})
         self.logger.info("Training completed: elapsed=%.1fs", time.perf_counter() - start)
         
         

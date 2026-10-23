@@ -9,7 +9,8 @@ model_config.json, git.json (commit, dirty incl. untracked files, untracked path
 changed, provenance.json (sha256 of every input file, python/platform/package versions, torch device), run.log,
 tree.json (saved tree path), metrics_<split>.json (scripts/evaluate.py's numbers), status.json (running ->
 completed | failed with the error | stopped by SIGTERM/SIGINT; process identity from xmr4el_tui.procinfo kept
-throughout), heartbeat (touched every HEARTBEAT seconds while running). An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
+throughout), heartbeat (touched every HEARTBEAT seconds while running), events.jsonl (one progress event per line:
+the `event` of xmr4el's stage log records and of xmr4el.progress, docs/design/tui.md §8). An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
 no training, evals only. `run(spec, xmodel_path)` is the same run without argument parsing.
 
 The model config is read once: validation, model_config.json, its provenance sha256 and the model all use those bytes.
@@ -35,7 +36,7 @@ from argparse import ArgumentParser
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 
-from xmr4el import set_verbosity, torch_device
+from xmr4el import progress, set_verbosity, torch_device
 from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import evaluate_tree, format_metrics
 from xmr4el.xmodel import PREDICT_DEFAULTS, XModel, check_search
@@ -46,6 +47,17 @@ EVAL_KEYS = {"split", "test_path", "train_path", "beam_size", "topk", "knn_beta"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGES = ("numpy", "scipy", "scikit-learn", "torch", "transformers")
 HEARTBEAT = 30  # seconds
+
+
+class EventFile(logging.FileHandler):
+    """Writes the `event` of each log record that has one as a JSON line {"t", **event}; other records are ignored."""
+
+    def emit(self, record):
+        event = getattr(record, "event", None)
+        if event is not None:
+            t = datetime.fromtimestamp(record.created).isoformat(timespec="milliseconds")
+            self.stream.write(json.dumps({"t": t, **event}) + "\n")  # one write per line: a reader sees whole lines
+            self.flush()
 
 
 class Stopped(BaseException):
@@ -194,6 +206,10 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
     log_file = logging.FileHandler(os.path.join(run_dir, "run.log"))
     log_file.setFormatter(logging.Formatter(fmt))
     logging.getLogger().addHandler(log_file)
+    events = EventFile(os.path.join(run_dir, "events.jsonl"))
+    event_loggers = [logging.getLogger(), logging.getLogger("xmr4el.progress")]  # the latter does not propagate
+    for lg in event_loggers:
+        lg.addHandler(events)
     set_verbosity(1)
     logger = logging.getLogger("xmr4el.run_experiment")
     status = os.path.join(run_dir, "status.json")
@@ -206,8 +222,10 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
         write_json(os.path.join(run_dir, "git.json"), git_state(run_dir))
         write_json(os.path.join(run_dir, "provenance.json"), provenance(spec, raw))
         logger.info("Run started: dir=%s argv=%s", run_dir, " ".join(sys.argv))
+        progress(stage="load", phase="start")
         if not train:
             xm, tree_path = XModel.load(xmodel_path), xmodel_path
+            progress(stage="load", phase="complete")
         else:
             with open(os.path.join(run_dir, "model_config.json"), "wb") as f:
                 f.write(raw)
@@ -215,19 +233,25 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             xm = XModel(**json.loads(raw))
             data = Preprocessor.load_pubtator_file(spec["train_path"], window=xm.context_window,
                                                    abbrev=xm.abbrev_expansion)
-            xm.train(*Preprocessor.organize_pubtator_output(data))
+            groups = Preprocessor.organize_pubtator_output(data)
+            progress(stage="load", phase="complete")
+            xm.train(*groups)
+            progress(stage="save", phase="start")
             tree_path = xm.save(os.path.join("outputs", "saved_trees"))
+            progress(stage="save", phase="complete")
             logger.info("Training completed: tree=%s elapsed=%.1fs", tree_path, time.perf_counter() - start)
         write_json(os.path.join(run_dir, "tree.json"), {"xmodel_path": tree_path, "tree_id": xm.tree_id,
                                                         "trained": train})
         tree = os.path.basename(os.path.normpath(tree_path))
         for e in spec["evals"]:
             start = time.perf_counter()
+            progress(stage="eval", split=e["split"], phase="start")
             m, _ = evaluate_tree(xm, tree, e["test_path"], train_path=e.get("train_path"),
                                  beam_size=e.get("beam_size"), topk=e.get("topk"), knn_beta=e.get("knn_beta"),
                                  leaf_candidates=e.get("leaf_candidates"))
             m.update(split=e["split"], eval_seconds=round(time.perf_counter() - start, 1))
             write_json(os.path.join(run_dir, f"metrics_{e['split']}.json"), m)
+            progress(stage="eval", split=e["split"], phase="complete", **{k: m[k] for k in ("acc@1",) if k in m})
             logger.info("Eval %s:\n%s", e["split"], format_metrics(m))
             if not m["rows"]:
                 raise ValueError(f"eval {e['split']}: no row has a gold label in the tree's vocabulary")
@@ -249,6 +273,9 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
         beat.set()
         logging.getLogger().removeHandler(log_file)
         log_file.close()
+        for lg in event_loggers:
+            lg.removeHandler(events)
+        events.close()
 
 
 def heartbeat(path, done):

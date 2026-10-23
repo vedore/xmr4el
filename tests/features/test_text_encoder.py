@@ -11,7 +11,7 @@ from xmr4el.data.readers import Preprocessor
 from xmr4el.features.transformers import MODEL_NAMES, POOLING, Transformer
 
 
-def fake_transformer(texts, _config):
+def fake_transformer(texts, _config, events=False):
     # Large raw norms, like the real sentence embeddings; per-block normalisation must neutralise them
     return np.array([[10.0 * len(t), 30.0, 1.0] for t in texts], dtype=np.float32)
 
@@ -103,3 +103,22 @@ def test_text_encoder():
     assert calls[1][0] == "org/model" and calls[1][1]["pooling"] == "mean", "any checkpoint via kwargs.model_name"
     print("ok")
 
+
+
+def test_encode_part_events(progress_events):
+    """Training encode emits part start/complete in fit order; prediction encoding emits none."""
+    enc = TextEncoder(
+        vectorizer_config={"type": "tfidf", "kwargs": {"analyzer": "char_wb", "ngram_range": [2, 4]}},
+        dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2, "random_state": 0}},
+        transformer_config={"type": "stub", "kwargs": {}}, features="sapbert_char_context",
+        context_vectorizer_config={"type": "tfidf", "kwargs": {"ngram_range": [1, 1], "max_df": 1.0}},
+        context_dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2, "random_state": 0}})
+    texts = ["aspirin [SEP] doc one", "tumour [SEP] another doc", "fever [SEP] doc dose"]
+    with patch.object(TextEncoder, "_encode_text_using_transformer", staticmethod(fake_transformer)), \
+            patch("xmr4el.features.encoder.resolve_revision", side_effect=lambda c: c):
+        enc.encode(texts)
+        parts = [(e["part"], e["phase"]) for e in progress_events]
+        enc.predict(texts)
+    assert parts == [(p, phase) for p in ("mention_tfidf", "context_tfidf", "transformer", "assemble")
+                     for phase in ("start", "complete")]
+    assert len(progress_events) == len(parts), "prediction encoding emits no part events"

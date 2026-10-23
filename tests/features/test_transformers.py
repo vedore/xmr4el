@@ -141,3 +141,17 @@ def test_transform_cache(tiny_bert):
     assert calls == [["aspirin", "fever"], ["aspirin", "dose"], ["aspirin", "fever"]], calls
     ref = one_by_one(tiny_bert, ["aspirin", "fever"], "cls")
     assert np.allclose(first, ref[[1, 0, 1]], atol=1e-5) and np.array_equal(again, first[[1, 0]])
+
+
+def test_transform_progress_events(tiny_bert, progress_events, monkeypatch):
+    """events=True: ticks count distinct texts and end at the total (a batch per tick here), a cache hit emits
+    cache_hit; events=False (prediction) emits nothing."""
+    monkeypatch.setattr(transformers, "TICK_SECONDS", 0)
+    cfg = {"type": "local", "kwargs": {"model_name": tiny_bert, "pooling": "cls", "batch_size": 2}}
+    Transformer.transform(["fever", "aspirin", "fever", "dose"], cfg)
+    assert progress_events == []
+    Transformer.transform(["acute", "renal", "acute", "liver", "dose"], cfg, events=True)
+    assert [(e["phase"], e["done"], e["total"]) for e in progress_events] == [("tick", 2, 4), ("tick", 4, 4)]
+    progress_events.clear()
+    Transformer.transform(["renal", "acute", "dose", "liver"], cfg, events=True)
+    assert progress_events == [{"stage": "encode", "part": "transformer", "phase": "cache_hit", "distinct": 4}]
