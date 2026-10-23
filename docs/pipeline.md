@@ -3,6 +3,10 @@
 What is implemented, synthetic checks, pipeline observations and the external-baseline notes.
 Moved out of `STATUS.md` (2026-10-06).
 
+Current component boundaries, cleanup decisions and terminal-interface contracts:
+[architecture assessment](architecture.md). Backend selection is explicit; internal adapter layouts
+changed in the 2026-10-23 cleanup, so older saved trees need retraining.
+
 ## What is implemented
 
 | Area | Current behavior | Evidence |

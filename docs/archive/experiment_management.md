@@ -1,5 +1,8 @@
 # Experiment management design for this fork
 
+Historical design and baseline inventory. For current implementation and cleanup decisions, see
+[architecture assessment](../architecture.md); the registry names and line numbers below describe older code.
+
 Analysis baseline: local commit `7683b5dc5180d7f3f5c80008ab579d65ae9e8266`, inspected on 2026-10-09. The working tree was clean before this report. Only this fork informs the design; the upstream repository is outside scope.
 
 **Since that commit (Plan H, 2026-10-09):** `scripts/run_experiment.py` writes `status.json` (running / completed /
@@ -19,21 +22,21 @@ This is a design report, not an implementation. All new modules, specification f
 
 | Operation | Implemented entry point | Behavior |
 | --- | --- | --- |
-| Train | [`scripts/train.py`](../scripts/train.py), `main`, lines 16–60 | argparse; load one model JSON; load and group local data; take first `ds_len` groups; call `XModel.train`; save under `outputs/saved_trees`. |
-| Evaluate | [`scripts/evaluate.py`](../scripts/evaluate.py), `main`, lines 26–110 | Load one tree; parse PubTator evaluation data; exclude out-of-vocabulary gold labels; predict; print metrics and optional string/reranker breakdowns. |
-| Predict | [`xmr4el/xmodel.py`](../xmr4el/xmodel.py), `XModel.predict`, line 304 | Python API accepting raw text; returns a query-by-label CSR score matrix. There is no dedicated prediction CLI. |
+| Train | [`scripts/train.py`](../../scripts/train.py), `main`, lines 16–60 | argparse; load one model JSON; load and group local data; take first `ds_len` groups; call `XModel.train`; save under `outputs/saved_trees`. |
+| Evaluate | [`scripts/evaluate.py`](../../scripts/evaluate.py), `main`, lines 26–110 | Load one tree; parse PubTator evaluation data; exclude out-of-vocabulary gold labels; predict; print metrics and optional string/reranker breakdowns. |
+| Predict | [`xmr4el/xmodel.py`](../../xmr4el/xmodel.py), `XModel.predict`, line 304 | Python API accepting raw text; returns a query-by-label CSR score matrix. There is no dedicated prediction CLI. |
 | Load model | `XModel.load`, line 198 | Load pickled state, hierarchy, and fitted encoder; check label count against PIFA rows. |
 | Construct model | `XModel.__init__`, line 43; `load_config`, line 218 | Constructor keyword arguments or JSON unpacked directly into `XModel(**data)`. |
-| Train reranker | [`scripts/train_reranker.py`](../scripts/train_reranker.py), `main`, line 29 | Separate argparse settings; load a saved tree; construct negatives; train a cross-encoder; save under `outputs/rerankers`. |
-| Diagnose | [`scripts/diagnose_routing.py`](../scripts/diagnose_routing.py), `report`; [`scripts/diagnose_unseen.py`](../scripts/diagnose_unseen.py) | Saved-tree diagnostics, avoiding full retraining. Routing reports include uniform chance and majority-cluster baselines. |
-| Sweep search | [`scripts/experiments/beam_sweep.py`](../scripts/experiments/beam_sweep.py), `run_tests`, line 16 | Sequential subprocess calls to evaluation; continues after a child failure and exits unsuccessfully if any failed. |
-| Screen features | [`scripts/experiments/screen_features.py`](../scripts/experiments/screen_features.py) | Flat retrieval comparisons without tree training; its own feature variants and tie policy. |
-| Screen leaf scorers | [`scripts/experiments/screen_leaf_scorer.py`](../scripts/experiments/screen_leaf_scorer.py) | Oracle routing within saved leaves; standalone scorer mapping, including logistic regression and SVM. |
-| PECOS baseline | [`scripts/baselines/pecos_compare.py`](../scripts/baselines/pecos_compare.py), `export`/`score`; [`pecos_run.py`](../scripts/baselines/pecos_run.py), `main` | Export aligned matrices, train external PECOS variants, save predictions, report comparisons. Separate runtime. |
+| Train reranker | [`scripts/train_reranker.py`](../../scripts/train_reranker.py), `main`, line 29 | Separate argparse settings; load a saved tree; construct negatives; train a cross-encoder; save under `outputs/rerankers`. |
+| Diagnose | [`scripts/diagnose_routing.py`](../../scripts/diagnose_routing.py), `report`; [`scripts/diagnose_unseen.py`](../../scripts/diagnose_unseen.py) | Saved-tree diagnostics, avoiding full retraining. Routing reports include uniform chance and majority-cluster baselines. |
+| Sweep search | [`scripts/experiments/beam_sweep.py`](../../scripts/experiments/beam_sweep.py), `run_tests`, line 16 | Sequential subprocess calls to evaluation; continues after a child failure and exits unsuccessfully if any failed. |
+| Screen features | [`scripts/experiments/screen_features.py`](../../scripts/experiments/screen_features.py) | Flat retrieval comparisons without tree training; its own feature variants and tie policy. |
+| Screen leaf scorers | [`scripts/experiments/screen_leaf_scorer.py`](../../scripts/experiments/screen_leaf_scorer.py) | Oracle routing within saved leaves; standalone scorer mapping, including logistic regression and SVM. |
+| PECOS baseline | [`scripts/baselines/pecos_compare.py`](../../scripts/baselines/pecos_compare.py), `export`/`score`; [`pecos_run.py`](../../scripts/baselines/pecos_run.py), `main` | Export aligned matrices, train external PECOS variants, save predictions, report comparisons. Separate runtime. |
 
-[`pyproject.toml`](../pyproject.toml) declares Python >=3.12 and the ML stack, but no `[project.scripts]` entry point. There is currently no installed `xmr4el` command, dataset catalog, experiment store, or general batch manager.
+[`pyproject.toml`](../../pyproject.toml) declares Python >=3.12 and the ML stack, but no `[project.scripts]` entry point. There is currently no installed `xmr4el` command, dataset catalog, experiment store, or general batch manager.
 
-The two tracked model presets, [`xmr4el_base_config.json`](../configs/xmr4el_base_config.json) and [`xmr4el_bc5cdr_config.json`](../configs/xmr4el_bc5cdr_config.json), contain constructor settings only. They repeat most feature and matcher settings. Dataset paths, group limits, output selection, and reranker training settings live elsewhere, principally CLI arguments. There is no inherited configuration or general grid expansion.
+The two tracked model presets, [`xmr4el_base_config.json`](../../configs/xmr4el_base_config.json) and [`xmr4el_bc5cdr_config.json`](../../configs/xmr4el_bc5cdr_config.json), contain constructor settings only. They repeat most feature and matcher settings. Dataset paths, group limits, output selection, and reranker training settings live elsewhere, principally CLI arguments. There is no inherited configuration or general grid expansion.
 
 Configuration checks are distributed and often late: unexpected top-level fields raise constructor `TypeError`; some factories assert that `type` exists and then index a registry; parameter errors can occur during fitting. `resolve_predict_config` checks beam and top-k bounds but does not provide a complete experiment schema. Factory defaults are also not all materialized in the saved top-level model config.
 
@@ -41,15 +44,15 @@ Configuration checks are distributed and often late: unexpected top-level fields
 
 | Stage | Existing selection mechanism | Available pipeline implementations |
 | --- | --- | --- |
-| Feature composition | `FEATURES` and `TextEncoder._encode` in [`features/encoder.py`](../xmr4el/features/encoder.py) | `tfidf`, `sapbert_char_context`. |
-| Vectorization | `vectorizer_dict`, `VectorizerMeta`, `Vectorizer.fit` in [`features/vectorizers.py`](../xmr4el/features/vectorizers.py) | `tfidf`. |
-| Reduction | `dimension_dict`, `DimensionModelMeta`, `DimensionModel.fit` in [`features/reduction.py`](../xmr4el/features/reduction.py) | `sklearntruncatedsvd`. |
-| Frozen transformer | `MODEL_NAMES`, `Transformer.transform`, `sentence_model` in [`features/transformers.py`](../xmr4el/features/transformers.py) | `biobert`, `sentencetbiobert`, `sapbert`; arbitrary checkpoint through `kwargs.model_name`, with optional pooling and max length. |
-| Label representation | `XModel._fit` and [`LabelEmbeddingFactory.generate_PIFA`](../xmr4el/features/label_embeddings.py) | PIFA, hard-coded by the pipeline rather than a selectable registry. |
-| Clustering | `cluster_dict`, `ClusterMeta`, `ClusteringModel.train` in [`hierarchy/clusterers.py`](../xmr4el/hierarchy/clusterers.py) | `balancedkmeans`. |
-| Matcher | `classifier_dict`, `ClassifierMeta`, `ClassifierModel.train` in [`learning/classifiers.py`](../xmr4el/learning/classifiers.py) | `jointlogisticregression`, backed by `JointOvRLogistic`. |
+| Feature composition | `FEATURES` and `TextEncoder._encode` in [`features/encoder.py`](../../xmr4el/features/encoder.py) | `tfidf`, `sapbert_char_context`. |
+| Vectorization | `vectorizer_dict`, `VectorizerMeta`, `Vectorizer.fit` in [`features/vectorizers.py`](../../xmr4el/features/vectorizers.py) | `tfidf`. |
+| Reduction | `dimension_dict`, `DimensionModelMeta`, `DimensionModel.fit` in [`features/reduction.py`](../../xmr4el/features/reduction.py) | `sklearntruncatedsvd`. |
+| Frozen transformer | `MODEL_NAMES`, `Transformer.transform`, `sentence_model` in [`features/transformers.py`](../../xmr4el/features/transformers.py) | `biobert`, `sentencetbiobert`, `sapbert`; arbitrary checkpoint through `kwargs.model_name`, with optional pooling and max length. |
+| Label representation | `XModel._fit` and [`LabelEmbeddingFactory.generate_PIFA`](../../xmr4el/features/label_embeddings.py) | PIFA, hard-coded by the pipeline rather than a selectable registry. |
+| Clustering | `cluster_dict`, `ClusterMeta`, `ClusteringModel.train` in [`hierarchy/clusterers.py`](../../xmr4el/hierarchy/clusterers.py) | `balancedkmeans`. |
+| Matcher | `classifier_dict`, `ClassifierMeta`, `ClassifierModel.train` in [`learning/classifiers.py`](../../xmr4el/learning/classifiers.py) | `jointlogisticregression`, backed by `JointOvRLogistic`. |
 | Leaf scoring | `MLModel.train`, `HierarchicalMLModel.predict` | Label-level matcher probability multiplied by routing path probability; optional mention-kNN in `XModel.predict`. |
-| Cross-encoder | [`rerank.py`](../xmr4el/rerank.py), `CrossEncoderReranker` | Separate training/evaluation stage, not a constructor-selected leaf ranker. |
+| Cross-encoder | [`rerank.py`](../../xmr4el/rerank.py), `CrossEncoderReranker` | Separate training/evaluation stage, not a constructor-selected leaf ranker. |
 
 Metaclasses register lower-case subclass names when their modules are imported. They are useful existing extension points, but do not discover unimported modules or provide parameter schemas, resource requirements, compatibility rules, or user-facing descriptions. `JointOvRLogistic` is the estimator behind the registered wrapper, not a second pipeline backend.
 
@@ -57,22 +60,22 @@ Do not expose standalone screen scorers as if they were interchangeable tree com
 
 ### Verified execution flow
 
-1. **Load and group.** `train.main` calls `Preprocessor.load_pubtator_file` and `organize_pubtator_output`, or `load_data_labels_from_file` in [`data/readers.py`](../xmr4el/data/readers.py). PubTator produces supplied mentions plus context, optional document abbreviation expansion, labels, spans, and document IDs. Training groups mentions by label. TSV rows are `group_id<TAB>text`, with a separate label file aligned to sorted group IDs.
+1. **Load and group.** `train.main` calls `Preprocessor.load_pubtator_file` and `organize_pubtator_output`, or `load_data_labels_from_file` in [`data/readers.py`](../../xmr4el/data/readers.py). PubTator produces supplied mentions plus context, optional document abbreviation expansion, labels, spans, and document IDs. Training groups mentions by label. TSV rows are `group_id<TAB>text`, with a separate label file aligned to sorted group IDs.
 2. **Select training groups.** `-ds_len` slices groups after loading the corpus. PubTator groups preserve first-seen label order; TSV uses sorted group IDs. This is neither random sampling nor a document/mention limit, and does not bound initial loading memory. TSV with non-TF-IDF features is rejected by the training CLI.
 3. **Prepare examples.** `XModel._fit` deep-copies training groups and calls `Preprocessor.prepare_data` to flatten synonyms and retain row-to-label ownership.
 4. **Fit features.** `TextEncoder.encode` fits training TF-IDF and reduction models. `tfidf` represents the whole input. `sapbert_char_context` requires `[SEP]` and concatenates transformer mention, character TF-IDF/SVD mention, and TF-IDF/SVD context blocks; each block and the concatenated row are normalized. Actual block widths are recorded.
 5. **Construct labels.** `LabelEmbeddingFactory.label_binarizer` returns sparse `Y` and sorted classes. `XModel.initial_labels` follows those columns, not input group order. PIFA is normalized `Y.T @ X`, materialized densely as `Z`.
-6. **Build hierarchy.** `HierarchicalMLModel.train` in [`hierarchy/tree.py`](../xmr4el/hierarchy/tree.py), line 208, trains nodes sequentially, layer by layer. `BalancedKMeans.train` bisects normalized label embeddings, then jointly refines balanced assignments. `ClusteringTrainer.train` filters undersized clusters and reassigns orphan labels to valid centroids.
-7. **Train matchers.** `MLModel.train` in [`hierarchy/node.py`](../xmr4el/hierarchy/node.py), line 140, trains internal nodes against `Y @ C`. Leaves use identity `C`, producing label-level supervision. `prepare_layer` passes child rows only from the child cluster and appends three parent score features. There are no out-of-cluster negatives in those child inputs.
+6. **Build hierarchy.** `HierarchicalMLModel.train` in [`hierarchy/tree.py`](../../xmr4el/hierarchy/tree.py), line 208, trains nodes sequentially, layer by layer. `BalancedKMeans.train` bisects normalized label embeddings, then jointly refines balanced assignments. `ClusteringTrainer.train` filters undersized clusters and reassigns orphan labels to valid centroids.
+7. **Train matchers.** `MLModel.train` in [`hierarchy/node.py`](../../xmr4el/hierarchy/node.py), line 140, trains internal nodes against `Y @ C`. Leaves use identity `C`, producing label-level supervision. `prepare_layer` passes child rows only from the child cluster and appends three parent score features. There are no out-of-cluster negatives in those child inputs.
 8. **Persist.** Each trained node is temporarily saved and later reloaded into the complete hierarchy. `XModel.save` writes the final model to a timestamp-named child of its argument directory.
 9. **Infer.** Query features use fitted TF-IDF/SVD models. Batched beam traversal expands internal nodes, with at most 100 candidate labels contributed by each visited leaf. Scores always include routing path probability. Mention-kNN optionally multiplies scores by `exp(beta * max_cosine)` before final top-k truncation.
-10. **Evaluate.** `evaluate.main` parses PubTator using the tree's preprocessing, filters to training vocabulary, calls prediction, and uses `gold_rank` and `ranking_metrics` in [`eval.py`](../xmr4el/eval.py). It reports acc@1, MRR, recall@k, candidate recall, vocabulary coverage, and optionally string breakdowns or cross-encoder reranking.
+10. **Evaluate.** `evaluate.main` parses PubTator using the tree's preprocessing, filters to training vocabulary, calls prediction, and uses `gold_rank` and `ranking_metrics` in [`eval.py`](../../xmr4el/eval.py). It reports acc@1, MRR, recall@k, candidate recall, vocabulary coverage, and optionally string breakdowns or cross-encoder reranking.
 
 Training from TSV exists; the evaluation CLI specifically consumes PubTator. A future dataset adapter must explicitly define any flat TSV evaluation format instead of claiming that it already works.
 
 ### Logging, persistence, caching, failure handling
 
-- Library modules use Python logging. [`xmr4el/__init__.py`](../xmr4el/__init__.py) provides package verbosity and a null handler; applications own output handlers. Encoding, hierarchy, node, routing, and ranking logs already contain useful counts and elapsed times. Evaluation and screens mainly print human-readable output. There is no structured progress stream or common metrics JSON.
+- Library modules use Python logging. [`xmr4el/__init__.py`](../../xmr4el/__init__.py) provides package verbosity and a null handler; applications own output handlers. Encoding, hierarchy, node, routing, and ranking logs already contain useful counts and elapsed times. Evaluation and screens mainly print human-readable output. There is no structured progress stream or common metrics JSON.
 - `XModel.save`, line 169, safely reserves a unique timestamp directory but returns no path. `xmodel.pkl` retains training groups, label mapping, `X/Y/Z`, and configuration; `xmodel.json` is a readable state summary, never loaded. Encoder, hierarchy, node, clustering, and matcher state are saved separately. Hierarchy saving refuses nonempty destinations, and loading validates child mappings and numeric node order.
 - A final model directory is not published atomically as a complete artifact. Save failure can leave a partial directory. Merely finding a directory is insufficient evidence of successful training.
 - Temporary node persistence in `HierarchicalMLModel.train` is a memory measure, not a restart checkpoint: temporary folders have no durable resume manifest, and training reconstructs all nodes at the end. Cross-encoder saving stores model/tokenizer/metadata, not optimizer, scheduler, and RNG state for training continuation.
@@ -83,7 +86,7 @@ Training from TSV exists; the evaluation CLI specifically consumes PubTator. A f
 
 ### Resource behavior and architectural limits
 
-[`torch_device`](../xmr4el/__init__.py), line 25, automatically selects CUDA, then MPS, then CPU. `Transformer.transform` explicitly discards a configured `device`. `JointOvRLogistic.fit` uses that same accelerator selection when `n * target_count >= 5,000,000`; smaller fits use CPU. **TF-IDF-only training can therefore still use an accelerator.** There is no current explicit CPU-only run contract or GPU assignment parameter.
+[`torch_device`](../../xmr4el/__init__.py), line 25, automatically selects CUDA, then MPS, then CPU. `Transformer.transform` explicitly discards a configured `device`. `JointOvRLogistic.fit` uses that same accelerator selection when `n * target_count >= 5,000,000`; smaller fits use CPU. **TF-IDF-only training can therefore still use an accelerator.** There is no current explicit CPU-only run contract or GPU assignment parameter.
 
 The joint matcher densifies features with an added bias column and its target indicator matrix, creates dense sign/weight matrices, and runs Torch L-BFGS with history size 10. A feature buffer alone costs approximately `4 * n * (d + 1)` bytes, before target arrays, device copies, optimizer history, retained CSR matrices, and other stages. The accelerator threshold uses target count, not a memory estimate. Matcher OOM has no equivalent batch reduction mechanism.
 
@@ -91,13 +94,13 @@ PIFA is dense `labels * dimensions`; balanced refinement uses dense label-by-clu
 
 Core hierarchy training has no node process pool or `n_workers` control. NumPy/BLAS and Torch can nevertheless use native threads. `ClassifierModel.train` uses `threadpool_limits(1)`, so an outer BLAS thread budget may be narrowed there; Torch thread settings need explicit measurement/control too. The standalone leaf screen uses `OneVsRestClassifier(n_jobs=-1)` and can consume all CPU cores. Parallelizing runs without accounting for these differences risks oversubscription.
 
-The main Dockerfile supplies Python 3.12 and locked dependencies, with source mounted at runtime. [`pecos.dockerfile`](../pecos.dockerfile) uses a separate Python 3.10/libpecos environment. Do not import PECOS into the main runner process or mix its environment into the core lock.
+The main Dockerfile supplies Python 3.12 and locked dependencies, with source mounted at runtime. [`pecos.dockerfile`](../../pecos.dockerfile) uses a separate Python 3.10/libpecos environment. Do not import PECOS into the main runner process or mix its environment into the core lock.
 
 ### Tests inspected and executed
 
 The current offline suite passed: **43 tests in 23.04 seconds**, using `.venv/bin/python -m pytest tests/ -q`.
 
-Coverage includes readers/splits, normalized feature blocks, mocked transformer ordering/cache/OOMs, balanced clustering, child inputs, joint logistic behavior, mention-kNN, metrics, logging, quiet CLI behavior, label mapping, save/load round trips, tiny cross-encoder fitting, and out-of-fold exclusion by document. Relevant starting points are [`tests/integration/`](../tests/integration), [`tests/features/test_transformers.py`](../tests/features/test_transformers.py), [`tests/test_rerank.py`](../tests/test_rerank.py), and [`tests/test_audit_regressions.py`](../tests/test_audit_regressions.py). `conftest.py` redirects embedding caches into temporary directories.
+Coverage includes readers/splits, normalized feature blocks, mocked transformer ordering/cache/OOMs, balanced clustering, child inputs, joint logistic behavior, mention-kNN, metrics, logging, quiet CLI behavior, label mapping, save/load round trips, tiny cross-encoder fitting, and out-of-fold exclusion by document. Relevant starting points are [`tests/integration/`](../../tests/integration), [`tests/features/test_transformers.py`](../../tests/features/test_transformers.py), [`tests/test_rerank.py`](../../tests/test_rerank.py), and [`tests/test_audit_regressions.py`](../../tests/test_audit_regressions.py). `conftest.py` redirects embedding caches into temporary directories.
 
 These tests do not establish production memory capacity, real accelerator behavior, dataset quality, deterministic pretrained-model execution, or orchestration reliability. Experiment scheduling, durable state, cancellation, retries, configuration composition, and comparison policy have no implemented layer to test yet. No corpus training, dataset inspection, or resource benchmark was run for this report.
 

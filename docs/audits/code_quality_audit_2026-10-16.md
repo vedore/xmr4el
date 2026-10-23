@@ -16,7 +16,7 @@ None confirmed.
 
 **Classification:** confirmed compatibility defect.
 
-**Locations:** [pyproject.toml:24](../pyproject.toml#L24), [transformers.py:17](../xmr4el/features/transformers.py#L17).
+**Locations:** [pyproject.toml:24](../../pyproject.toml#L24), [transformers.py:17](../../xmr4el/features/transformers.py#L17).
 
 `sentence-transformers` has no minimum version, although the implementation requires newer module paths, constructor arguments, and methods. For example, the permitted 5.1.1 release uses different constructor arguments. An existing environment can satisfy package metadata while failing to import or construct the encoder. See the [upstream 5.1.1 implementation](https://raw.githubusercontent.com/huggingface/sentence-transformers/v5.1.1/sentence_transformers/models/Transformer.py).
 
@@ -26,7 +26,7 @@ None confirmed.
 
 **Classification:** confirmed behavior; projected scalability risk.
 
-**Locations:** [classifiers.py:145](../xmr4el/learning/classifiers.py#L145), [scoring.py:43](../xmr4el/learning/scoring.py#L43).
+**Locations:** [classifiers.py:145](../../xmr4el/learning/classifiers.py#L145), [scoring.py:43](../../xmr4el/learning/scoring.py#L43).
 
 `JointOvRLogistic._dense()` always allocates `rows × (features + 1)` float32 values. Label blocking limits target matrices, but does not bound this allocation. A supported configuration retaining 100,000 features across 100,000 rows requires approximately **40 GB for this array alone**.
 
@@ -40,7 +40,7 @@ Candidate kNN also materializes query-chunk × selected-training-row similaritie
 
 **Classification:** reproduced.
 
-**Location:** [classifiers.py:156](../xmr4el/learning/classifiers.py#L156).
+**Location:** [classifiers.py:156](../../xmr4el/learning/classifiers.py#L156).
 
 Both NaN and infinity in `X` produced a fitted object with nonfinite weights instead of an error. Empty training input raises `ZeroDivisionError`. This matters for callers using the classifier or encoded-feature API directly.
 
@@ -50,7 +50,7 @@ Both NaN and infinity in `X` produced a fitted object with nonfinite weights ins
 
 **Classification:** reproduced.
 
-**Location:** [xmodel.py:226](../xmr4el/xmodel.py#L226).
+**Location:** [xmodel.py:226](../../xmr4el/xmodel.py#L226).
 
 `XModel(features="tfidf").save(...)` succeeds and writes `xmodel.pkl`, but loading fails because `hml/hml.pkl` does not exist. The completion marker therefore does not guarantee a loadable model.
 
@@ -60,7 +60,7 @@ Both NaN and infinity in `X` produced a fitted object with nonfinite weights ins
 
 **Classification:** reproduced.
 
-**Location:** [encoder.py:182](../xmr4el/features/encoder.py#L182).
+**Location:** [encoder.py:182](../../xmr4el/features/encoder.py#L182).
 
 Two valid inputs such as `"aspirin [SEP] "` and `"fever [SEP] "` fail with `empty vocabulary`. This affects dictionary-only training, `context_window=0`, and contexts containing only filtered tokens. Existing tests cover individual empty contexts within a nonempty corpus.
 
@@ -70,7 +70,7 @@ Two valid inputs such as `"aspirin [SEP] "` and `"fever [SEP] "` fail with `empt
 
 **Classification:** reproduced.
 
-**Location:** [label_embeddings.py:29](../xmr4el/features/label_embeddings.py#L29).
+**Location:** [label_embeddings.py:29](../../xmr4el/features/label_embeddings.py#L29).
 
 `MultiLabelBinarizer` produces int64 labels. Multiplying these by float32 features produces a float64 intermediate; conversion back happens after densification and normalization. At 180,000 labels × 2,304 features, one float64 intermediate occupies **3.1 GiB**, before additional copies.
 
@@ -86,7 +86,7 @@ Validate numerical tolerances and ranking stability because accumulation precisi
 
 **Classification:** confirmed defect.
 
-**Locations:** [rerank.py:161](../xmr4el/rerank.py#L161), [train_reranker.py:79](../scripts/train_reranker.py#L79).
+**Locations:** [rerank.py:161](../../xmr4el/rerank.py#L161), [train_reranker.py:79](../../scripts/train_reranker.py#L79).
 
 Different trees with the same basename pass the check. Renaming the correct tree fails it. Independent output roots and copied artifacts make both cases possible.
 
@@ -96,7 +96,7 @@ Different trees with the same basename pass the check. Renaming the correct tree
 
 **Classification:** reproduced.
 
-**Location:** [readers.py:190](../xmr4el/data/readers.py#L190).
+**Location:** [readers.py:190](../../xmr4el/data/readers.py#L190).
 
 An annotation whose offsets identify `"Aspirin"` but whose mention text is `"WRONGTX"` is accepted. An annotation ending with an empty concept field is silently dropped after stripping removes its trailing tab. Consequently, malformed data can change supervision or evaluation denominators without a clear diagnostic.
 
@@ -106,7 +106,7 @@ An annotation whose offsets identify `"Aspirin"` but whose mention text is `"WRO
 
 **Classification:** missing safeguard; actual dataset leakage was not checked.
 
-**Location:** [run_experiment.py:40](../scripts/run_experiment.py#L40).
+**Location:** [run_experiment.py:40](../../scripts/run_experiment.py#L40).
 
 Validation checks paths and settings, but permits training and evaluating on the same file or overlapping documents. File hashes establish provenance without establishing split independence.
 
@@ -116,7 +116,7 @@ Validation checks paths and settings, but permits training and evaluating on the
 
 **Classification:** documented security limitation.
 
-**Locations:** [xmodel.py:276](../xmr4el/xmodel.py#L276), [node.py:95](../xmr4el/hierarchy/node.py#L95).
+**Locations:** [xmodel.py:276](../../xmr4el/xmodel.py#L276), [node.py:95](../../xmr4el/hierarchy/node.py#L95).
 
 Loading executes unrestricted pickle deserialization before structural validation. A malicious artifact can execute code. The README correctly documents this restriction; it is not a newly discovered remote-service exploit.
 
@@ -128,7 +128,7 @@ Loading executes unrestricted pickle deserialization before structural validatio
 
 **Classification:** reproduced.
 
-**Locations:** [xmodel.py:114](../xmr4el/xmodel.py#L114), [classifiers.py:83](../xmr4el/learning/classifiers.py#L83).
+**Locations:** [xmodel.py:114](../../xmr4el/xmodel.py#L114), [classifiers.py:83](../../xmr4el/learning/classifiers.py#L83).
 
 `XModel(features="tfidf").train(...)` finishes encoding and then raises `AttributeError` because `matcher_config` is `None`. Several backend dispatchers similarly expose `KeyError` for unknown types.
 
@@ -138,7 +138,7 @@ Loading executes unrestricted pickle deserialization before structural validatio
 
 **Classification:** reproduced.
 
-**Location:** [transformers.py:107](../xmr4el/features/transformers.py#L107).
+**Location:** [transformers.py:107](../../xmr4el/features/transformers.py#L107).
 
 Joining fields with `"\0"` makes `["a", "b\0c"]` and `["a\0b", "c"]` produce the same cache key. Both contain two strings, so the row-count assertion passes and the second request receives incorrect embeddings.
 
@@ -148,7 +148,7 @@ Joining fields with `"\0"` makes `["a", "b\0c"]` and `["a\0b", "c"]` produce the
 
 **Classification:** reproduced reproducibility issue.
 
-**Location:** [tree.py:376](../xmr4el/hierarchy/tree.py#L376).
+**Location:** [tree.py:376](../../xmr4el/hierarchy/tree.py#L376).
 
 With four equal leaf scores, requesting one candidate returned label 3; requesting four candidates and then `topk=1` returned label 0. Stable sorting downstream cannot recover candidates discarded by `argpartition`.
 
@@ -172,7 +172,7 @@ With four equal leaf scores, requesting one candidate returned label 3; requesti
 - Actual encoder construction and forward passes passed with a local synthetic BERT using CLS and mean pooling.
 - Shell syntax checks passed.
 
-The important coverage gaps are the reproduced cases above, dependency-minimum installations, and real accelerator memory behavior. CI tests one Ubuntu environment; its installed-wheel smoke mocks transformer computation. See [CI configuration:5](../.github/workflows/ci.yml#L5).
+The important coverage gaps are the reproduced cases above, dependency-minimum installations, and real accelerator memory behavior. CI tests one Ubuntu environment; its installed-wheel smoke mocks transformer computation. See [CI configuration:5](../../.github/workflows/ci.yml#L5).
 
 No specific vulnerability in the locked dependency set was confirmed. The Torch floor excludes CVE-2025-3000's affected range, according to [OSV](https://osv.dev/vulnerability/GHSA-rrmf-rvhw-rf47). A complete transitive advisory scan was not available.
 

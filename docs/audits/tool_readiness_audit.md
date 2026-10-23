@@ -1,5 +1,8 @@
 # XMR4EL tool readiness audit
 
+Historical audit. Current implementation, cleanup decisions and terminal-interface contracts are in
+[architecture assessment](../architecture.md); findings and component names below may be superseded.
+
 Audit date: 2026-10-09. Source of truth: the local fork at commit
 `54803a7209772e57a67101dd1863f132dbaf3826`. No upstream comparison was performed.
 This report records the preceding read-only audit; it does not implement its recommendations.
@@ -29,24 +32,24 @@ packaging, or orchestration reliability.
 
 ### Current execution flow
 
-1. [Preprocessor](../xmr4el/data/readers.py) reads PubTator or grouped TSV inputs.
+1. [Preprocessor](../../xmr4el/data/readers.py) reads PubTator or grouped TSV inputs.
    Training data is grouped by label; texts in a group are positives or synonyms.
    PubTator input supplies annotated mention spans; the framework does not discover
    mentions in unannotated documents.
-2. [`XModel._fit()`](../xmr4el/xmodel.py) flattens those groups, fits a
-   [TextEncoder](../xmr4el/features/encoder.py), constructs the label matrix `Y`,
+2. [`XModel._fit()`](../../xmr4el/xmodel.py) flattens those groups, fits a
+   [TextEncoder](../../xmr4el/features/encoder.py), constructs the label matrix `Y`,
    and builds normalized PIFA label embeddings `Z` through
-   [LabelEmbeddingFactory](../xmr4el/features/label_embeddings.py).
+   [LabelEmbeddingFactory](../../xmr4el/features/label_embeddings.py).
    `initial_labels` follows the sorted label columns of `Y`.
-3. [`HierarchicalMLModel.train()`](../xmr4el/hierarchy/tree.py) builds and trains
-   layers sequentially. [MLModel](../xmr4el/hierarchy/node.py) handles individual
+3. [`HierarchicalMLModel.train()`](../../xmr4el/hierarchy/tree.py) builds and trains
+   layers sequentially. [MLModel](../../xmr4el/hierarchy/node.py) handles individual
    nodes, clustering, and matcher training. Child training uses the relevant
    cluster rows and augmented routing-score features.
-4. [`XModel.predict()`](../xmr4el/xmodel.py) encodes queries and traverses the
+4. [`XModel.predict()`](../../xmr4el/xmodel.py) encodes queries and traverses the
    hierarchy. Leaf probabilities are multiplied by routing-path probabilities.
-   Optional [mention-kNN scoring](../xmr4el/learning/scoring.py) adjusts candidate
+   Optional [mention-kNN scoring](../../xmr4el/learning/scoring.py) adjusts candidate
    scores before final ranking.
-5. [`evaluate_tree()`](../xmr4el/eval.py) loads evaluation mentions, filters to
+5. [`evaluate_tree()`](../../xmr4el/eval.py) loads evaluation mentions, filters to
    training-supported labels, computes ranking metrics, and returns a metrics
    dictionary plus intermediate state for optional downstream analysis.
 
@@ -62,10 +65,10 @@ packaging, or orchestration reliability.
 | Classifier registry | `JointLogisticRegression`, using `JointOvRLogistic` |
 | Additional scoring | Candidate-restricted mention-kNN and optional cross-encoder reranking |
 
-Registries exist in [vectorizers.py](../xmr4el/features/vectorizers.py),
-[reduction.py](../xmr4el/features/reduction.py),
-[clusterers.py](../xmr4el/hierarchy/clusterers.py), and
-[classifiers.py](../xmr4el/learning/classifiers.py). They register imported classes
+Registries exist in [vectorizers.py](../../xmr4el/features/vectorizers.py),
+[reduction.py](../../xmr4el/features/reduction.py),
+[clusterers.py](../../xmr4el/hierarchy/clusterers.py), and
+[classifiers.py](../../xmr4el/learning/classifiers.py). They register imported classes
 under lowercased class names. They are not a rich capability or parameter-schema
 catalog. Screening scripts and separate PECOS baselines are not additional
 interchangeable backends in the main pipeline.
@@ -78,13 +81,13 @@ does not imply that arbitrary alternatives already work.
 
 | Capability | Source | Status |
 |---|---|---|
-| Train through Python | `XModel.train()` in [xmodel.py](../xmr4el/xmodel.py) | Verified with small synthetic inputs |
+| Train through Python | `XModel.train()` in [xmodel.py](../../xmr4el/xmodel.py) | Verified with small synthetic inputs |
 | Predict through Python | `XModel.predict()` | Verified with small synthetic inputs |
 | Save and reload | `XModel.save()/load()`, encoder and hierarchy persistence | Integration-tested; transformer checkpoint portability remains limited |
-| Train from files | [scripts/train.py](../scripts/train.py) | Implemented for PubTator and grouped TSV; full corpus execution not repeated |
-| Evaluate saved trees | [scripts/evaluate.py](../scripts/evaluate.py), `evaluate_tree()` | Metric and filtering behavior tested |
-| Record one experiment | [scripts/run_experiment.py](../scripts/run_experiment.py) | Implemented and tested; lifecycle gaps remain |
-| Rerank candidates | [rerank.py](../xmr4el/rerank.py) and evaluation script | Small CPU tests; not a general orchestration API |
+| Train from files | [scripts/train.py](../../scripts/train.py) | Implemented for PubTator and grouped TSV; full corpus execution not repeated |
+| Evaluate saved trees | [scripts/evaluate.py](../../scripts/evaluate.py), `evaluate_tree()` | Metric and filtering behavior tested |
+| Record one experiment | [scripts/run_experiment.py](../../scripts/run_experiment.py) | Implemented and tested; lifecycle gaps remain |
+| Rerank candidates | [rerank.py](../../xmr4el/rerank.py) and evaluation script | Small CPU tests; not a general orchestration API |
 
 The experiment wrapper accepts JSON with `name`, `model_config`, `train_path`,
 and `evals`. It supports evaluation-only runs through `-xmodel_path`. It writes
@@ -128,7 +131,7 @@ Additional temporary probes verified:
   existed. That file did not change executed code, but demonstrated the detection gap.
 
 Transformer/OOM tests use mocks rather than downloaded checkpoints or real GPU
-exhaustion. Existing corpus results recorded in [STATUS.md](../STATUS.md) provide
+exhaustion. Existing corpus results recorded in [STATUS.md](../../STATUS.md) provide
 historical evidence, not experiments reproduced by this audit.
 
 ## C. Critical blockers for reliable experiments
@@ -136,7 +139,7 @@ historical evidence, not experiments reproduced by this audit.
 ### 1. Configuration validation is incomplete
 
 **Evidence:** `check_spec()` in
-[run_experiment.py](../scripts/run_experiment.py) checks required and unknown keys,
+[run_experiment.py](../../scripts/run_experiment.py) checks required and unknown keys,
 nonempty evaluations, and duplicate split names. It does not enforce value types,
 valid identifiers, resource constraints, or file existence. `XModel.load_config()`
 passes JSON directly into the constructor. `resolve_predict_config()` checks only
@@ -154,9 +157,9 @@ dependency is required for an initial fix.
 
 ### 2. Empty evaluation can be recorded as successful
 
-**Evidence:** `evaluate_tree()` in [eval.py](../xmr4el/eval.py) returns early with
+**Evidence:** `evaluate_tree()` in [eval.py](../../xmr4el/eval.py) returns early with
 metadata and `None` when filtering leaves zero evaluation rows.
-[evaluate.py](../scripts/evaluate.py) exits normally, and the experiment wrapper
+[evaluate.py](../../scripts/evaluate.py) exits normally, and the experiment wrapper
 writes the metadata and logs run completion.
 
 **Consequence:** a dataset or label mismatch can look like a successful benchmark
@@ -170,7 +173,7 @@ Validate search settings even when evaluation has no eligible rows. Preserve
 
 ### 3. Transformer identity and cache compatibility are not pinned
 
-**Evidence:** [transformers.py](../xmr4el/features/transformers.py) builds cache keys
+**Evidence:** [transformers.py](../../xmr4el/features/transformers.py) builds cache keys
 from checkpoint names, requested pooling/length settings, dtype, and unique texts.
 Checkpoint revisions, tokenizer identity, and implementation changes are absent.
 `sentence_model()` does not expose a pinned revision. The encoder saves transformer
@@ -203,7 +206,7 @@ Record enough to reproduce each stage; this does not require MLflow or a server.
 
 ### 5. Run and artifact completion are not durable
 
-**Evidence:** [run_experiment.py](../scripts/run_experiment.py) writes JSON directly
+**Evidence:** [run_experiment.py](../../scripts/run_experiment.py) writes JSON directly
 and has no persistent status/failure record. Exceptions are logged and raised;
 interruptions are not modeled as run states. Run directories use second-resolution
 timestamps plus names. `XModel.save()` reserves a unique directory, but publishes
@@ -223,7 +226,7 @@ checkpoint resumption: durable training checkpoints are currently absent.
 
 ### 6. Wrapper logging leaks across repeated in-process calls
 
-`main()` in [run_experiment.py](../scripts/run_experiment.py) attaches a root
+`main()` in [run_experiment.py](../../scripts/run_experiment.py) attaches a root
 `FileHandler` without closing or removing it. Global verbosity and import-time
 logging configuration elsewhere also affect the process. Repeated wrapper calls
 can write later logs into earlier runs and accumulate handlers.
@@ -244,15 +247,15 @@ on failure. This is not a reason to rewrite the pipeline.
 
 ### 8. Resource selection is implicit and memory use is substantial
 
-[torch_device()](../xmr4el/__init__.py) automatically selects CUDA, MPS, or CPU.
+[torch_device()](../../xmr4el/__init__.py) automatically selects CUDA, MPS, or CPU.
 Transformer configuration discards `device` and selects automatically.
-[JointOvRLogistic.fit()](../xmr4el/learning/classifiers.py) selects acceleration
+[JointOvRLogistic.fit()](../../xmr4el/learning/classifiers.py) selects acceleration
 using an `n * L` threshold, not an explicit run allocation or memory estimate.
 Its training uses dense features, targets, scores, and class weights; LBFGS also
 retains optimizer history. Classifier training limits BLAS threads to one, but this
 does not constitute a project-wide worker policy.
 
-[label_max_cos()](../xmr4el/learning/scoring.py) restricts score computation to
+[label_max_cos()](../../xmr4el/learning/scoring.py) restricts score computation to
 candidates but still densifies the training mention matrix. PIFA construction and
 other transformations can also allocate dense intermediates. Transformer OOM
 retries reduce batch size; they do not solve total host-memory pressure.
@@ -266,8 +269,8 @@ must come before launching several models on one accelerator.
 Transformer cache paths derive from the installed module location, which can land
 under a read-only `site-packages` directory. Script outputs are relative to the
 current working directory. The wrapper derives its Git checkout from its script
-location, while [train.py](../scripts/train.py) contains environment-specific setup.
-[pyproject.toml](../pyproject.toml) packages `xmr4el` but declares no console entry
+location, while [train.py](../../scripts/train.py) contains environment-specific setup.
+[pyproject.toml](../../pyproject.toml) packages `xmr4el` but declares no console entry
 point; scripts and configuration presets are not explicitly installed as package
 resources by the current manifest.
 
