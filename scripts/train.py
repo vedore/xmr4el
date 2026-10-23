@@ -1,12 +1,6 @@
 import os
 import time
-import platform
 import logging
-
-if platform.machine() == 'aarch64':  # ARM only
-    os.environ['LD_PRELOAD'] = '/lib/aarch64-linux-gnu/libgomp.so.1'
-
-# LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1
 from argparse import ArgumentParser
 from xmr4el import set_verbosity
 from xmr4el.data.readers import Preprocessor
@@ -59,6 +53,5 @@ def main():
 
     logger.info("Run completed: elapsed=%.1fs", time.perf_counter() - start)
 
-# Here is code
 if __name__ == "__main__":
     main()
