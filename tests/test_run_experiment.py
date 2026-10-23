@@ -1,5 +1,6 @@
 """scripts/run_experiment.py end to end on a synthetic tfidf spec: run dir contents, metrics = evaluate.py's,
-eval-only reuse of the saved tree, spec checks, no overwrite, empty evals fail the run, log handler cleanup."""
+eval-only reuse of the saved tree, spec checks, no overwrite, empty evals fail the run, log handler cleanup,
+-check responses, -run_dir and the reviewed config/tree bindings (exit 3)."""
 from datetime import datetime
 import importlib.util
 import hashlib
@@ -56,7 +57,15 @@ def test_run_experiment(tmp_path):
             "evals": [{"split": "dev", "test_path": "dev.pubtator", "train_path": "train.pubtator"},
                       {"split": "dev_beam1", "test_path": "dev.pubtator", "beam_size": 1, "knn_beta": 2}]}
     (tmp_path / "spec.json").write_text(json.dumps(spec))
-    r = run(tmp_path, "-spec", "spec.json")
+    r = run(tmp_path, "-spec", "spec.json", "-check")
+    assert r.returncode == 0 and not (tmp_path / "outputs").exists(), r.stderr
+    checked = json.loads(r.stdout)
+    config_sha = hashlib.sha256((tmp_path / "cfg.json").read_bytes()).hexdigest()
+    assert checked["ok"] and checked["model_config_sha256"] == config_sha and checked["tree_id"] is None
+    r = run(tmp_path, "-spec", "spec.json", "-model_config_sha256", "0" * 64)
+    assert r.returncode == 3 and not (tmp_path / "outputs").exists(), r.stderr
+    assert json.loads(r.stdout) == {"error": "model_config_changed", "expected": "0" * 64, "actual": config_sha}
+    r = run(tmp_path, "-spec", "spec.json", "-model_config_sha256", config_sha)
     assert r.returncode == 0, r.stderr
     (run_dir,) = (tmp_path / "outputs/runs").iterdir()
     assert run_dir.name.endswith("_syn")
@@ -80,6 +89,8 @@ def test_run_experiment(tmp_path):
     assert dev["rows"] == dev["rows_total"] == 40 and dev["strings"]["all"]["n"] == 40
     assert dev["strings"]["all"]["routed"] == dev["R@cand"] and dev["ms_per_query"] >= 0
     assert dev["acc@1_all"] == dev["acc@1"] and dev["hybrid_all"] == dev["hybrid"]  # every row in vocabulary
+    assert checked["search"] == {"dev": dev["search"], "dev_beam1": beam1["search"]}
+    assert (run_dir / "model_config.json").read_bytes() == (tmp_path / "cfg.json").read_bytes()
     assert "acc@1" in (run_dir / "run.log").read_text(), "eval report in the log"
 
     # metrics = evaluate.py's function on the saved tree, minus timings
@@ -90,16 +101,23 @@ def test_run_experiment(tmp_path):
         assert dev[k] == want[k], k
 
     # eval only, spec on stdin: the saved tree is reused, nothing trained
-    r = run(tmp_path, "-spec", "-", "-xmodel_path", tree_path, stdin=json.dumps(spec))
+    tree_id = json.loads((run_dir / "tree.json").read_text())["tree_id"]
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", tree_path, "-check", stdin=json.dumps(spec))
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {**checked, "model_config_sha256": None, "tree_id": tree_id}
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", tree_path, "-tree_id", "other", stdin=json.dumps(spec))
+    assert r.returncode == 3 and json.loads(r.stdout)["error"] == "tree_changed", r.stderr
+    again = tmp_path / "outputs/runs/given"
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", tree_path, "-tree_id", tree_id, "-run_dir", str(again),
+            stdin=json.dumps(spec))
     assert r.returncode == 0, r.stderr
     assert len(list((tmp_path / "outputs/saved_trees").iterdir())) == 1
-    again = max((tmp_path / "outputs/runs").iterdir())
-    assert again != run_dir and not (again / "model_config.json").exists()
+    assert len(list((tmp_path / "outputs/runs").iterdir())) == 2 and not (again / "model_config.json").exists()
     again_dev = json.loads((again / "metrics_dev.json").read_text())
     assert again_dev["acc@1"] == dev["acc@1"] and again_dev["population_sha256"] == dev["population_sha256"]
 
     # the TUI reads both real run dirs
-    trained, evaluated = sorted(runs.scan(tmp_path), key=lambda x: x.id)
+    trained, evaluated = sorted(runs.scan(tmp_path), key=lambda x: x.kind == "eval")
     assert (trained.kind, evaluated.kind, trained.recorded) == ("train", "eval", "completed")
     assert trained.tree_id == evaluated.tree_id and trained.tree_here and not trained.problems
     assert [e.split for e in trained.evals] == ["dev", "dev_beam1"] and trained.evals[1].overrides["beam_size"] == 1
@@ -110,6 +128,30 @@ def test_run_experiment(tmp_path):
     r = run(tmp_path, "-spec", "bad.json")
     assert r.returncode != 0 and "unknown ['extra']" in r.stderr
     assert len(list((tmp_path / "outputs/runs").iterdir())) == 2
+
+
+def test_check_errors(tmp_path):
+    """Invalid input: exit 1 and one JSON object on stdout, no run dir; an existing -run_dir is refused."""
+    (tmp_path / "t").write_text("")
+    (tmp_path / "broken.json").write_text("{")
+    (tmp_path / "tree").mkdir()
+    (tmp_path / "tree/xmodel.pkl").write_text("")
+    spec = {"name": "x", "evals": [{"split": "d", "test_path": "t"}]}
+    for args, stdin, msg in [(["-spec", "broken.json"], None, "JSONDecodeError"),
+                             (["-spec", "-"], json.dumps({**spec, "extra": 1}), "unknown ['extra']"),
+                             (["-spec", "-", "-xmodel_path", "tree"], json.dumps(spec), "effective search")]:
+        r = run(tmp_path, *args, "-check", stdin=stdin)
+        response = json.loads(r.stdout)
+        assert r.returncode == 1 and not response["ok"] and msg in response["error"], r.stdout
+        assert response["search"] == {} and response["model_config_sha256"] is response["tree_id"] is None
+    (tmp_path / "tree/xmodel.json").write_text(json.dumps({"tree_id": "abc", "predict_config": {"beam_size": 5}}))
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", "tree", "-check", stdin=json.dumps(spec))
+    assert json.loads(r.stdout)["search"] == {"d": {"beam_size": 5, "topk": 0, "knn_beta": 0.0,
+                                                    "leaf_candidates": 100}}
+    (tmp_path / "exists").mkdir()
+    r = run(tmp_path, "-spec", "-", "-xmodel_path", "tree", "-run_dir", "exists", stdin=json.dumps(spec))
+    assert r.returncode != 0 and "FileExistsError" in r.stderr and not list((tmp_path / "exists").iterdir())
+    assert not (tmp_path / "outputs").exists()
 
 
 def test_run_dir_never_overwritten(tmp_path, monkeypatch):
