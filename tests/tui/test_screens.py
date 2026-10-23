@@ -6,7 +6,7 @@ pytest.importorskip("textual")
 
 from fake_runs import make_run  # noqa: E402
 from textual.widgets import DataTable, Static, TabbedContent  # noqa: E402
-from xmr4el_tui.app import XMR4ELApp  # noqa: E402
+from xmr4el_tui.app import XMR4ELApp, settings_path  # noqa: E402
 from xmr4el_tui.screens import CompareScreen, RunScreen, RunsScreen, columns_for  # noqa: E402
 from xmr4el_tui.widgets import LogView  # noqa: E402
 
@@ -43,8 +43,8 @@ def test_runs_table_details_and_open(tmp_path):
         assert table.get_row_at(0)[-1].plain == "UNVERIFIED"  # recorded running, no process identity
         await pilot.press("down")  # ncbi_disease_test
         details = text(screen.query_one("#details", Static))
-        assert "ncbi_disease_test · eval" in details and "also: ncbi_disease" in details
-        assert "test  acc@1 0.9246" in details
+        assert details.startswith("ncbi_disease_test\neval · COMPLETED") and "Also      ncbi_disease\n" in details
+        assert "test\nacc@1     0.9246" in details
         await pilot.press("down", "enter")
         run_screen = app.screen
         assert isinstance(run_screen, RunScreen) and run_screen.run.name == "ncbi_disease"
@@ -134,6 +134,34 @@ def test_compare_selection_and_swap(tmp_path):
         assert "Not comparable" in body and "B - A" not in body
         await pilot.press("x")
         assert app.screen.splits == ["dev", "test"] and app.screen.query_one("#sel-0").value == "dev"
+        assert app.screen.active_bindings["escape"].binding.action == "app.pop_screen"  # footer: esc runs
         await pilot.press("escape")
         assert isinstance(app.screen, RunsScreen)
     run_app(tmp_path, check)
+
+
+def test_help_replaces_details_and_theme_persists(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    root = fake_root(tmp_path)
+
+    async def help_and_theme(app, pilot):
+        panel = app.screen.query_one(".side-panel")
+        await pilot.press("question_mark")
+        assert app.screen.query("HelpPanel") and not panel.display
+        await pilot.press("escape")  # closes help, not the screen
+        assert not app.screen.query("HelpPanel") and panel.display and isinstance(app.screen, RunsScreen)
+        await pilot.press("ctrl+r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert any("Rescanned" in str(n.message) for n in app._notifications)
+        await pilot.press("ctrl+q")  # first press warns only
+        await pilot.pause()
+        assert app.is_running and any("again to quit" in str(n.message) for n in app._notifications)
+        app.theme = "nord"
+        await pilot.pause()
+    run_app(root, help_and_theme, size=(140, 30))
+    assert '"nord"' in settings_path().read_text()
+
+    async def restored(app, pilot):
+        assert app.theme == "nord"
+    run_app(root, restored)

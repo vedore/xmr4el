@@ -1,8 +1,10 @@
 """Widgets and the text blocks screens show (tui.md §4, §5.1-5.4)."""
 import json
 import os
+import re
 from datetime import datetime
 
+from rich.highlighter import Highlighter
 from rich.text import Text
 from textual.widgets import Log, Static
 
@@ -14,6 +16,15 @@ STATE_STYLE = {"RUNNING": "bold blue", "UNVERIFIED": "yellow", "LOST": "red", "C
                "FAILED": "red", "STOPPED": "yellow", "UNKNOWN": ""}
 LOG_TAIL = 256 * 1024
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
+STRING_COLS = ("tree", "dict", "either", "routed")
+LOG_STYLES = ((r"^\d{4}-\d\d-\d\d [\d:,]+", "dim"), (r"\] [\w.]+:", "dim"), (r"\[WARNING\]", "yellow"),
+              (r"\[(ERROR|CRITICAL)\]", "bold red"))
+
+
+def bold_heads(t, *heads):
+    """Bold `heads` where they start a line of `t` (section and field labels)."""
+    t.highlight_regex(r"(?m)^(?:" + "|".join(map(re.escape, heads)) + r")", "bold")
+    return t
 
 
 def state_word(run):
@@ -77,39 +88,51 @@ class TopBar(Static):
 
 
 def details_text(run, all_runs):
-    """The details block under the Runs table (§5.1)."""
-    t = Text()
+    """The selected-run panel beside the Runs table (§5.1): one field per line."""
     word = state_word(run)
-    when = f"started {fmt.stamp(run.started, long=True)} · {fmt.duration(elapsed(run))} so far" \
-        if run.recorded == "running" else f"{fmt.stamp(run.started, long=True)} · {fmt.duration(elapsed(run))}"
+    running = run.recorded == "running"
     e = first_eval(run)
     m = e.metrics if e else None
-    features = f" · {m['features']}" if m and m.get("features") else ""
-    t.append(f" {run.name} · {run.kind} · {when}{features} · ")
+    t = Text()
+    t.append(f"{run.name}\n", style="bold")
+    t.append(f"{run.kind} · ")
     t.append(word, style=STATE_STYLE[word])
-    also = runs.same_tree(all_runs, run)
+    t.append("\n")
+    fields = [("Started", fmt.stamp(run.started, long=True)),
+              ("Duration", fmt.duration(elapsed(run)) + (" so far" if running else ""))]
+    if m and m.get("features"):
+        fields.append(("Features", m["features"]))
     if run.tree_id:
-        labels = f" · {fmt.count(m['labels'])} labels" if m and "labels" in m else ""
-        t.append(f"\n tree {fmt.tree(run.tree_id)}{labels} · {tree_place(run)}")
-        if also:
-            t.append(" · also: " + ", ".join(r.name for r in also))
-    if run.recorded == "running":
-        prev = runs.previous_completed(all_runs, run)
-        t.append("\n stage  " + ("not recorded (no events.jsonl)" if stage_list(run) is None else "see run (enter)"))
-        if prev:
-            t.append(f" · previous {prev.name} took {fmt.duration(elapsed(prev))}")
+        fields.append(("Tree", fmt.tree(run.tree_id)))
+        if m and "labels" in m:
+            fields.append(("Labels", fmt.count(m["labels"])))
+        fields.append(("Tree file", tree_place(run)))
+        if also := runs.same_tree(all_runs, run):
+            fields.append(("Also", ", ".join(r.name for r in also)))
+    if running:
+        fields.append(("Stage", "not recorded" if stage_list(run) is None else "see run (enter)"))
+        if prev := runs.previous_completed(all_runs, run):
+            fields.append(("Previous", f"{prev.name} took {fmt.duration(elapsed(prev))}"))
+    _fields(t, fields)
     for e in run.evals:
+        t.append(f"\n\n{e.split}", style="bold")
         if e.metrics:
             em = e.metrics
-            t.append(f"\n {e.split}  acc@1 {fmt.metric(em.get('acc@1'))} · acc@1_all {fmt.metric(em.get('acc@1_all'))}"
-                     f" · {fmt.count(em.get('rows'))} / {fmt.count(em.get('rows_total'))} rows in vocabulary")
+            _fields(t, [("acc@1", fmt.metric(em.get("acc@1"))), ("acc@1_all", fmt.metric(em.get("acc@1_all"))),
+                        ("Rows", f"{fmt.count(em.get('rows'))} / {fmt.count(em.get('rows_total'))} in vocab")])
         else:
-            t.append(f"\n {e.split}  no metrics")
+            t.append("\nno metrics")
     if run.error:
-        t.append(f"\n {fmt.marker('failed', fmt.use_ascii())} {run.error}", style="red")
+        t.append(f"\n\n{fmt.marker('failed', fmt.use_ascii())} {run.error}", style="red")
     if run.problems:
-        t.append("\n problems: " + "; ".join(run.problems), style="yellow")
+        t.append("\n\nproblems: " + "; ".join(run.problems), style="yellow")
     return t
+
+
+def _fields(t, fields):
+    for k, v in fields:
+        t.append(f"\n{k:<10}", style="dim")
+        t.append(f"{v}")
 
 
 def banner_text(run):
@@ -163,20 +186,22 @@ def metrics_text(m, split):
     for k, v in cells:
         row.append(f"{k:<10} {fmt.metric(v):>6}")
         if len(row) == 3:
-            lines.append("    ".join(row))
+            lines.append("      ".join(row))
             row = []
-    lines += ["    ".join(row)] if row else []
+    lines += ["      ".join(row)] if row else []
     lines += [f"{fmt.ms(m.get('ms_per_query'))}, batch incl. encoding", ""]
     strings = m.get("strings")
     if strings:
-        lines.append(f"{'Mention strings':<16} {'n':>6}  {'tree':>6}  {'dict':>6}  {'either':>6}  {'routed':>6}")
+        lines.append(f"{'Mention strings':<16} {'n':>6}" + "".join(f"{k:>10}" for k in STRING_COLS))
         for g in STRING_GROUPS:
             s = strings.get(g, {})
-            lines.append(f"{g:<16} {fmt.count(s.get('n')):>6}  " + "  ".join(
-                f"{fmt.metric(s.get(k)):>6}" for k in ("tree", "dict", "either", "routed")))
+            lines.append(f"{g:<16} {fmt.count(s.get('n')):>6}" + "".join(
+                f"{fmt.metric(s.get(k)):>10}" for k in STRING_COLS))
     else:
         lines.append("Mention strings  not recorded (no train_path in this evaluation)")
-    return Text("\n".join(lines))
+    t = bold_heads(Text("\n".join(lines)), "Search", "Rows", "Mention strings")
+    t.highlight_regex(r"(?m)^acc@1 +[\d.]+", "bold")
+    return t
 
 
 def overview_text(run, all_runs, split):
@@ -202,7 +227,7 @@ def overview_text(run, all_runs, split):
         t.append("No evaluations in spec.json")
     if run.problems:
         t.append("\n\nproblems: " + "; ".join(run.problems), style="yellow")
-    return t
+    return bold_heads(t, "Tree", "Took", "Evaluation")
 
 
 def inputs_text(run):
@@ -216,7 +241,7 @@ def inputs_text(run):
     prov = run.provenance() or {}
     if prov:
         lines += ["", "Inputs (sha256)"] + [f"  {sha[:12]}  {p}" for p, sha in (prov.get("inputs") or {}).items()]
-        lines.append(f"Python {prov.get('python')} · {prov.get('platform')} · device {prov.get('torch_device')}")
+        lines.append(f"Python       {prov.get('python')} · {prov.get('platform')} · device {prov.get('torch_device')}")
         lines.append("Packages     " + " · ".join(f"{k} {v}" for k, v in (prov.get("packages") or {}).items()))
     git = run.git() or {}
     if git:
@@ -225,14 +250,24 @@ def inputs_text(run):
     cfg = run.model_config()
     if cfg is not None:
         lines += ["", "Model config", json.dumps(cfg, indent=2)]
-    return Text("\n".join(lines))
+    return bold_heads(Text("\n".join(lines)), "Run dir", "Run id", "Tree id", "Tree path", "Command",
+                      "Inputs (sha256)", "Python", "Packages", "Git", "Model config")
+
+
+class LogHighlighter(Highlighter):
+    """Dim timestamp and logger, colour WARNING / ERROR."""
+
+    def highlight(self, text):
+        for pattern, style in LOG_STYLES:
+            text.highlight_regex(pattern, style)
 
 
 class LogView(Log):
     """Bounded tail of run.log (last 256 KB), polled every second; `warnings` keeps WARNING/ERROR lines only."""
 
     def __init__(self, path, **kwargs):
-        super().__init__(highlight=False, **kwargs)
+        super().__init__(highlight=True, **kwargs)
+        self.highlighter = LogHighlighter()
         self.path, self.read_pos, self.lines_seen, self.warnings = path, None, [], False
 
     def on_mount(self):

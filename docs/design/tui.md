@@ -79,9 +79,11 @@ and a valid input specification so a run can be repeated outside the TUI (§10).
 
 ## 4. Visual language
 
-**Layout.** One header line, one footer line, content between. One column. Blank
-lines separate groups; one rule (`───`) separates the content from a details block.
-Borders only on overlays. No boxes around sections.
+**Layout.** One header line, one footer line, content between. Blank lines separate
+groups. The Runs details block is a 40-column panel on the right (under the table below
+100 columns); help (`?`) takes the same panel and `esc` closes it. No boxes around sections.
+The theme chosen in the command palette is kept in `~/.config/xmr4el/tui.json`.
+`ctrl+q` quits only when pressed twice within 3 s; `ctrl+r` shows a toast with the run count.
 
 **Header.** `XMR4EL  <place>` on the left; state, elapsed time and host on the right.
 The right side is the same on every screen, so state is always in one place.
@@ -514,7 +516,7 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Runs | `c` | Compare the marked runs. |
 | Runs | `/` | Filter: substring of run name, run ID, tree ID or state. `enter` returns to the table with the filter kept. |
 | Runs | `o` | Cycle sort. |
-| Runs | `r` | Rescan `outputs/runs/` (also automatic every 5 s). |
+| Runs | `ctrl+r` | Rescan `outputs/runs/` (also automatic every 5 s). |
 | Compare | `tab` / `shift+tab` | Focus A's or B's evaluation selector. |
 | Compare | `enter`, `up` / `down`, `esc` | Open selector, move between evaluations, close without changing; Enter confirms. |
 | Compare | `x` | Swap runs with their selected evaluations. |

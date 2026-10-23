@@ -13,22 +13,43 @@ TopBar {
     height: 3;
 }
 
-Rule {
-    margin: 0;
+.side-panel {
+    split: right;
+    width: 40;
+    height: 1fr;
+    border-left: vkey $foreground 30%;
+}
+
+.-narrow .side-panel {
+    split: none;
+    width: 1fr;
+    height: auto;
+    max-height: 12;
+    border-left: none;
+    border-top: hkey $foreground 30%;
 }
 
 #details {
-    height: auto;
-    max-height: 8;
-    padding: 0 0 0 0;
+    padding: 1 2;
 }
 
-#overview-text, #inputs-text {
+HelpPanel {
+    width: 40;
+    min-width: 40;
+    max-width: 40;
+}
+
+#overview-text, #inputs-text, #compare-text {
+    padding: 1 2;
+}
+
+#logview {
     padding: 0 1;
 }
 
 #split {
     width: 30;
+    margin: 1 2 0 2;
 }
 
 TabbedContent {
@@ -41,6 +62,7 @@ TabPane {
 
 .side {
     height: auto;
+    padding: 0 1;
 }
 
 .side Static {
@@ -50,4 +72,8 @@ TabPane {
 
 .side Select {
     width: 24;
+}
+
+.-narrow #details {
+    padding: 0 2;
 }

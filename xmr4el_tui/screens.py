@@ -7,13 +7,15 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Input, Rule, Select, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
 
 from xmr4el_tui import compare, fmt
 from xmr4el_tui.widgets import (LogView, TopBar, acc1, details_text, elapsed, inputs_text, overview_text,
                                 split_cell, state_text, state_word)
 
 SORTS = ("started", "run", "acc@1")
+DETAILS_WIDTH = 40  # = HelpPanel width in app.tcss
+NARROW = 100  # below this terminal width the details panel sits under the table
 
 
 class RunsChanged(Message):
@@ -38,7 +40,7 @@ HEADERS = {"mark": " ", "started": "Started", "duration": "Duration", "run": "Ru
 
 class RunTable(DataTable):
     """home/end move the row cursor (DataTable only scrolls)."""
-    BINDINGS = [Binding("home", "first", show=False), Binding("end", "last", show=False)]
+    BINDINGS = [Binding("home", "first", "first run", show=False), Binding("end", "last", "last run", show=False)]
 
     def action_first(self):
         self.move_cursor(row=0)
@@ -50,7 +52,7 @@ class RunTable(DataTable):
 class RunsScreen(Screen):
     BINDINGS = [Binding("enter", "open", "open"), Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
                 Binding("slash", "filter", "filter"),
-                Binding("o", "sort", "sort"), Binding("r", "rescan", "rescan"),
+                Binding("o", "sort", "sort"), Binding("ctrl+r", "rescan", "rescan"),
                 Binding("escape", "clear_filter", "clear filter", show=False)]
 
     def __init__(self):
@@ -61,19 +63,25 @@ class RunsScreen(Screen):
         yield TopBar(id="top")
         yield RunTable(id="runs", cursor_type="row")
         yield Input(placeholder="filter: run name, run id, tree id or state", id="filter")
-        yield Rule()
-        yield Static(id="details")
+        with VerticalScroll(classes="side-panel"):
+            yield Static(id="details")
         yield Footer()
 
     def on_mount(self):
         self.query_one("#filter").display = False
+        self.set_class((self.size.width or self.app.size.width) < NARROW, "-narrow")
         self.rebuild()
 
     def on_runs_changed(self, _):
         self.rebuild()
 
+    def table_width(self):
+        width = self.size.width or self.app.size.width
+        return width if width < NARROW else width - DETAILS_WIDTH
+
     def on_resize(self, _):
-        if columns_for(self.size.width) != self.cols:
+        self.set_class((self.size.width or self.app.size.width) < NARROW, "-narrow")
+        if columns_for(self.table_width()) != self.cols:
             self.rebuild()
 
     def visible(self):
@@ -108,7 +116,7 @@ class RunsScreen(Screen):
         """Redraw the table, keeping the selected run by id."""
         table = self.query_one(DataTable)
         keep = self.selected_id()
-        self.cols = columns_for(self.size.width or self.app.size.width)
+        self.cols = columns_for(self.table_width())
         table.clear(columns=True)
         for c in self.cols:
             table.add_column(HEADERS[c], key=c)
@@ -204,7 +212,7 @@ class RunsScreen(Screen):
         self.rebuild()
 
     def action_rescan(self):
-        self.app.rescan()
+        self.app.rescan(announce=True)
 
 
 class RunScreen(Screen):
@@ -275,10 +283,10 @@ class CompareScreen(Screen):
     """Two marked runs, one selected evaluation each (§5.8); deltas only where §11 allows them."""
     BINDINGS = [Binding("x", "swap", "swap"), Binding("escape", "app.pop_screen", "runs")]
 
-    def __init__(self, a_id, b_id):
+    def __init__(self, a_id, b_id, splits=None):
         super().__init__()
         self.ids = [a_id, b_id]
-        self.splits = list(compare.default_splits(*self.sides()))
+        self.splits = list(splits or compare.default_splits(*self.sides()))
 
     def sides(self):
         by_id = {r.id: r for r in self.app.runs}
@@ -288,7 +296,8 @@ class CompareScreen(Screen):
         yield TopBar(id="top")
         for i, (side, run) in enumerate(zip("AB", self.sides())):
             with Horizontal(classes="side"):
-                yield Static(f" {side}  {run.name:<22} tree {fmt.tree(run.tree_id)}   Evaluation ", classes="who")
+                yield Static(Text.assemble((f" {side}  ", "bold"), f"{run.name:<22} tree {fmt.tree(run.tree_id)}"
+                                           "   Evaluation "), classes="who")
                 if len(run.evals) > 1:
                     yield Select([(e.split, e.split) for e in run.evals], value=self.splits[i], allow_blank=False,
                                  id=f"sel-{i}")
@@ -309,11 +318,8 @@ class CompareScreen(Screen):
         self.splits[int(event.select.id[-1])] = event.value
         self.render_compare()
 
-    async def action_swap(self):
-        self.ids.reverse()
-        self.splits.reverse()
-        await self.recompose()
-        self.on_mount()
+    def action_swap(self):
+        self.app.switch_screen(CompareScreen(*reversed(self.ids), splits=self.splits[::-1]))
 
     def render_compare(self):
         a, b = self.sides()
@@ -322,12 +328,30 @@ class CompareScreen(Screen):
             body.update("A compared run directory is gone (esc returns to runs).")
             return
         v = compare.verdict(a, self.splits[0], b, self.splits[1], self.app.runs)
-        lines = ["", *(f" {r}" for r in v.reasons)]
+        t = Text()
+        for i, r in enumerate(v.reasons):
+            t.append(f"{r}\n", style=("green" if v.subset_deltas else "yellow") if i == 0 else "")
         if v.differs:
-            lines.append(" Differs: " + ", ".join(v.differs))
+            t.append("Differs: ", style="bold")
+            t.append(", ".join(v.differs) + "\n")
         ea, eb = a.eval(self.splits[0]), b.eval(self.splits[1])
         if ea and ea.metrics and eb and eb.metrics:
             rows = compare.rows(ea.metrics, eb.metrics, v)
-            lines += ["", f" {'':<13}{'A':>11}{'B':>11}" + ("   B - A" if any(d for *_, d in rows) else "")]
-            lines += [f" {k:<13}{x:>11}{y:>11}   {d}".rstrip() for k, x, y, d in rows]
-        body.update(Text("\n".join(lines)))
+            w = 2 + max(len(c) for _, x, y, _ in rows for c in (x, y))
+            t.append(f"\n{'':<13}{'A':>{w}}{'B':>{w}}" + ("   B - A" if any(d for *_, d in rows) else "") + "\n",
+                     style="bold")
+            for k, x, y, d in rows:
+                t.append(f"{k:<13}{x:>{w}}{y:>{w}}   ")
+                t.append(d, style=delta_style(d, lower_better=k == "ms/query"))
+                t.append("\n")
+        body.update(t)
+
+
+def delta_style(d, lower_better=False):
+    """Green where B is better, red where worse, dim when equal, yellow for a note (devices differ)."""
+    num = d.split()[0] if d else ""
+    if num[:1] not in ("+", "-") or not num[1:].replace(".", "").isdigit():
+        return "yellow"
+    if float(num) == 0:
+        return "dim"
+    return "green" if (float(num) > 0) != lower_better else "red"
