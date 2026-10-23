@@ -142,7 +142,7 @@ def banner_text(run):
         return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", "red"),
                              f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}    2 full log")
     if word == "STOPPED":
-        return Text(f"Stopped by SIGTERM at {fmt.stamp(run.finished, long=True)}. "
+        return Text(f"Stopped by {run.error or 'a signal'} at {fmt.stamp(run.finished, long=True)}. "
                     "Completed stages and saved files are kept.", style="yellow")
     if word == "UNVERIFIED":
         return Text("Recorded running, but this run records no process identity (written before the runner "

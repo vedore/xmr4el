@@ -222,7 +222,7 @@ Manual check after 4: `.venv/bin/python -m xmr4el_tui` on the real `outputs/runs
 One commit each on `tui`:
 
 1. Runner: `-check`, `-run_dir`, `-model_config_sha256`, `-tree_id`, exit 3; model config read once. Done.
-2. `procinfo.py`; identity in `status.json`, `stopped` on SIGTERM/Ctrl+C, `heartbeat`.
+2. `procinfo.py`; identity in `status.json`, `stopped` on SIGTERM/Ctrl+C, `heartbeat`. Done (`error` = `SIGTERM` / `SIGINT`).
 3. `events.jsonl` handler; `extra={"event": ...}` on the stage log calls, encoder parts, transformer ticks.
 4. `process.py` (`check`, `spawn`, `derived_state`, `stop`); Runs/Run show RUNNING/LOST from it.
 5. Setup + Review screens, spawn (§5.5-5.7).

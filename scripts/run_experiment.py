@@ -8,7 +8,8 @@ Writes outputs/runs/<timestamp>_<name>/ (an existing directory is refused): spec
 model_config.json, git.json (commit, dirty incl. untracked files, untracked paths) + git_diff.patch if tracked files
 changed, provenance.json (sha256 of every input file, python/platform/package versions, torch device), run.log,
 tree.json (saved tree path), metrics_<split>.json (scripts/evaluate.py's numbers), status.json (running ->
-completed | failed with the error). An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
+completed | failed with the error | stopped by SIGTERM/SIGINT; process identity from xmr4el_tui.procinfo kept
+throughout), heartbeat (touched every HEARTBEAT seconds while running). An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
 no training, evals only. `run(spec, xmodel_path)` is the same run without argument parsing.
 
 The model config is read once: validation, model_config.json, its provenance sha256 and the model all use those bytes.
@@ -28,6 +29,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 from argparse import ArgumentParser
 from datetime import datetime
@@ -37,11 +39,17 @@ from xmr4el import set_verbosity, torch_device
 from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import evaluate_tree, format_metrics
 from xmr4el.xmodel import PREDICT_DEFAULTS, XModel, check_search
+from xmr4el_tui.procinfo import own_identity
 
 SPEC_KEYS = {"name", "model_config", "train_path", "evals"}
 EVAL_KEYS = {"split", "test_path", "train_path", "beam_size", "topk", "knn_beta", "leaf_candidates"}
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGES = ("numpy", "scipy", "scikit-learn", "torch", "transformers")
+HEARTBEAT = 30  # seconds
+
+
+class Stopped(BaseException):
+    """SIGTERM (TUI stop, kill, docker stop): the run is recorded as stopped."""
 
 
 class BindingRejected(Exception):
@@ -189,8 +197,11 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
     set_verbosity(1)
     logger = logging.getLogger("xmr4el.run_experiment")
     status = os.path.join(run_dir, "status.json")
+    record = {"started": datetime.now().isoformat(timespec="seconds"), **own_identity()}
+    beat = threading.Event()
+    threading.Thread(target=heartbeat, args=(os.path.join(run_dir, "heartbeat"), beat), daemon=True).start()
     try:
-        write_json(status, {"status": "running", "started": datetime.now().isoformat(timespec="seconds")})
+        write_json(status, {"status": "running", **record})
         write_json(os.path.join(run_dir, "spec.json"), {**spec, "xmodel_path": xmodel_path})
         write_json(os.path.join(run_dir, "git.json"), git_state(run_dir))
         write_json(os.path.join(run_dir, "provenance.json"), provenance(spec, raw))
@@ -220,17 +231,37 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             logger.info("Eval %s:\n%s", e["split"], format_metrics(m))
             if not m["rows"]:
                 raise ValueError(f"eval {e['split']}: no row has a gold label in the tree's vocabulary")
-        write_json(status, {"status": "completed", "finished": datetime.now().isoformat(timespec="seconds")})
+        write_json(status, {"status": "completed", **record, "finished": datetime.now().isoformat(timespec="seconds")})
         logger.info("Run completed: dir=%s", run_dir)
         return run_dir
-    except BaseException as err:  # KeyboardInterrupt too: the run dir says it did not complete
-        write_json(status, {"status": "failed", "finished": datetime.now().isoformat(timespec="seconds"),
+    except (Stopped, KeyboardInterrupt) as err:
+        signame = "SIGTERM" if isinstance(err, Stopped) else "SIGINT"
+        write_json(status, {"status": "stopped", **record, "finished": datetime.now().isoformat(timespec="seconds"),
+                            "error": signame})
+        logger.warning("Run stopped by %s", signame)
+        raise
+    except BaseException as err:
+        write_json(status, {"status": "failed", **record, "finished": datetime.now().isoformat(timespec="seconds"),
                             "error": f"{type(err).__name__}: {err}"})
         logger.exception("Run failed")
         raise
     finally:
+        beat.set()
         logging.getLogger().removeHandler(log_file)
         log_file.close()
+
+
+def heartbeat(path, done):
+    """Touch `path` now and every HEARTBEAT seconds until `done` is set (a file of its own: never races status.json)."""
+    while True:
+        with open(path, "a"):
+            os.utime(path)
+        if done.wait(HEARTBEAT):
+            return
+
+
+def stop(signum, frame):
+    raise Stopped(signum)
 
 
 def main():
@@ -252,13 +283,15 @@ def main():
         print(json.dumps(response))
         sys.exit(0 if response["ok"] else 1)
     spec = load_spec(args.spec)
-    # SIGTERM (kill, docker stop) -> SystemExit, so run() marks the run failed; SIGKILL still leaves "running"
-    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
+    # SIGTERM (kill, docker stop) -> Stopped, so run() marks the run stopped; SIGKILL still leaves "running"
+    signal.signal(signal.SIGTERM, stop)
     try:
         run(spec, args.xmodel_path, args.run_dir, args.model_config_sha256, args.tree_id)
     except BindingRejected as err:
         print(json.dumps(err.args[0]))
         sys.exit(3)
+    except Stopped as err:
+        sys.exit(128 + err.args[0])
 
 
 def load_spec(path):

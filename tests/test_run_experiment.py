@@ -7,9 +7,12 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import os
 import random
+import signal
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -152,6 +155,33 @@ def test_check_errors(tmp_path):
     r = run(tmp_path, "-spec", "-", "-xmodel_path", "tree", "-run_dir", "exists", stdin=json.dumps(spec))
     assert r.returncode != 0 and "FileExistsError" in r.stderr and not list((tmp_path / "exists").iterdir())
     assert not (tmp_path / "outputs").exists()
+
+
+def test_sigterm_records_stopped(tmp_path, monkeypatch):
+    """SIGTERM during the run -> status stopped (identity and started kept), exit 128 + 15, heartbeat touched."""
+    mod = load_script()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "t").write_text("")
+    (tmp_path / "tree").mkdir()
+    (tmp_path / "tree/xmodel.pkl").write_text("")
+    (tmp_path / "spec.json").write_text(json.dumps({"name": "x", "evals": [{"split": "d", "test_path": "t"}]}))
+    monkeypatch.setattr(mod.XModel, "load", staticmethod(lambda path: SimpleNamespace(tree_id="abc")))
+    monkeypatch.setattr(mod, "evaluate_tree", lambda *a, **k: os.kill(os.getpid(), signal.SIGTERM))
+    monkeypatch.setattr(sys, "argv", ["run_experiment.py", "-spec", "spec.json", "-xmodel_path", "tree",
+                                      "-run_dir", "r"])
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        with pytest.raises(SystemExit) as stop:
+            mod.main()
+    finally:
+        signal.signal(signal.SIGTERM, old)
+    assert stop.value.code == 128 + signal.SIGTERM
+    status = json.loads((tmp_path / "r/status.json").read_text())
+    assert status["status"] == "stopped" and status["error"] == "SIGTERM" and status["started"]
+    assert status["pid"] == os.getpid() and status["start"] and status["runtime"] and "isolated_group" in status
+    assert (tmp_path / "r/heartbeat").exists() and "stopped by SIGTERM" in (tmp_path / "r/run.log").read_text()
+    run = runs.read_run(tmp_path / "r", tmp_path)
+    assert run.recorded == "stopped" and run.identity["pid"] == os.getpid()
 
 
 def test_run_dir_never_overwritten(tmp_path, monkeypatch):
