@@ -11,7 +11,8 @@ from textual.app import App
 from textual.binding import Binding
 
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.screens import RunsChanged, RunsScreen
+from xmr4el_tui.launch import SetupScreen
+from xmr4el_tui.screens import RunsChanged, RunScreen, RunsScreen
 
 RESCAN_SECONDS = 5
 QUIT_SECONDS = 3  # second ctrl+q within this window quits
@@ -34,6 +35,7 @@ class XMR4ELApp(App):
         self.host = socket.gethostname()
         self.quit_armed = 0.0
         self.cache = {}  # only touched by the (exclusive) scan worker after the first scan
+        self.launched = []  # runs this TUI started, kept only so poll() reaps them
         self.runs, self.runs_found = self.scan()
 
     def scan(self):
@@ -64,11 +66,34 @@ class XMR4ELApp(App):
 
     def apply_scan(self, found, announce=False):
         self.runs, self.runs_found = found
+        self.launched = [c for c in self.launched if c.poll() is None]
         if announce:
             self.notify(f"Rescanned outputs/runs/: {len(self.runs)} runs" if self.runs_found
                         else "Rescanned: outputs/runs/ not found", timeout=2)
         for screen in self.screen_stack:
             screen.post_message(RunsChanged())
+
+    def setup(self, spec=None, xmodel_path=None):
+        """Setup for a new training run, or for evaluating the tree at xmodel_path (§5.5, §5.6)."""
+        self.push_screen(SetupScreen(spec, xmodel_path))
+
+    def evaluate_tree(self, run):
+        """`e`: Setup with the run's tree and evaluations (no search overrides)."""
+        if not run.tree_path:
+            self.notify(f"{run.name} has no saved tree", severity="warning")
+        elif not run.tree_here:
+            self.notify(f"tree {run.tree_id and run.tree_id[:8]} not on this machine\nmissing: "
+                        f"{run.tree_path}/xmodel.pkl", severity="warning")
+        else:
+            evals = [{k: v for k, v in (("split", e.split), ("test_path", e.test_path), ("train_path", e.train_path))
+                      if v} for e in run.evals]
+            self.setup({"name": run.name, "evals": evals or [{"split": "dev"}]}, run.tree_path)
+
+    async def started(self, run_id):
+        """Review -> the new run's screen once its status.json exists (Setup and Review leave the stack)."""
+        self.apply_scan(self.scan())
+        await self.pop_screen()
+        await self.switch_screen(RunScreen(run_id))
 
     async def action_quit(self):
         """ctrl+q twice: the first press only warns."""

@@ -50,9 +50,10 @@ class RunTable(DataTable):
 
 
 class RunsScreen(Screen):
-    BINDINGS = [Binding("enter", "open", "open"), Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
+    BINDINGS = [Binding("enter", "open", "open"), Binding("n", "new", "new run"), Binding("e", "evaluate", "evaluate"),
+                Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
                 Binding("slash", "filter", "filter"),
-                Binding("o", "sort", "sort"), Binding("ctrl+r", "rescan", "rescan"),
+                Binding("o", "sort", "sort", show=False), Binding("ctrl+r", "rescan", "rescan", show=False),
                 Binding("escape", "clear_filter", "clear filter", show=False)]
 
     def __init__(self):
@@ -165,6 +166,13 @@ class RunsScreen(Screen):
         if (rid := self.selected_id()) is not None:
             self.app.push_screen(RunScreen(rid))
 
+    def action_new(self):
+        self.app.setup()
+
+    def action_evaluate(self):
+        if (run := self.selected()) is not None:
+            self.app.evaluate_tree(run)
+
     def action_mark(self):
         rid = self.selected_id()
         if rid is None:
@@ -218,7 +226,8 @@ class RunsScreen(Screen):
 class RunScreen(Screen):
     BINDINGS = [Binding("1", "tab('overview')", "overview"), Binding("2", "tab('log')", "log"),
                 Binding("3", "tab('inputs')", "inputs"), Binding("w", "warnings", "warnings"),
-                Binding("y", "copy", "copy path"), Binding("escape", "app.pop_screen", "runs")]
+                Binding("y", "copy", "copy path"), Binding("e", "evaluate", "evaluate", show=False),
+                Binding("escape", "app.pop_screen", "runs")]
 
     def __init__(self, run_id):
         super().__init__()
@@ -273,6 +282,9 @@ class RunScreen(Screen):
         self.action_tab("log")
         on = self.query_one(LogView).toggle_warnings()
         self.notify("Log: warnings and errors only" if on else "Log: all lines")
+
+    def action_evaluate(self):
+        self.app.evaluate_tree(self.run)
 
     def action_copy(self):
         self.app.copy_to_clipboard(str(self.run.path))

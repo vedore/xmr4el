@@ -77,3 +77,70 @@ TabPane {
 .-narrow #details {
     padding: 0 2;
 }
+
+#form {
+    padding: 1 1;
+}
+
+.row {
+    height: 1;
+}
+
+.row Label {
+    width: 17;
+}
+
+.row Input {
+    width: 48;
+}
+
+.hint {
+    width: auto;
+    padding: 0 0 0 2;
+    color: $text-muted;
+}
+
+.error {
+    color: $error;
+    padding: 0 0 0 17;
+}
+
+.note {
+    color: $text-muted;
+    padding: 0 0 0 17;
+}
+
+.eval {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+.eval-head {
+    height: 1;
+}
+
+.eval-head Label {
+    width: 48;
+    text-style: bold;
+}
+
+#add {
+    margin: 1 0 0 0;
+}
+
+#check-line, #start-line {
+    margin: 1 0 0 0;
+}
+
+#review-text {
+    padding: 1 1 0 1;
+}
+
+#review-buttons {
+    height: 1;
+    margin: 1 1;
+}
+
+#review-buttons Button {
+    margin: 0 4 0 0;
+}

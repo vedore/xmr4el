@@ -7,7 +7,7 @@ to it. Nothing here is implemented yet.
 
 - `xmr4el_tui` never imports `xmr4el` (torch at import, §10). It reads run files and
   spawns `scripts/run_experiment.py`.
-- Only `app.py` / `screens.py` / `widgets.py` import Textual. Everything else is
+- Only `app.py` / `screens.py` / `launch.py` / `widgets.py` import Textual. Everything else is
   stdlib-only, pure where possible, and tested without a terminal.
 - Run directories are the only durable state. The app holds a scan result, the
   current draft, and Popen handles of children it started (to reap them); nothing else.
@@ -28,7 +28,8 @@ xmr4el_tui/
   fmt.py           durations, timestamps, metrics, counts, stage markers
   process.py       spawn, -check, derived state, stop            (increment 2)
   app.py           App: scan timer, global keys, command palette, theme
-  screens.py       RunsScreen, RunScreen, CompareScreen; Setup/Review/StopModal (inc. 2)
+  screens.py       RunsScreen, RunScreen, CompareScreen; StopModal (inc. 2)
+  launch.py        SetupScreen, ReviewScreen (inc. 2): form -> spec, -check by revision, spawn
   widgets.py       RunTable, Details, StageList, MetricsBlock, Banner, LogView
   app.tcss
 tests/tui/
@@ -225,7 +226,7 @@ One commit each on `tui`:
 2. `procinfo.py`; identity in `status.json`, `stopped` on SIGTERM/Ctrl+C, `heartbeat`. Done (`error` = `SIGTERM` / `SIGINT`).
 3. `events.jsonl` handler; `extra={"event": ...}` on the stage log calls, encoder parts, transformer ticks. Done (`xmr4el.progress(**event)` for part/tick/runner events; the runner emits load, save, eval).
 4. `process.py` (`check`, `spawn`, `derived_state`, `stop`); Runs/Run show RUNNING/LOST from it. Done (`Run.live` = `process.Live`, set by the app's scan for recorded-running runs; `rejection` reads the exit-3 line).
-5. Setup + Review screens, spawn (§5.5-5.7).
+5. Setup + Review screens, spawn (§5.5-5.7). Done (`launch.py`; Runs `n` new, Runs/Run `e` evaluate tree; `d` duplicate left to increment 3; a superseded `-check` runs to its end, its result dropped by revision).
 6. Stop modal (§5.9).
 
 ## 10. Decisions
