@@ -3,7 +3,10 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["xmr4el", "xmr4el.*"]
+include = ["xmr4el", "xmr4el.*", "xmr4el_tui", "xmr4el_tui.*"]
+
+[tool.setuptools.package-data]
+xmr4el_tui = ["*.tcss"]
 
 [project]
 name = "xmr4el"
@@ -27,6 +30,14 @@ dependencies = [
 
   "torch>=2.13.0"
 ]
+
+[project.optional-dependencies]
+tui = [
+    "textual==8.2.8",
+]
+
+[project.scripts]
+xmr4el-tui = "xmr4el_tui.__main__:main"
 
 # Linux: CUDA 12.6 build (PyPI's Linux torch 2.14 is CUDA 13, driver >= 580; the server has 570)
 [tool.uv.sources]

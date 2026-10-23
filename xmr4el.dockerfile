@@ -21,7 +21,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 # Install dependencies outside the source mount; code is supplied at runtime.
 WORKDIR /opt/deps
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --locked --no-dev --no-install-project --no-cache
+RUN uv sync --locked --no-dev --extra tui --no-install-project --no-cache
 
 # Use PYTHONPATH, not the script directory (scripts must import the mounted package).
 ENV PYTHONSAFEPATH=1

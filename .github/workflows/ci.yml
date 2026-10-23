@@ -9,14 +9,15 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --locked
-      - run: uvx ruff check xmr4el scripts tests
+      - run: uv sync --locked --extra tui
+      - run: uvx ruff check xmr4el xmr4el_tui scripts tests
       - run: uv run pytest -q
       # installed wheel, read-only install, run outside the repo: cache miss must not fail
       - run: |
           # non-editable sync = built wheel + the lock with its per-package indexes (Linux torch 2.14.1+cu126 is
           # on the PyTorch index only; `uv export` + `uv pip install` loses that mapping)
-          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/wheel" uv sync --locked --no-dev --no-editable
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/wheel" uv sync --locked --no-dev --no-editable --extra tui
           chmod -R a-w "$RUNNER_TEMP/wheel"
           cp tests/smoke_installed.py "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP" && "$RUNNER_TEMP/wheel/bin/python" smoke_installed.py
+          "$RUNNER_TEMP/wheel/bin/xmr4el-tui" --help
