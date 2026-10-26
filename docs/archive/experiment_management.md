@@ -1,7 +1,7 @@
 # Experiment management design for this fork
 
 Historical design and baseline inventory. For current implementation and cleanup decisions, see
-[architecture assessment](../architecture.md); the registry names and line numbers below describe older code.
+[architecture assessment](architecture.md); the registry names and line numbers below describe older code.
 
 Analysis baseline: local commit `7683b5dc5180d7f3f5c80008ab579d65ae9e8266`, inspected on 2026-10-09. The working tree was clean before this report. Only this fork informs the design; the upstream repository is outside scope.
 

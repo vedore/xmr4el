@@ -24,6 +24,8 @@ When analyzing this repo, assume the main logic is organized around these areas:
 - `xmr4el/learning/scoring.py`: mention-kNN label scores (`label_max_cos`)
 - `xmr4el/hierarchy/node.py`, `hierarchy/tree.py`: tree node and hierarchical model (training, traversal, persistence)
 - `xmr4el/xmodel.py`: the `XModel` API; `xmr4el/eval.py`: evaluation metrics
+- `scripts/run_experiment.py`: spec-driven runner writing `outputs/runs/<run>/`
+- `xmr4el_tui/`: Textual TUI over `outputs/runs/` (design `docs/design/tui.md`, code map `docs/design/tui_architecture.md`)
 
 Scripts live under `scripts/`, pytest checks under `tests/`, configs under `configs/`,
 saved trees and exports under `outputs/` (gitignored).
@@ -197,7 +199,7 @@ If asked why a result is poor, check these first:
 
 Do not jump directly to model replacement before checking pipeline quality.
 
-Then check these known error origins, in pipeline order (state in `STATUS.md`, evidence in `docs/pipeline.md`):
+Then check these known error origins, in pipeline order (evidence in `docs/pipeline.md`):
 - label index <-> label name mapping: model indices follow sorted `Y` columns; `XModel.initial_labels`
   must match them. A permuted mapping looks exactly like "routes at chance on dev, fine on train"
 - `-ds_len` selects the first N label groups (first-seen order for PubTator, sorted group ID for

@@ -3,8 +3,8 @@
 What is implemented, synthetic checks, pipeline observations and the external-baseline notes.
 Moved out of `STATUS.md` (2026-10-06).
 
-Current component boundaries, cleanup decisions and terminal-interface contracts:
-[architecture assessment](architecture.md). Backend selection is explicit; internal adapter layouts
+Component boundaries and cleanup decisions (2026-10-23, archived):
+[architecture assessment](archive/architecture.md). Backend selection is explicit; internal adapter layouts
 changed in the 2026-10-23 cleanup, so older saved trees need retraining.
 
 ## What is implemented
@@ -48,7 +48,7 @@ Observations and hypotheses, not a mandatory sequence of fixes.
 | Label embeddings / hierarchy | PIFA uses full mention+context features | If flat retrieval works but centroid routing fails, isolate a label-representation or clustering change; PIFA itself is not a bug |
 | Matcher | Child models train on in-cluster rows but receive beam-routed queries | If root routing works and child rejection fails, measure out-of-cluster errors before adding routed negatives |
 | Traversal / scoring | Ancestor `path_logscore` prunes the beam and multiplies every leaf score (exp(path_logscore)) | Leaf matcher probabilities alone are not comparable across leaves |
-| Training computation | Internal nodes set `fused_scores` from matcher cluster scores in `MLModel.train`, consumed by `prepare_layer`; leaves prepare no children (`tests/hierarchy/test_tree.py`) | Fusing other scores into these is future work (`STATUS.md`) |
+| Training computation | Internal nodes set `fused_scores` from matcher cluster scores in `MLModel.train`, consumed by `prepare_layer`; leaves prepare no children (`tests/hierarchy/test_tree.py`) | Fusing other scores into these is future work (`docs/future_work.md`) |
 
 The path score is a fixed route-score rule. A learned weight needs separate justification and dev
 tuning. Neither route weighting nor `log_loss` alone establishes calibration across leaves.

@@ -231,8 +231,8 @@ Layout:
 - `configs/`: model configs and experiment specs. [Documentation](docs/README.md): architecture,
   pipeline notes, results, interface design, and historical audits.
 
-The [architecture assessment](docs/architecture.md) records the scope, cleanup decisions, remaining
-risks, and operations a future terminal interface can expose. TF-IDF, SVD, balanced k-means and joint
+The archived [architecture assessment](docs/archive/architecture.md) records the 2026-10-23 scope, cleanup
+decisions and remaining risks. TF-IDF, SVD, balanced k-means and joint
 logistic regression use explicit adapters; their config `type` names are validated. There is no backend
 plugin registry. This cleanup changes internal saved-model layouts: retrain previous trees.
 

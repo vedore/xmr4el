@@ -1,7 +1,7 @@
 # XMR4EL tool readiness audit
 
 Historical audit. Current implementation, cleanup decisions and terminal-interface contracts are in
-[architecture assessment](../architecture.md); findings and component names below may be superseded.
+[architecture assessment](../archive/architecture.md); findings and component names below may be superseded.
 
 Audit date: 2026-10-09. Source of truth: the local fork at commit
 `54803a7209772e57a67101dd1863f132dbaf3826`. No upstream comparison was performed.

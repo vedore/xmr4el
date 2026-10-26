@@ -14,6 +14,7 @@ evaluation, and regression checks focused on that workflow.
 uv sync --locked
 .venv/bin/python scripts/train.py --help
 .venv/bin/python scripts/evaluate.py --help
+uv sync --locked --extra tui && .venv/bin/python -m xmr4el_tui   # TUI over outputs/runs/
 ```
 
 Local machine: `.venv/bin/python`. Inside the Docker containers (`xmr4el.dockerfile`, `pecos.dockerfile`): `python3`.
@@ -40,7 +41,7 @@ Saved trees are under `outputs/saved_trees/`.
 ## Current context
 
 - Out of scope: UMLS, the KB/Postgres layer, the old SapBERT/KRISSBERT wrappers — all removed.
-  (User 2026-10-01: SapBERT as a mention encoder is allowed; see `STATUS.md`.) PubTator is
+  SapBERT as a mention encoder is allowed. PubTator is
   only a local file format here.
 - Label index `j` = column `j` of `Y` = row `j` of `Z` = `XModel.initial_labels[j]`, which is the
   binarizer's `classes_` (sorted; labels with no training text have no column). `load` refuses a label/`Z`
@@ -54,4 +55,4 @@ Saved trees are under `outputs/saved_trees/`.
 implemented-behavior table, synthetic checks and pipeline observations. Do not
 duplicate them here. Internal nodes set `fused_scores` from the matcher's cluster scores in
 `MLModel.train`, and `prepare_layer` consumes them; score fusion for that step
-(`fused_predict`) is future work (`STATUS.md` § Future work).
+(`fused_predict`) is future work (`docs/future_work.md` item 5).

@@ -1,6 +1,6 @@
 # Architecture and cleanup assessment
 
-Inspected 2026-10-23. This is the current scope reference; dated audits and experiment designs describe historical code or proposals.
+Inspected 2026-10-23. Archived 2026-10-26: historical record of the 2026-10-23 cleanup. The terminal-interface section predates the TUI (`docs/design/tui_architecture.md`).
 
 ## Purpose and boundary
 
