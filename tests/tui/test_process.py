@@ -8,7 +8,6 @@ from pathlib import Path
 
 from fake_runs import make_run
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.screens.dashboard_details import banner_text
 from xmr4el_tui.runs import state_word
 
 OK = {"ok": True, "error": None, "model_config_sha256": "a" * 64, "tree_id": None,
@@ -57,7 +56,10 @@ def sleeper(new_session=True):
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=new_session)
     deadline = time.monotonic() + 10
     while procinfo.identity(child.pid) is None or procinfo.identity(child.pid)["start"] is None:
-        assert time.monotonic() < deadline
+        if time.monotonic() > deadline:  # inspection blocked (sandbox): do not leave the sleeper behind
+            child.kill()
+            child.wait()
+            raise AssertionError("child identity not readable")
         time.sleep(0.05)
     return child
 
@@ -83,14 +85,13 @@ def test_derived_state_and_stop(tmp_path):
         other = recorded_running(tmp_path, "c", child, runtime="elsewhere")
         assert process.derived_state(other, here) == process.Live("UNVERIFIED", "another machine or container",
                                                                     other_runtime=True)
-        assert "another machine or container" in banner_text(replace_live(other, here)).plain
         shared = recorded_running(tmp_path, "d", child, isolated_group=False)
         assert process.derived_state(shared, here) == process.Live("RUNNING", "process group is shared")
         assert process.stop(shared) == "not signalled: process group is shared" and child.poll() is None
         assert process.stop(run) == f"SIGTERM sent to pid {child.pid}"
         assert child.wait(timeout=10) == -15
         gone = replace_live(run, here)
-        assert state_word(gone) == "LOST" and f"Process {child.pid} is gone" in banner_text(gone).plain
+        assert state_word(gone) == "LOST"
         assert process.stop(run).startswith("not signalled")
     finally:
         child.kill()

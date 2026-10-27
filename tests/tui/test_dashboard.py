@@ -12,8 +12,9 @@ pytest.importorskip("textual")
 
 from fake_runs import make_run  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
-from xmr4el_tui import explorer, runs  # noqa: E402
+from xmr4el_tui import explorer, process, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
+from xmr4el_tui.screens.dashboard_details import banner_text  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import ActiveRuns, DashboardScreen  # noqa: E402
 from xmr4el_tui.widgets.description import Description  # noqa: E402
 from xmr4el_tui.widgets.explorer import EXPLORER_MIN, Explorer, explorer_width  # noqa: E402
@@ -109,6 +110,16 @@ def test_moved_tree_found_by_tree_id(tmp_path):
     assert json.loads(Path(tmp_path, "outputs/runs/2026-10-20_13-36-20_alpha/tree.json").read_text())[
         "xmodel_path"] == f"outputs/saved_trees/xmodel_{TREE}", "the recorded path is never rewritten"
     assert model(tmp_path)[("tree", TREE)][0].note == "moved"
+
+
+def test_banners_of_unfinished_runs(tmp_path):
+    ident = {"pid": 4242, "host": "h", "runtime": "r", "uid": 1, "start": "s", "pgid": 4242, "sid": 4242}
+    run = runs.read_run(make_run(tmp_path, "a", status="running", tree_id=None, metrics={"dev": None},
+                                 identity=ident), tmp_path)
+    other = runs.replace(run, live=process.Live("UNVERIFIED", "another machine or container", other_runtime=True))
+    assert "another machine or container" in banner_text(other).plain
+    gone = runs.replace(run, live=process.Live("LOST", "process 4242 is gone"))
+    assert "Process 4242 is gone" in banner_text(gone).plain
 
 
 def explorer_key(app):

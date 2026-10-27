@@ -2,13 +2,13 @@ import logging
 
 import pytest
 
-from xmr4el.features import transformers
-
 
 @pytest.fixture(autouse=True)
-def _transformer_cache(tmp_path, monkeypatch):
-    """Tests use fake encoders: keep their embeddings out of outputs/cache."""
-    monkeypatch.setattr(transformers, "CACHE_DIR", str(tmp_path / "transformer_cache"))
+def _transformer_cache(request, tmp_path, monkeypatch):
+    """Tests use fake encoders: keep their embeddings out of outputs/cache. TUI tests never import the backend
+    (the string target is imported only here, so collecting tests/tui loads no torch)."""
+    if "tui" not in request.path.parts:
+        monkeypatch.setattr("xmr4el.features.transformers.CACHE_DIR", str(tmp_path / "transformer_cache"))
 
 
 @pytest.fixture

@@ -1,6 +1,9 @@
 import json
 import shutil
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from fake_runs import make_run
 from xmr4el_tui import fmt, runs
@@ -91,3 +94,11 @@ def test_fmt(monkeypatch):
         "f15e98b4", "▸", ">>")
     monkeypatch.setenv("NO_COLOR", "1")
     assert fmt.use_ascii()
+
+
+def test_helpers_need_only_the_standard_library():
+    """The non-UI modules load under `python -S` (no site-packages: no Textual, no backend, no torch); the runner
+    imports procinfo without the tui extra."""
+    mods = ", ".join(f"xmr4el_tui.{m}" for m in ("runs", "progress", "explorer", "compare", "fmt", "process",
+                                                  "procinfo"))
+    subprocess.run([sys.executable, "-S", "-c", f"import {mods}"], cwd=Path(__file__).parents[2], check=True)
