@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from xmr4el_tui import procinfo
-from xmr4el_tui.runs import RUNS_DIR
+from xmr4el_tui.runs import RUNS_DIR, read_dict
 
 RUNNER = Path("scripts", "run_experiment.py")
 CONSOLE_DIR = RUNS_DIR / ".console"
@@ -33,7 +33,7 @@ class Live:
     state: str                # RUNNING | LOST | UNVERIFIED
     reason: str = ""          # why LOST / UNVERIFIED
     other_runtime: bool = False
-    stoppable: bool = False   # RUNNING, identity verified, isolated process group
+    stoppable: bool = False   # RUNNING, identity verified, it leads its own process group and session
 
 
 def runner_args(xmodel_path, *extra):
@@ -66,13 +66,14 @@ def check(root, spec, xmodel_path, revision, timeout=300):
 
 def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None):
     """Start the runner for `spec` in outputs/runs/<run_id> (new session: its own process group), stdout/stderr to
-    outputs/runs/.console/<run_id>.log. Returns the Popen (only to reap it)."""
+    outputs/runs/.console/<run_id>.log. Returns the Popen (only to reap it). An existing console log (the run id was
+    used before) raises FileExistsError: nothing is started or overwritten."""
     extra = ["-run_dir", str(RUNS_DIR / run_id)]
     extra += ["-model_config_sha256", config_sha] if config_sha else []
     extra += ["-tree_id", tree_id] if tree_id else []
     console = Path(root, CONSOLE_DIR)
     console.mkdir(parents=True, exist_ok=True)
-    with open(console / f"{run_id}.log", "w") as log:
+    with open(console / f"{run_id}.log", "x") as log:
         child = subprocess.Popen(runner_args(xmodel_path, *extra), cwd=root, stdin=subprocess.PIPE, stdout=log,
                                  stderr=subprocess.STDOUT, start_new_session=True, text=True)
     try:
@@ -115,13 +116,14 @@ def derived_state(run, here):
         return Live("UNVERIFIED", "inspection denied")
     if (live["start"], live["uid"]) != (rec["start"], rec["uid"]):
         return Live("LOST", f"process {rec['pid']} is gone (pid reused)")
-    stoppable = procinfo.same(rec, live) and rec.get("isolated_group") is True
+    # the recorded isolated_group flag is no proof: the live process must lead its own group and session now
+    stoppable = procinfo.same(rec, live) and live["pgid"] == live["sid"] == rec["pid"]
     return Live("RUNNING", "" if stoppable else "process group is shared", stoppable=stoppable)
 
 
 def stop(run, force=False):
-    """SIGTERM (force: SIGKILL) to the run's process group after re-verifying its identity, runtime and isolated
-    group. Returns what happened; on any mismatch nothing is sent."""
+    """SIGTERM (force: SIGKILL) to the run's process group after re-verifying its identity, runtime and that it
+    leads its group. Returns what happened; on any mismatch nothing is sent."""
     live = derived_state(run, procinfo.runtime())
     if not live.stoppable:
         return f"not signalled: {live.reason or live.state}"
@@ -133,3 +135,32 @@ def stop(run, force=False):
     except PermissionError:
         return "not signalled: permission denied"
     return f"{sig.name} sent to pid {run.identity['pid']}"
+
+
+class Launches:
+    """Runs this TUI started: the one owner of their Popen handles. A run's state still comes from its files; a
+    handle only tells what became of a launch that wrote no final status. Detached children outlive the TUI."""
+
+    def __init__(self, root):
+        self.root, self.children = root, {}  # run id -> Popen
+
+    def start(self, spec, run_id, **kwargs):
+        """spawn(); FileExistsError when the run id was used before."""
+        self.children[run_id] = spawn(self.root, spec, run_id, **kwargs)
+
+    def reap(self):
+        """[(run id, what happened)] for children that exited without a final status.json, each reported once;
+        finished children are reaped, running ones kept."""
+        out = []
+        for run_id, child in list(self.children.items()):
+            code = child.poll()
+            if code is None:
+                continue
+            del self.children[run_id]
+            status = read_dict(Path(self.root, RUNS_DIR, run_id, "status.json")) or {}
+            if status.get("status") in ("completed", "failed", "stopped"):
+                continue
+            rejected = rejection(self.root, run_id) if code == 3 else None
+            out.append((run_id, f"not started: {rejected['error']}" if rejected else
+                        f"exited {code} without a final status; see {CONSOLE_DIR / f'{run_id}.log'}"))
+        return out

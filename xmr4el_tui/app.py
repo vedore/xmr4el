@@ -9,6 +9,7 @@ from textual.message import Message
 from textual.theme import Theme
 from textual.worker import get_current_worker
 
+from xmr4el_tui import process
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
@@ -54,7 +55,7 @@ class XMR4ELApp(App):
         self.snapshot = Snapshot()  # empty until the first scan (started on mount) lands
         self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
         self.scan_wanted = self.scan_announce = False  # requests the running scan picks up
-        self.launched = []  # runs this TUI started, kept only so poll() reaps them
+        self.launches = process.Launches(root)
 
     def on_mount(self):
         self.register_theme(THEME)
@@ -88,7 +89,8 @@ class XMR4ELApp(App):
         if snapshot.problem and snapshot.problem != self.snapshot.problem:
             self.notify(snapshot.problem, title="Scan failed", severity="warning")
         self.snapshot = snapshot
-        self.launched = [c for c in self.launched if c.poll() is None]
+        for run_id, what in self.launches.reap():
+            self.notify(f"{run_id}: {what}", title="Launch", severity="error")
         if announce:
             self.notify(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found
                         else "Rescanned: outputs/runs/ not found", timeout=2)

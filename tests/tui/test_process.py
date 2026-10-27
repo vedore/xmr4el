@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from fake_runs import make_run
 from xmr4el_tui import procinfo, process, runs
 from xmr4el_tui.runs import state_word
@@ -52,8 +54,11 @@ def test_spawn_and_rejection(tmp_path):
     assert [r.id for r in runs.scan(tmp_path)] == [], "the console dir is not a run"
 
 
-def sleeper(new_session=True):
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=new_session)
+def sleeper(new_session=True, ignore_term=False):
+    code = "import signal, time\n" + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "") + \
+        "print('ready', flush=True)\ntime.sleep(60)"
+    child = subprocess.Popen([sys.executable, "-c", code], start_new_session=new_session, stdout=subprocess.PIPE)
+    child.stdout.readline()  # its SIGTERM handler is in place
     deadline = time.monotonic() + 10
     while procinfo.identity(child.pid) is None or procinfo.identity(child.pid)["start"] is None:
         if time.monotonic() > deadline:  # inspection blocked (sandbox): do not leave the sleeper behind
@@ -85,9 +90,8 @@ def test_derived_state_and_stop(tmp_path):
         other = recorded_running(tmp_path, "c", child, runtime="elsewhere")
         assert process.derived_state(other, here) == process.Live("UNVERIFIED", "another machine or container",
                                                                     other_runtime=True)
-        shared = recorded_running(tmp_path, "d", child, isolated_group=False)
-        assert process.derived_state(shared, here) == process.Live("RUNNING", "process group is shared")
-        assert process.stop(shared) == "not signalled: process group is shared" and child.poll() is None
+        understated = recorded_running(tmp_path, "d", child, isolated_group=False)
+        assert process.derived_state(understated, here).stoppable, "the live group decides, not the recorded flag"
         assert process.stop(run) == f"SIGTERM sent to pid {child.pid}"
         assert child.wait(timeout=10) == -15
         gone = replace_live(run, here)
@@ -115,3 +119,66 @@ def test_shared_group_not_stoppable(tmp_path):
 
 def replace_live(run, here):
     return runs.replace(run, live=process.derived_state(run, here))
+
+
+def test_false_isolation_claim_is_never_signalled(tmp_path, monkeypatch):
+    """Recorded and live identity agree, but pid 101 does not lead group/session 7: a status.json claiming
+    isolated_group must not get group 7 signalled."""
+    ident = {"uid": 1, "start": "s", "pgid": 7, "sid": 7}
+    monkeypatch.setattr(procinfo, "runtime", lambda: "here")
+    monkeypatch.setattr(procinfo, "identity", lambda pid: dict(ident))
+    sent = []
+    monkeypatch.setattr(os, "killpg", lambda *a: sent.append(a))
+    for override in ({}, {"pgid": 8}, {"start": None}):
+        run = runs.read_run(make_run(tmp_path, f"claim{len(override)}{list(override)}", status="running",
+                                     tree_id=None, metrics={"dev": None},
+                                     identity={"pid": 101, "runtime": "here", **ident, "isolated_group": True,
+                                               **override}), tmp_path)
+        assert not process.derived_state(run, "here").stoppable
+        assert process.stop(run).startswith("not signalled") and process.stop(run, force=True).startswith(
+            "not signalled")
+    assert sent == []
+
+
+def test_term_ignored_then_force_stop(tmp_path):
+    child = sleeper(ignore_term=True)
+    try:
+        run = recorded_running(tmp_path, "stubborn", child)
+        assert process.stop(run) == f"SIGTERM sent to pid {child.pid}"
+        with pytest.raises(subprocess.TimeoutExpired):
+            child.wait(timeout=1)
+        assert process.stop(run, force=True) == f"SIGKILL sent to pid {child.pid}"
+        assert child.wait(timeout=10) == -9
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_launch_console_never_overwritten_and_reaped_once(tmp_path):
+    fake_runner(tmp_path, "import time\nspec = json.load(sys.stdin)\n"
+                          "if spec['name'] == 'reject':\n"
+                          "    print(json.dumps({'error': 'model_config_changed'})); sys.exit(3)\n"
+                          "if spec['name'] == 'crash':\n"
+                          "    print('Traceback: boom'); sys.exit(1)\n"
+                          "if spec['name'] == 'slow':\n"
+                          "    time.sleep(30)\n")
+    launches = process.Launches(tmp_path)
+    for name in ("reject", "crash", "ok", "slow"):
+        launches.start({"name": name}, f"2026-10-23_15-00-00_{name}")
+    done = make_run(tmp_path, "ok", stamp="2026-10-23_15-00-00")  # wrote its final status
+    assert done.name == "2026-10-23_15-00-00_ok"
+    console = tmp_path / process.CONSOLE_DIR / "2026-10-23_15-00-00_crash.log"
+    with pytest.raises(FileExistsError):
+        launches.start({"name": "crash"}, "2026-10-23_15-00-00_crash")
+    for rid in ("reject", "crash", "ok"):
+        launches.children[f"2026-10-23_15-00-00_{rid}"].wait(timeout=30)
+    try:
+        got = dict(launches.reap())
+        assert got == {"2026-10-23_15-00-00_reject": "not started: model_config_changed",
+                       "2026-10-23_15-00-00_crash": "exited 1 without a final status; see "
+                                                    "outputs/runs/.console/2026-10-23_15-00-00_crash.log"}
+        assert "Traceback: boom" in console.read_text(), "the first launch's console is kept"
+        assert launches.reap() == [] and list(launches.children) == ["2026-10-23_15-00-00_slow"]
+    finally:
+        launches.children["2026-10-23_15-00-00_slow"].kill()
+        launches.children["2026-10-23_15-00-00_slow"].wait()
