@@ -1,20 +1,24 @@
 # XMR4EL TUI code architecture
 
-Status: proposed (2026-10-23). Implements [tui.md](tui.md); section numbers `§n` refer
-to it. Nothing here is implemented yet.
+Status: implemented, Dashboard only (2026-10-27). Implements [tui.md](tui.md); section numbers `§n` refer
+to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment, Results and Run monitor
+are planned: their keys only say what they would open.
 
 ## 1. Rules
 
 - `xmr4el_tui` never imports `xmr4el` (torch at import, §10). It reads run files and
   spawns `scripts/run_experiment.py`.
-- Only `app.py` / `dashboard.py` import Textual (2026-10-27: the old Runs/Run/Trees/Compare/Setup/Review screens,
-  `screens.py` / `launch.py` / `widgets.py`, were removed; the backend modules stay for the screens rebuilt next;
-  the old code is in git at `58cdffd`). Everything else is
-  stdlib-only, pure where possible, and tested without a terminal.
-- Run directories are the only durable state. The app holds a scan result, the
-  current draft, and Popen handles of children it started (to reap them); nothing else.
-- Every file read tolerates missing or corrupt input and reports it as data
-  (`Run.problems`), never as an exception into the UI.
+- Textual is imported only by `app.py`, `messages.py`, `screens/` and `widgets/` (the old
+  Runs/Run/Trees/Compare/Setup/Review screens were removed 2026-10-27; old code in git at `58cdffd`).
+  Everything else is stdlib-only (`tests/tui/test_runs.py` imports it under `python -S`), pure where
+  possible, and tested without a terminal.
+- Every file read goes through `runs` / `progress` / `services/experiment_repository.py`; renderers in
+  `screens/dashboard_details.py` read no file. The UI thread reads no file either: scans and the selected
+  item's Details run in thread workers.
+- Run directories are the only durable state. The app holds the last Snapshot and the Launches
+  (Popen handles of children it started); nothing else.
+- Every file read tolerates missing or corrupt input, and fields of the wrong JSON type, and reports it as
+  data (`Run.problems`, `Details.problems`, `Snapshot.problem`), never as an exception into the UI.
 - Imports at the top of each module.
 
 ## 2. Layout
@@ -24,24 +28,36 @@ xmr4el_tui/
   __init__.py      empty (no Textual import: the runner imports procinfo without the extra)
   __main__.py      argparse (--root), App(root).run()
   procinfo.py      process identity, stdlib only; shared by the runner and the TUI
-  runs.py          scan outputs/runs/ -> Run records; spec normalization; tree links; state_word, elapsed
-  progress.py      events.jsonl -> stage list; stage_list(run), current_stage(run)
-  compare.py       comparability verdict and deltas for two selected evaluations
-  fmt.py           durations, timestamps, metrics, counts, stage markers
-  process.py       spawn, -check, derived state, stop            (increment 2)
+  runs.py          Run/Eval/Tree records; tolerant reads; scan cache by file signature; canonical tree
+                   locations; state_word, elapsed; spec normalization
+  progress.py      events.jsonl -> stage list; current_stage(run, events), last_stage_event(events)
+  compare.py       comparability verdict and deltas for two selected evaluations (no screen yet)
+  fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
+  process.py       -check, spawn, derived state, stop; Launches (owner of started children)
   explorer.py      Dashboard explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels
-  app.py           App: scan timer (runs, trees, active-run stage/device), global keys, theme
-  dashboard.py     DashboardScreen (only screen): Explorer tree (resizable), Description (OptionList rows), Active
-                   runs; FullRow cursor; read-only; TopBar (shared header),
-                   banner_text, metrics_text
+  messages.py      RunsChanged (the app rescanned)
+  app.py           App: serialized, coalesced scan worker every 5 s; Snapshot; Launches reaping; global keys, theme
+  services/
+    experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
+                   and incremental events tails; Details of the selected item
+  screens/
+    dashboard_screen.py   DashboardScreen (only screen) + ActiveRuns; Details loaded in a worker
+    dashboard_details.py  pure Rich texts: banner, metrics, tree / evaluation / run / group descriptions
+  widgets/
+    explorer.py    Explorer tree (resizable) + node labels
+    description.py Description (read-only OptionList rows)
+    row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
+    top_bar.py     TopBar (shared header)
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
-  test_runs.py  test_progress.py  test_compare.py  test_fmt.py  test_procinfo.py
+  test_runs.py  test_progress.py  test_compare.py  test_procinfo.py  test_process.py
   test_dashboard.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
-Split `screens.py` when it passes ~600 lines, not before.
+Split by responsibility, not size: a widget used by a second screen moves to `widgets/`, a message handled
+by more than one screen to `messages.py`, file reads to the repository. No base screen or generic layer
+before a second consumer exists.
 
 ## 3. Data model (`runs.py`)
 
@@ -72,22 +88,26 @@ class Run:
     problems: tuple[str, ...] # "metrics_dev.json: invalid JSON", ...
 ```
 
-`spec`, `provenance`, `git` and `model_config` are read lazily by `Run` helpers
-(`run.spec()`, `run.provenance()`, ...) for Inputs and Compare, not at scan time.
+`spec`, `provenance`, `git` and `model_config` are read lazily by `Run` helpers (`run.spec()`, ...; a
+JSON object or None) for Compare; the Dashboard reads them once per selection through
+`ExperimentRepository.details`.
 
 Functions:
 
 | Function | Purpose |
 | --- | --- |
-| `scan(root, cache) -> list[Run]` | Read every non-dot dir under `outputs/runs/`; reuse a cached `Run` when the dir's and `status.json`'s mtimes are unchanged. Newest first. |
+| `scan(root, cache) -> list[Run]` | Read every non-dot dir under `outputs/runs/`; reuse a cached `Run` while the (name, mtime, size) of its status/spec/tree/metrics files are unchanged (`signature`); a dir vanishing mid-read is left out. Newest first. |
+| `trees(root, runs) -> list[Tree]` | Group runs by `canonical(root, tree_path)`; a missing location joins the one existing location of its tree_id (several = copies: stays missing). |
 | `same_tree(runs, run) -> list[Run]` | Other runs with the same `tree_id` (details `also:`). |
 | `training_run(runs, tree_id) -> Run \| None` | The `kind == "train"` run that saved this tree (§11 derivation, eval-only defaults). |
 | `previous_completed(runs, run) -> Run \| None` | Newest COMPLETED run with the same name, older than `run` (§5.2 timings). |
 | `normalize_spec(recorded) -> (spec, xmodel_path)` | §10 round trip: drop `xmodel_path` from the copy, return it separately. |
 | `command_line(spec, xmodel_path) -> str` | Equivalent CLI for Inputs (`-spec -` with the normalized JSON). |
 
-Scan cost: about 5 small JSON reads per changed run; unchanged runs cost two
-`stat` calls. Rescan every 5 s and on `r`, in a Textual thread worker.
+Scan cost: about 5 small JSON reads per changed run; unchanged runs cost one directory listing.
+Rescan every 5 s and on `ctrl+r` (rereads every file), in one Textual thread at a time: a request during a
+scan makes that scan go once more. `events.jsonl` of recorded-running runs is read from the last offset
+(again from 0 when truncated or replaced).
 
 ## 4. Other pure modules
 
@@ -153,12 +173,12 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
 | Class | Shows | Reads |
 | --- | --- | --- |
-| `App` | header right side (host, running count), footer, command palette, theme | `scan` every 5 s -> posts `RunsChanged` |
-| `DashboardScreen` | only screen: explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.runs`, `App.trees`, `App.active`; `explorer.build`; tree's `xmodel.json` on selection (no pickle) |
+| `App` | footer, help panel, theme | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
+| `DashboardScreen` | only screen: explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 
 Results and Run monitor are not rebuilt yet: `DashboardScreen.open_results(filter, select)` and
 `open_run(run_id, split)` resolve the target (tree id or run id, run, split) and only say what they would open.
-Backend kept for them and for Setup: `process.check/spawn/rejection/stop/derived_state`, `compare.verdict/rows`,
+Backend kept for them and for Setup: `process.check/Launches/rejection/stop/derived_state`, `compare.verdict/rows`,
 `progress.stages`, `runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
@@ -169,15 +189,19 @@ scroll and marks by run `id` (§7).
 ```python
 def check(root, spec, xmodel_path, revision) -> CheckResult   # spawns -check, parses one JSON object
 def spawn(root, spec, run_dir, xmodel_path, config_sha, tree_id) -> Popen
-def derived_state(run, here: dict) -> str     # RUNNING | LOST | UNVERIFIED | recorded
+def derived_state(run, here) -> Live          # RUNNING | LOST | UNVERIFIED; stoppable only when the live
+                                              # process leads its group and session (the recorded flag is no proof)
 def stop(run, force=False) -> str             # re-verifies identity first (§9); returns outcome
+class Launches                                # start() = spawn + keep the handle; reap() -> [(run id, what
+                                              # happened)] for exits without a final status (exit 3: rejection)
 ```
 
 - `check` runs in a thread worker; the app ignores results whose `revision` is not
   the draft's current revision (§5.5).
 - `spawn`: argument list, `cwd=root`, `start_new_session=True`, stdin = spec JSON,
-  stdout/stderr = `outputs/runs/.console/<run-id>.log`. The Popen goes into
-  `App.children` only so `poll()` reaps it; the run's state always comes from files.
+  stdout/stderr = `outputs/runs/.console/<run-id>.log`, created exclusively (a reused run id raises
+  `FileExistsError` before anything starts). The Popen goes into `App.launches` only so `reap()` collects it
+  and reports a launch that wrote no final status; the run's state always comes from files.
 - Exit code 3 + the JSON line in the console log -> `BindingRejected` -> Setup (§10).
 
 ## 7. Changes outside the package

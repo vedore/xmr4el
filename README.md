@@ -133,17 +133,20 @@ mentions whose gold label has training text (coverage is reported); `acc@1_all` 
 the run (spec, metrics, git state, input hashes, package versions) under `outputs/runs/`. Recorded results
 are in `docs/results.md`.
 
-Browse and compare recorded runs in the terminal (optional `tui` extra; reads `outputs/runs/` only, never
-loads a tree):
+Browse saved trees, their evaluations and active runs in the terminal (optional `tui` extra; reads
+`outputs/runs/` and `outputs/saved_trees/` only, never loads a tree, writes nothing):
 
 ```bash
 uv sync --locked --extra tui
 .venv/bin/python -m xmr4el_tui            # or xmr4el-tui; --root <repo> when started elsewhere
 ```
 
-Runs: `enter` open, `space` mark two then `c` compare, `/` filter, `o` sort. Run: `1` `2` `3` overview, log,
-inputs. Compare computes differences only for the same evaluation file, preprocessing and evaluated
-population (`docs/design/tui.md` §11).
+One screen, the Dashboard: Explorer (Models > dataset > tree > evaluation, then runs without a saved tree),
+Description of the selected item, Active runs. `enter` describes, `]` / `[` (or `ctrl+tab`) cycle panels,
+`ctrl+b` hides the explorer, `<` / `>` resize it, `ctrl+r` rereads every run file, `?` lists the keys,
+`ctrl+c` twice quits. Mouse drag selects text and copies it. It rescans every 5 s. New Experiment (`n`),
+Results and Run monitor (`left` / `right` in the Description, `enter` on an active run) are not built yet:
+they only say what they would open.
 
 ## Configuration
 
