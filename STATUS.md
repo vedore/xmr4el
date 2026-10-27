@@ -15,6 +15,22 @@ Commands: `docs/results.md` § Commands.
 
 **2026-10-27 architecture audit (`/private/tmp/xmr4el-architecture-audit.md`) implemented, committed on `tui` (766e495..eaa1644, one commit per step, not pushed):** S2 `dashboard.py` split into `screens/dashboard_screen.py`, `screens/dashboard_details.py` (pure renderers), `widgets/{explorer,description,row_rendering,top_bar}.py`, `messages.py`; S3 tests/tui no longer import the backend (conftest string-target patch), process tests need no Textual, `python -S` import check; A1 one scan thread at a time, requests coalesced, cancelled scan publishes nothing, first scan after mount ("Scanning…"); A2 wrong-typed JSON fields read as absent + `Run.problems`, offset times converted to local naive, vanished run dirs skipped, unreadable outputs/runs keeps the last Snapshot + `Snapshot.problem`; A3 cache key = (name, mtime, size) of status/spec/tree/metrics, `ctrl+r` rereads all, tree locations canonical (abs/rel/`..`), moved tree joins its one existing location (copies stay missing); A4 `services/experiment_repository.py` (Snapshot, Activity, Details read in a worker, stale results dropped by seq); A6 events.jsonl tails read from offset (reset on truncate/replace); A5 stop needs live pid==pgid==sid, console log opened `x`, `process.Launches` owns handles/reap; O2 `forget_lines` on content replacement. Skipped: S4 (setup enumerators kept for New Experiment), O1/O3/O4. Full suite 170 pass, ruff clean, headless smoke on real outputs OK. NEXT: user tries `python -m xmr4el_tui` (first scan now lands after mount: brief "Scanning…"); push `tui` only on the user's OK; then the agreed plan from (2).
 
+**2026-10-27 execution telemetry + View Logs (user's pasted prompt; committed on `tui`, not pushed):** runner-side
+`xmr4el/telemetry/{events,resources}.py` (EventLog replaces the runner's EventFile: events schema v1 = `v`,
+offset times, monotonic `duration_seconds`, `run` start/complete/failed/stopped, open stages closed failed/stopped;
+eval parts data/predict/metrics/write via `evaluate_tree(events=...)`; `resources.json` per-stage CPU/RSS/GPU,
+`-resource_interval` default 5, 0 = off; `logging.captureWarnings`); runner ignores a repeated SIGTERM or one after
+the final status (`ENDING`); `process.stop` refuses runs whose status.json is already final. TUI: `logs.py` LogTail,
+`widgets/log_view.py`, `screens/log_screen.py`; Description row `View Logs [Open]` (eval: Run/State; run: Type/State;
+tree: Training run/Run state), enter opens, esc returns with the row kept. Docs tui.md §7, §8 (schema, resources,
+logs, measured overhead), §9 (cancellation, state mapping), tui_architecture.md. Full suite 186 pass, ruff clean.
+Follow-up (same day, same commit): optional extra `nvml` (nvidia-ml-py, in uv.lock and xmr4el.dockerfile);
+NVML queried by device index (a bare `cuda` device initialised CUDA); `vram_peak_bytes` renamed
+`torch_gpu_allocated_peak_bytes` (PyTorch allocator tensors, not process/device memory); `stop(force=True)` records
+`stopped`/SIGKILL/`forced` after the process is verified gone; procinfo treats zombies as gone. Full suite 192 pass, ruff clean.
+NEXT: push `tui` only on the user's OK; user tries View Logs (`python -m xmr4el_tui`) and a tiny run to see
+resources.json on the server (`gpu_util` stays null without nvidia-ml-py).
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

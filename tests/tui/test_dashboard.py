@@ -20,9 +20,11 @@ from xmr4el_tui import explorer, process, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
 from xmr4el_tui.screens.dashboard_details import banner_text, eval_text, run_text, tree_text  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import ActiveRuns, DashboardScreen  # noqa: E402
+from xmr4el_tui.screens.log_screen import LogScreen  # noqa: E402
 from xmr4el_tui.services.experiment_repository import Activity, Details, ExperimentRepository  # noqa: E402
 from xmr4el_tui.widgets.description import Description  # noqa: E402
 from xmr4el_tui.widgets.explorer import EXPLORER_MIN, Explorer, explorer_width  # noqa: E402
+from xmr4el_tui.widgets.log_view import LogView  # noqa: E402
 from xmr4el_tui.widgets.top_bar import TopBar  # noqa: E402
 
 TREE = "8528b624aaaa"
@@ -560,3 +562,116 @@ def test_mouse_selection_copies(tmp_path):
         await drag(pilot, (tree.region.right - 1, 5), (tree.region.right + 9, 5))  # border drag: a resize only
         assert app.clipboard == "My Custom" and tree.outer_size.width == 36
     run_app(fake_root(tmp_path), check)
+
+
+def test_view_logs_row_sits_between_run_and_state(tmp_path):
+    root = fake_root(tmp_path)
+    found = runs.scan(root)
+    idx = explorer.index(explorer.build(found, runs.trees(root, found)))
+    run = idx[("run", "2026-10-23_14-10-00_live")][0].ref
+    ev, tree = idx[("eval", "2026-10-20_13-36-20_alpha", "dev")][0], idx[("tree", TREE)][0]
+    for t, before, after in ((eval_text(ev, tree, Activity(), Details()), "Run", "State"),
+                             (run_text(run, Activity(), Details()), "Type", "State"),
+                             (tree_text(tree, Details()), "Training run", "Run state")):
+        keys = [line[:14].strip() for line in t.plain.splitlines()]
+        i = keys.index("View Logs")
+        assert keys[i - 1] == before and keys[i + 1] == after and "[Open]" in t.plain.splitlines()[i]
+
+
+def test_log_viewer_opens_searches_filters_and_returns(tmp_path):
+    root = fake_root(tmp_path)
+    alpha = tmp_path / "outputs/runs/2026-10-20_13-36-20_alpha"
+    (alpha / "run.log").write_text("".join(
+        f"2026-10-20 13:36:{i % 60:02d},000 [{'WARNING' if i % 50 == 7 else 'INFO'}] x: line {i}\n"
+        for i in range(3000)) + "2026-10-20 13:38:00,000 [ERROR] x: Run failed\nTraceback (most recent call last)\n")
+    before = {p: p.stat().st_mtime_ns for p in tmp_path.rglob("*") if p.is_file()}
+
+    async def check(app, pilot):
+        desc = app.screen.query_one(Description)
+        await pilot.press("tab", "tab", "right", "tab", "tab", "tab")  # the tree, expanded: dev of alpha
+        assert app.screen.query_one(Explorer).selected_key() == ("eval", "2026-10-20_13-36-20_alpha", "dev")
+        await settle(app, pilot)
+        await pilot.press("enter")
+        await settle(app, pilot)
+        await goto_row(pilot, desc, "View Logs")
+        row = desc.highlighted
+        await pilot.press("enter")
+        await settle(app, pilot)
+        screen = app.screen
+        assert isinstance(screen, LogScreen) and screen.run.id == "2026-10-20_13-36-20_alpha"
+        view = screen.query_one(LogView)
+        assert len(view.all) == 3002 and view.scroll_offset.y == view.max_scroll_y, "opens at the end"
+        header = str(screen.query_one("#log-header").render())
+        assert "alpha" in header and "COMPLETED" in header and "following" not in header
+        assert screen.timer is None, "a finished run is read once, not polled"
+        await pilot.press("home")
+        assert view.scroll_offset.y == 0
+        await pilot.press("pagedown")
+        assert view.scroll_offset.y > 0
+        await pilot.press("slash", *"LINE 2999", "enter")
+        assert view.matches == [2999] and view.current == 0 and "1/1" in str(screen.query_one("#log-header").render())
+        assert screen.query_one("#log-search").display is False and app.focused is view
+        await pilot.press("slash", *"x: line 10", "enter")  # line 10, 100..109, 1000..1099
+        assert len(view.matches) == 1 + 10 + 100
+        first = view.current
+        await pilot.press("n")
+        assert view.current == (first + 1) % len(view.matches)
+        await pilot.press("N", "N")
+        assert view.current == (first - 1) % len(view.matches)
+        await pilot.press("l", "l")  # all -> INFO+ -> WARNING+
+        assert view.min_level == "WARNING" and len(view.shown) == 60 + 2, "ERROR record and its traceback line"
+        await pilot.press("l")
+        assert len(view.shown) == 2
+        await pilot.press("l")
+        assert len(view.shown) == 3002
+        await pilot.press("slash", "escape")  # esc first closes the search box
+        assert isinstance(app.screen, LogScreen) and app.focused is view
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, DashboardScreen) and app.focused is desc and desc.highlighted == row
+        assert desc.keys[desc.highlighted] == "View Logs"
+    run_app(root, check)
+    assert {p: p.stat().st_mtime_ns for p in tmp_path.rglob("*") if p.is_file()} == before, "read-only"
+
+
+def test_log_viewer_missing_log_and_live_follow(tmp_path):
+    root = fake_root(tmp_path)
+    live = tmp_path / "outputs/runs/2026-10-23_14-10-00_live"
+    (live / "run.log").unlink()
+
+    async def check(app, pilot):
+        run = next(r for r in app.snapshot.runs if r.id == live.name)
+        app.push_screen(LogScreen(run, root))
+        await settle(app, pilot)
+        screen = app.screen
+        assert screen.query_one("#log-missing").display and not screen.query_one(LogView).display
+        assert "not created yet" in str(screen.query_one("#log-missing").render())
+        assert screen.timer is not None, "an active run is polled"
+        (live / "run.log").write_text("2026-10-23 14:10:01,000 [INFO] x: Run started\n")
+        screen.tick()
+        await settle(app, pilot)
+        view = screen.query_one(LogView)
+        assert view.display and [x.text[-11:] for x in view.all] == ["Run started"]
+        with open(live / "run.log", "a") as f:
+            f.write("2026-10-23 14:10:02,000 [INFO] x: Encoding started\n")
+        screen.tick()
+        await settle(app, pilot)
+        assert len(view.all) == 2 and view.scroll_offset.y == view.max_scroll_y
+        patch_json(live / "status.json", status="completed", finished="2026-10-23T14:20:00")
+        app.apply_scan(app.repo.snapshot(fresh=True))
+        await pilot.pause()
+        screen.tick()  # the final read, then polling stops
+        await settle(app, pilot)
+        assert screen.timer is None and "COMPLETED" in str(screen.query_one("#log-header").render())
+    run_app(root, check)
+
+
+def test_forced_stop_banner(tmp_path):
+    """A stop recorded by process.record_forced reads as a requested force stop, not as a signal from outside."""
+    path = make_run(tmp_path, "forced", status="stopped", tree_id=None, metrics={"dev": None})
+    patch_json(path / "status.json", error="SIGKILL", forced=True)
+    run = runs.read_run(path, tmp_path)
+    assert runs.state_word(run) == "STOPPED" and "forced" not in (run.identity or {})
+    assert banner_text(run).plain.startswith("Force-stopped (SIGKILL, requested in the TUI)")
+    patch_json(path / "status.json", error="SIGTERM")
+    assert banner_text(runs.read_run(path, tmp_path)).plain.startswith("Stopped by SIGTERM")

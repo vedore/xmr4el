@@ -6,7 +6,9 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from xmr4el_tui import procinfo
@@ -16,6 +18,8 @@ RUNNER = Path("scripts", "run_experiment.py")
 CONSOLE_DIR = RUNS_DIR / ".console"
 CHECK_KEYS = {"ok", "error", "model_config_sha256", "tree_id", "search"}
 BINDING_ERRORS = ("model_config_changed", "tree_changed")
+FINAL = ("completed", "failed", "stopped")  # recorded final states
+FORCE_WAIT = 10  # seconds a forced stop waits for the killed process to be gone before recording it
 
 
 @dataclass(frozen=True)
@@ -122,8 +126,15 @@ def derived_state(run, here):
 
 
 def stop(run, force=False):
-    """SIGTERM (force: SIGKILL) to the run's process group after re-verifying its identity, runtime and that it
-    leads its group. Returns what happened; on any mismatch nothing is sent."""
+    """Cancel `run` (tui.md §9): SIGTERM (force: SIGKILL) to its process group after re-reading status.json (a run
+    that already wrote a final status is not signalled) and re-verifying its identity, runtime and that it leads
+    its group. Returns what happened; on any mismatch nothing is sent. Safe to repeat: the runner records the first
+    SIGTERM as stopped and ignores later ones, and ignores one that arrives after its final status is decided.
+    A SIGKILLed runner records nothing, so a forced stop records it here (`record_forced`): blocks up to
+    FORCE_WAIT seconds (call it from a worker)."""
+    recorded = (read_dict(run.path / "status.json") or {}).get("status")
+    if recorded in FINAL:
+        return f"not signalled: run already {recorded}"
     live = derived_state(run, procinfo.runtime())
     if not live.stoppable:
         return f"not signalled: {live.reason or live.state}"
@@ -134,7 +145,29 @@ def stop(run, force=False):
         return "not signalled: process exited"
     except PermissionError:
         return "not signalled: permission denied"
-    return f"{sig.name} sent to pid {run.identity['pid']}"
+    sent = f"{sig.name} sent to pid {run.identity['pid']}"
+    return f"{sent}; {record_forced(run)}" if force else sent
+
+
+def record_forced(run):
+    """After a verified SIGKILL: once the recorded process is gone (absent, reaped or a zombie, or its pid reused),
+    a status.json still `running` becomes `stopped` with error SIGKILL and forced: true, identity kept (it cannot
+    write any more, so nothing races this write). A final status the runner wrote first (it was already handling a
+    SIGTERM) is kept. An unrequested SIGKILL never passes here: that run stays `running` and shows LOST."""
+    rec, deadline = run.identity, time.monotonic() + FORCE_WAIT
+    while (live := procinfo.identity(rec["pid"])) is not None and live["start"] == rec["start"]:
+        if time.monotonic() > deadline:
+            return "still exiting, stop not recorded"
+        time.sleep(0.05)
+    path = run.path / "status.json"
+    status = read_dict(path)
+    if not status or status.get("status") != "running":
+        return f"run recorded {(status or {}).get('status', 'nothing')}"
+    tmp = path.with_name("status.json.forced")
+    tmp.write_text(json.dumps({**status, "status": "stopped", "finished": datetime.now().isoformat(timespec="seconds"),
+                               "error": "SIGKILL", "forced": True}, indent=2))
+    os.replace(tmp, path)
+    return "recorded stopped (forced)"
 
 
 class Launches:
@@ -158,7 +191,7 @@ class Launches:
                 continue
             del self.children[run_id]
             status = read_dict(Path(self.root, RUNS_DIR, run_id, "status.json")) or {}
-            if status.get("status") in ("completed", "failed", "stopped"):
+            if status.get("status") in FINAL:
                 continue
             rejected = rejection(self.root, run_id) if code == 3 else None
             out.append((run_id, f"not started: {rejected['error']}" if rejected else

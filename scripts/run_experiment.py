@@ -9,8 +9,11 @@ model_config.json, git.json (commit, dirty incl. untracked files, untracked path
 changed, provenance.json (sha256 of every input file, python/platform/package versions, torch device), run.log,
 tree.json (saved tree path), metrics_<split>.json (scripts/evaluate.py's numbers), status.json (running ->
 completed | failed with the error | stopped by SIGTERM/SIGINT; process identity from xmr4el_tui.procinfo kept
-throughout), heartbeat (touched every HEARTBEAT seconds while running), events.jsonl (one progress event per line:
-the `event` of xmr4el's stage log records and of xmr4el.progress, docs/design/tui.md §8). An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
+throughout; once a final status is written, a later SIGTERM is ignored), heartbeat (touched every HEARTBEAT seconds
+while running), events.jsonl (one progress event per line: the `event` of xmr4el's stage log records and of
+xmr4el.progress, plus run start/end and failed/stopped ends of open stages, docs/design/tui.md §8), resources.json
+(per-stage CPU / memory / GPU summary, sampled every -resource_interval seconds, 0 = off). Python warnings go to
+run.log. An eval with no row in the tree's vocabulary fails the run. With -xmodel_path:
 no training, evals only. `run(spec, xmodel_path)` is the same run without argument parsing.
 
 The model config is read once: validation, model_config.json, its provenance sha256 and the model all use those bytes.
@@ -39,6 +42,8 @@ from importlib.metadata import PackageNotFoundError, version
 from xmr4el import progress, set_verbosity, torch_device
 from xmr4el.data.readers import Preprocessor
 from xmr4el.eval import evaluate_tree, format_metrics
+from xmr4el.telemetry.events import EventLog
+from xmr4el.telemetry.resources import ResourceMonitor
 from xmr4el.xmodel import PREDICT_DEFAULTS, XModel, check_search
 from xmr4el_tui.procinfo import own_identity
 
@@ -47,17 +52,8 @@ EVAL_KEYS = {"split", "test_path", "train_path", "beam_size", "topk", "knn_beta"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGES = ("numpy", "scipy", "scikit-learn", "torch", "transformers")
 HEARTBEAT = 30  # seconds
-
-
-class EventFile(logging.FileHandler):
-    """Writes the `event` of each log record that has one as a JSON line {"t", **event}; other records are ignored."""
-
-    def emit(self, record):
-        event = getattr(record, "event", None)
-        if event is not None:
-            t = datetime.fromtimestamp(record.created).isoformat(timespec="milliseconds")
-            self.stream.write(json.dumps({"t": t, **event}) + "\n")  # one write per line: a reader sees whole lines
-            self.flush()
+RESOURCE_INTERVAL = 5  # seconds between resource samples
+ENDING = threading.Event()  # set once the run's final status is decided: a later SIGTERM raises nothing
 
 
 class Stopped(BaseException):
@@ -187,7 +183,8 @@ def write_json(path, obj):
     os.replace(path + ".tmp", path)
 
 
-def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=None):
+def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=None,
+        resource_interval=RESOURCE_INTERVAL):
     """One run of `spec` (dict) in a new run dir (`run_dir`, default outputs/runs/<timestamp>_<name>); returns the run
     dir. A given model_config_sha256 / tree_id must match (BindingRejected before any output). Raises after recording
     a failure."""
@@ -201,12 +198,16 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
 
     run_dir = run_dir or os.path.join("outputs", "runs", f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{spec['name']}")
     os.makedirs(run_dir)  # exists -> FileExistsError: runs are never overwritten
+    ENDING.clear()
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     logging.basicConfig(level=logging.WARNING, format=fmt)
     log_file = logging.FileHandler(os.path.join(run_dir, "run.log"))
     log_file.setFormatter(logging.Formatter(fmt))
     logging.getLogger().addHandler(log_file)
-    events = EventFile(os.path.join(run_dir, "events.jsonl"))
+    logging.captureWarnings(True)
+    resources = ResourceMonitor(os.path.join(run_dir, "resources.json"), torch_device(), resource_interval) \
+        if resource_interval > 0 else None
+    events = EventLog(os.path.join(run_dir, "events.jsonl"), resources)
     event_loggers = [logging.getLogger(), logging.getLogger("xmr4el.progress")]  # the latter does not propagate
     for lg in event_loggers:
         lg.addHandler(events)
@@ -217,6 +218,8 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
     beat = threading.Event()
     threading.Thread(target=heartbeat, args=(os.path.join(run_dir, "heartbeat"), beat), daemon=True).start()
     try:
+        progress(stage="run", phase="start", run_id=os.path.basename(os.path.normpath(run_dir)),
+                 kind="train" if train else "eval", splits=[e["split"] for e in spec["evals"]])
         write_json(status, {"status": "running", **record})
         write_json(os.path.join(run_dir, "spec.json"), {**spec, "xmodel_path": xmodel_path})
         write_json(os.path.join(run_dir, "git.json"), git_state(run_dir))
@@ -248,29 +251,41 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             progress(stage="eval", split=e["split"], phase="start")
             m, _ = evaluate_tree(xm, tree, e["test_path"], train_path=e.get("train_path"),
                                  beam_size=e.get("beam_size"), topk=e.get("topk"), knn_beta=e.get("knn_beta"),
-                                 leaf_candidates=e.get("leaf_candidates"))
+                                 leaf_candidates=e.get("leaf_candidates"), events={"split": e["split"]})
             m.update(split=e["split"], eval_seconds=round(time.perf_counter() - start, 1))
+            progress(stage="eval", split=e["split"], part="write", phase="start")
             write_json(os.path.join(run_dir, f"metrics_{e['split']}.json"), m)
+            progress(stage="eval", split=e["split"], part="write", phase="complete")
             progress(stage="eval", split=e["split"], phase="complete", **{k: m[k] for k in ("acc@1",) if k in m})
             logger.info("Eval %s:\n%s", e["split"], format_metrics(m))
             if not m["rows"]:
                 raise ValueError(f"eval {e['split']}: no row has a gold label in the tree's vocabulary")
+        ENDING.set()
         write_json(status, {"status": "completed", **record, "finished": datetime.now().isoformat(timespec="seconds")})
+        progress(stage="run", phase="complete")
         logger.info("Run completed: dir=%s", run_dir)
         return run_dir
     except (Stopped, KeyboardInterrupt) as err:
+        ENDING.set()
         signame = "SIGTERM" if isinstance(err, Stopped) else "SIGINT"
         write_json(status, {"status": "stopped", **record, "finished": datetime.now().isoformat(timespec="seconds"),
                             "error": signame})
+        events.end_open("stopped", signal=signame)
         logger.warning("Run stopped by %s", signame)
         raise
     except BaseException as err:
+        ENDING.set()
+        error = f"{type(err).__name__}: {err}"
         write_json(status, {"status": "failed", **record, "finished": datetime.now().isoformat(timespec="seconds"),
-                            "error": f"{type(err).__name__}: {err}"})
+                            "error": error})
+        events.end_open("failed", error=error)
         logger.exception("Run failed")
         raise
     finally:
         beat.set()
+        if resources:
+            resources.close()
+        logging.captureWarnings(False)
         logging.getLogger().removeHandler(log_file)
         log_file.close()
         for lg in event_loggers:
@@ -288,7 +303,11 @@ def heartbeat(path, done):
 
 
 def stop(signum, frame):
-    raise Stopped(signum)
+    """SIGTERM handler: the first one raises Stopped; a repeat, or one after the final status is decided (a stop
+    racing completion), is ignored."""
+    if not ENDING.is_set():
+        ENDING.set()
+        raise Stopped(signum)
 
 
 def main():
@@ -299,6 +318,8 @@ def main():
     parser.add_argument("-model_config_sha256", help="refuse (exit 3) unless the model config has this sha256")
     parser.add_argument("-tree_id", help="refuse (exit 3) unless the tree's xmodel.json has this tree_id")
     parser.add_argument("-check", action="store_true", help="validate only; one JSON object on stdout")
+    parser.add_argument("-resource_interval", type=float, default=RESOURCE_INTERVAL,
+                        help="seconds between resource samples (resources.json); 0 = no resource telemetry")
     args = parser.parse_args()
     if args.check:
         try:
@@ -313,7 +334,7 @@ def main():
     # SIGTERM (kill, docker stop) -> Stopped, so run() marks the run stopped; SIGKILL still leaves "running"
     signal.signal(signal.SIGTERM, stop)
     try:
-        run(spec, args.xmodel_path, args.run_dir, args.model_config_sha256, args.tree_id)
+        run(spec, args.xmodel_path, args.run_dir, args.model_config_sha256, args.tree_id, args.resource_interval)
     except BindingRejected as err:
         print(json.dumps(err.args[0]))
         sys.exit(3)

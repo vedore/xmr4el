@@ -80,3 +80,25 @@ HelpPanel {
 Description > .option-list--option-disabled {
     color: $foreground;
 }
+
+/* Log viewer (screens/log_screen.py) */
+#log-header {
+    height: 1;
+    background: $surface;
+}
+
+#log-view, #log-missing {
+    height: 1fr;
+    background: $surface;
+    border: round $border;
+    border-title-color: $accent;
+}
+
+#log-missing {
+    padding: 1 2;
+}
+
+#log-search {
+    dock: bottom;
+    margin-bottom: 1;
+}

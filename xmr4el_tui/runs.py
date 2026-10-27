@@ -20,7 +20,7 @@ TREES_DIR = Path("outputs", "saved_trees")
 SPLIT_FILE = re.compile(r"(?:.*[_-])?(train|dev|test)\.pubtator|.*pubtator[_-](train|dev|test)\.txt")
 SPLITS = ("train", "dev", "test")
 # status.json keys that are not process identity (§9)
-STATUS_KEYS = {"status", "started", "finished", "error"}
+STATUS_KEYS = {"status", "started", "finished", "error", "forced"}  # forced: process.record_forced
 RUN_FILES = ("status.json", "spec.json", "tree.json")  # with metrics_*.json: every file read_run reads
 
 

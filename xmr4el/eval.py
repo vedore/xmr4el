@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from xmr4el import progress
 from xmr4el.data.readers import Preprocessor
 
 RECALL_KS = (5, 10, 20, 50, 100)
@@ -83,11 +84,15 @@ def string_breakdown(test_texts, gold, tree_top1, train_pairs):
 
 
 def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=None, knn_beta=None,
-                  leaf_candidates=None):
+                  leaf_candidates=None, events=None):
     """Rank the PubTator `test_path` with the loaded tree `xm` (named `tree`); search settings left None come from
     its predict_config. Rows whose gold label is not in the tree are dropped (`rows` of `rows_total` kept).
     Returns (metrics, state): metrics is JSON-ready (acc@1, MRR, R@k, R@cand, with `train_path` the mention-string
-    breakdown and hybrid); state = the ranked rows for the reranker (None if no row is kept)."""
+    breakdown and hybrid); state = the ranked rows for the reranker (None if no row is kept). `events` (e.g.
+    {"split": "dev"}): emit eval part events data / predict / metrics with these fields (tui.md §8); None: none."""
+    part = (lambda name, phase: progress(stage="eval", part=name, phase=phase, **events)) if events is not None \
+        else (lambda name, phase: None)
+    part("data", "start")
     abbrev = xm.abbrev_expansion  # train side too: same dictionary keys
     test = Preprocessor.load_pubtator_file(test_path, window=xm.context_window, abbrev=abbrev)
     gold, texts = filter_labels_and_inputs(test["corpus"], test["labels"], xm.initial_labels)
@@ -102,11 +107,15 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
          "preprocessing": {"context_window": xm.context_window, "abbrev_expansion": abbrev}}
     m["search"] = xm.resolve_predict_config(beam_size=beam_size, topk=topk, knn_beta=knn_beta,
                                             leaf_candidates=leaf_candidates)
+    part("data", "complete")
     if not gold:
         return m, None
+    part("predict", "start")
     start = time.perf_counter()
     scores = xm.predict(texts, **m["search"])
     seconds = time.perf_counter() - start
+    part("predict", "complete")
+    part("metrics", "start")
     m["predict_seconds"] = round(seconds, 1)
     m["ms_per_query"] = round(1000 * seconds / len(gold), 2)  # batch predict incl. encoding
     label_to_idx = {lab: i for i, lab in enumerate(labels)}
@@ -135,6 +144,7 @@ def evaluate_tree(xm, tree, test_path, train_path=None, beam_size=None, topk=Non
                      "unseen string": n_lab == 0}.items():
             m["strings"][k]["routed"] = float((ranks[g] > 0).mean()) if g.any() else 0.0
     state = {"scores": scores, "texts": texts, "gold": gold, "ranks": ranks, "train_pairs": train_pairs}
+    part("metrics", "complete")
     return m, state
 
 

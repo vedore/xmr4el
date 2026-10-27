@@ -31,6 +31,7 @@ xmr4el_tui/
   runs.py          Run/Eval/Tree records; tolerant reads; scan cache by file signature; canonical tree
                    locations; state_word, elapsed; spec normalization
   progress.py      events.jsonl -> stage list; current_stage(run, events), last_stage_event(events)
+  logs.py          LogTail: incremental, bounded run.log reads (levels, torn lines, truncation); log_path
   compare.py       comparability verdict and deltas for two selected evaluations (no screen yet)
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
   process.py       -check, spawn, derived state, stop; Launches (owner of started children)
@@ -43,17 +44,23 @@ xmr4el_tui/
   screens/
     dashboard_screen.py   DashboardScreen (only screen) + ActiveRuns; Details loaded in a worker
     dashboard_details.py  pure Rich texts: banner, metrics, tree / evaluation / run / group descriptions
+    log_screen.py  LogScreen: fullscreen read-only log (View Logs); polls while active; / n N search, l level
   widgets/
     explorer.py    Explorer tree (resizable) + node labels
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
     top_bar.py     TopBar (shared header)
+    log_view.py    LogView: virtual-rendered log lines, level filter, search highlight (Run monitor reuses it)
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
-  test_runs.py  test_progress.py  test_compare.py  test_procinfo.py  test_process.py
+  test_runs.py  test_progress.py  test_logs.py  test_compare.py  test_procinfo.py  test_process.py
   test_dashboard.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
+
+Runner side (imports xmr4el, never imported by the TUI): `xmr4el/telemetry/events.py` (EventLog: the
+events.jsonl handler, durations, open stages closed on failure / stop) and `xmr4el/telemetry/resources.py`
+(ResourceMonitor: per-stage resources.json), tui.md §8; tests in `tests/test_telemetry.py`.
 
 Split by responsibility, not size: a widget used by a second screen moves to `widgets/`, a message handled
 by more than one screen to `messages.py`, file reads to the repository. No base screen or generic layer

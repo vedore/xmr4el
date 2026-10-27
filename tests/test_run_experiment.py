@@ -103,6 +103,18 @@ def test_run_experiment(tmp_path):
     assert [x.key for x in stages[1].parts] == ["mention_tfidf"] and stages[1].detail == "120 rows"
     assert stages[2].detail == "8 labels" and stages[3].detail.startswith("layer 2/2")
     assert stages[5].detail == f"acc@1 {dev['acc@1']:.4f}"
+    assert [p.key for p in stages[5].parts] == ["data", "predict", "metrics", "write"]
+    assert all(p.state == "done" for p in stages[5].parts) and stages[0].seconds == events[2]["duration_seconds"]
+    assert all(e["v"] == 1 and datetime.fromisoformat(e["t"]).tzinfo for e in events)
+    assert (events[0]["stage"], events[0]["phase"], events[0]["kind"], events[0]["splits"]) == \
+        ("run", "start", "train", ["dev", "dev_beam1"]) and events[0]["run_id"] == run_dir.name
+    assert (events[-1]["stage"], events[-1]["phase"]) == ("run", "complete") and events[-1]["duration_seconds"] > 0
+    usage = json.loads((run_dir / "resources.json").read_text())
+    assert [(x["stage"], x.get("split"), x["status"]) for x in usage["stages"]] == [
+        ("load", None, "completed"), ("encode", None, "completed"), ("labels", None, "completed"),
+        ("hierarchy", None, "completed"), ("save", None, "completed"), ("eval", "dev", "completed"),
+        ("eval", "dev_beam1", "completed")]
+    assert all(x["samples"] >= 2 and x["resources"]["rss_peak_bytes"] > 0 for x in usage["stages"])
 
     # metrics = evaluate.py's function on the saved tree, minus timings
     want, _ = evaluate_tree(XModel.load(str(tmp_path / tree_path)), Path(tree_path).name,
@@ -193,6 +205,84 @@ def test_sigterm_records_stopped(tmp_path, monkeypatch):
     assert (tmp_path / "r/heartbeat").exists() and "stopped by SIGTERM" in (tmp_path / "r/run.log").read_text()
     run = runs.read_run(tmp_path / "r", tmp_path)
     assert run.recorded == "stopped" and run.identity["pid"] == os.getpid()
+
+
+def eval_only(tmp_path, monkeypatch, mod, evaluate):
+    """An eval-only run of a stub tree in tmp_path/r through main(): evaluate_tree replaced by `evaluate`."""
+    tmp_path.mkdir(exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mod, "format_metrics", str)
+    (tmp_path / "t").write_text("")
+    (tmp_path / "tree").mkdir()
+    (tmp_path / "tree/xmodel.pkl").write_text("")
+    (tmp_path / "spec.json").write_text(json.dumps({"name": "x", "evals": [{"split": "a", "test_path": "t"},
+                                                                          {"split": "b", "test_path": "t"}]}))
+    monkeypatch.setattr(mod.XModel, "load", staticmethod(lambda path: SimpleNamespace(tree_id="abc")))
+    monkeypatch.setattr(mod, "evaluate_tree", evaluate)
+    monkeypatch.setattr(sys, "argv", ["run_experiment.py", "-spec", "spec.json", "-xmodel_path", "tree",
+                                      "-run_dir", "r", "-resource_interval", "0"])
+    old = signal.getsignal(signal.SIGTERM)
+    try:
+        mod.main()
+    finally:
+        signal.signal(signal.SIGTERM, old)
+
+
+def test_failed_stage_and_stopped_split_keep_earlier_results(tmp_path, monkeypatch):
+    """A failure in split b: b's stage and the run end failed with the error, a's metrics stay; a stop in b ends
+    as stopped (not failed), a later SIGTERM is ignored."""
+    mod = load_script()
+    ok = {"rows": 1, "acc@1": 0.5}
+
+    def failing(xm, tree, test_path, events=None, **k):
+        if events["split"] == "b":
+            raise RuntimeError("boom")
+        return dict(ok), None
+    root = tmp_path
+    tmp_path = root / "fail"
+    with pytest.raises(RuntimeError):
+        eval_only(tmp_path, monkeypatch, mod, failing)
+    events, _ = progress.read_events(tmp_path / "r/events.jsonl")
+    assert [(e["stage"], e.get("split"), e["phase"]) for e in events if e["phase"] != "start" and "part" not in e] \
+        == [("load", None, "complete"), ("eval", "a", "complete"), ("eval", "b", "failed"), ("run", None, "failed")]
+    assert events[-1]["error"] == "RuntimeError: boom" and json.loads((tmp_path / "r/metrics_a.json").read_text())
+    got = progress.stages(events, "eval", ["a", "b"], "failed")
+    assert [(x.key, x.state) for x in got] == [("load", "done"), ("eval:a", "done"), ("eval:b", "failed")]
+    assert got[2].error == "RuntimeError: boom" and not (tmp_path / "r/resources.json").exists(), "0 = off"
+
+    def stopping(xm, tree, test_path, events=None, **k):
+        if events["split"] == "b":
+            os.kill(os.getpid(), signal.SIGTERM)
+        return dict(ok), None
+    tmp_path = root / "stop"
+    with pytest.raises(SystemExit) as stop:
+        eval_only(tmp_path, monkeypatch, mod, stopping)
+    assert stop.value.code == 128 + signal.SIGTERM
+    assert json.loads((tmp_path / "r/status.json").read_text())["status"] == "stopped"
+    events, _ = progress.read_events(tmp_path / "r/events.jsonl")
+    assert [(e["stage"], e.get("split"), e["phase"]) for e in events[-2:]] == [("eval", "b", "stopped"),
+                                                                                ("run", None, "stopped")]
+    assert events[-1]["signal"] == "SIGTERM" and (tmp_path / "r/metrics_a.json").exists()
+    assert mod.ENDING.is_set() and mod.stop(signal.SIGTERM, None) is None, "a repeated SIGTERM raises nothing"
+
+
+def test_sigterm_after_completion_keeps_completed(tmp_path, monkeypatch):
+    """A stop that lands once the run decided it completed (stop racing completion) changes nothing."""
+    mod = load_script()
+
+    class KillOnCompleted(logging.Handler):
+        def emit(self, record):
+            if record.getMessage().startswith("Run completed"):
+                os.kill(os.getpid(), signal.SIGTERM)
+    handler = KillOnCompleted()
+    logging.getLogger("xmr4el.run_experiment").addHandler(handler)
+    try:
+        eval_only(tmp_path, monkeypatch, mod, lambda *a, **k: ({"rows": 1}, None))
+    finally:
+        logging.getLogger("xmr4el.run_experiment").removeHandler(handler)
+    assert json.loads((tmp_path / "r/status.json").read_text())["status"] == "completed"
+    events, _ = progress.read_events(tmp_path / "r/events.jsonl")
+    assert (events[-1]["stage"], events[-1]["phase"]) == ("run", "complete")
 
 
 def test_run_dir_never_overwritten(tmp_path, monkeypatch):

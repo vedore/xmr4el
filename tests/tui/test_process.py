@@ -1,5 +1,6 @@
 """process: -check responses (fake runners: malformed output and inconsistent exit codes fail), spawn in a new
 session with the spec on stdin, live state of recorded-running runs, stop re-verifies identity before signalling."""
+import json
 import os
 import subprocess
 import sys
@@ -138,6 +139,8 @@ def test_false_isolation_claim_is_never_signalled(tmp_path, monkeypatch):
         assert process.stop(run).startswith("not signalled") and process.stop(run, force=True).startswith(
             "not signalled")
     assert sent == []
+    assert all(json.loads(p.read_text())["status"] == "running" for p in tmp_path.glob("outputs/runs/*/status.json")), \
+        "nothing recorded for a process that was never signalled"
 
 
 def test_term_ignored_then_force_stop(tmp_path):
@@ -147,7 +150,7 @@ def test_term_ignored_then_force_stop(tmp_path):
         assert process.stop(run) == f"SIGTERM sent to pid {child.pid}"
         with pytest.raises(subprocess.TimeoutExpired):
             child.wait(timeout=1)
-        assert process.stop(run, force=True) == f"SIGKILL sent to pid {child.pid}"
+        assert process.stop(run, force=True) == f"SIGKILL sent to pid {child.pid}; recorded stopped (forced)"
         assert child.wait(timeout=10) == -9
     finally:
         child.kill()
@@ -182,3 +185,108 @@ def test_launch_console_never_overwritten_and_reaped_once(tmp_path):
     finally:
         launches.children["2026-10-23_15-00-00_slow"].kill()
         launches.children["2026-10-23_15-00-00_slow"].wait()
+
+
+def test_stop_refused_once_final_status_is_written(tmp_path):
+    """A run that wrote its final status while the stop was being asked for is not signalled, alive or not."""
+    child = sleeper()
+    try:
+        run = recorded_running(tmp_path, "done", child)
+        status = run.path / "status.json"
+        status.write_text(status.read_text().replace('"running"', '"completed"'))
+        assert process.stop(run) == "not signalled: run already completed" and child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_stop_reaches_the_whole_process_group(tmp_path):
+    """The run's own children (same group) stop with it; a process outside the group is untouched."""
+    code = ("import subprocess, sys, time\n"
+            "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "print(kid.pid, flush=True)\ntime.sleep(60)")
+    leader = subprocess.Popen([sys.executable, "-c", code], start_new_session=True, stdout=subprocess.PIPE, text=True)
+    kid = int(leader.stdout.readline())
+    outsider = sleeper()
+    try:
+        while procinfo.identity(leader.pid)["start"] is None:
+            time.sleep(0.05)
+        run = recorded_running(tmp_path, "tree", leader)
+        assert process.stop(run) == f"SIGTERM sent to pid {leader.pid}"
+        assert leader.wait(timeout=10) == -15
+        deadline = time.monotonic() + 10
+        while procinfo.identity(kid) is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert procinfo.identity(kid) is None or procinfo.identity(kid)["pgid"] != leader.pid
+        assert outsider.poll() is None
+    finally:
+        for p in (leader, outsider):
+            p.kill()
+            p.wait()
+        try:
+            os.kill(kid, 9)
+        except ProcessLookupError:
+            pass
+
+
+def test_forced_stop_is_recorded_external_kill_is_lost(tmp_path):
+    """A verified force stop records stopped (SIGKILL, forced, identity kept) once the process is gone, even before
+    it is reaped, so it never reads as LOST; the same SIGKILL from outside leaves running -> LOST."""
+    here = procinfo.runtime()
+    child = sleeper()
+    try:
+        run = recorded_running(tmp_path, "forced", child)
+        assert process.stop(run, force=True) == f"SIGKILL sent to pid {child.pid}; recorded stopped (forced)"
+        assert child.poll() is None or child.returncode == -9, "not reaped by stop: a zombie counted as gone"
+        status = json.loads((run.path / "status.json").read_text())
+        assert (status["status"], status["error"], status["forced"], status["pid"]) == ("stopped", "SIGKILL", True,
+                                                                                         child.pid)
+        again = runs.read_run(run.path, tmp_path)
+        assert state_word(replace_live(again, here)) == "STOPPED" and "forced" not in (again.identity or {})
+        assert process.stop(again, force=True) == "not signalled: run already stopped", "repeat: nothing sent"
+    finally:
+        child.kill()
+        child.wait()
+    child = sleeper()
+    try:
+        run = recorded_running(tmp_path, "oom", child)
+        child.kill()  # external SIGKILL (OOM killer, kill -9): nobody records anything
+        child.wait()
+        assert json.loads((run.path / "status.json").read_text())["status"] == "running"
+        assert state_word(replace_live(run, here)) == "LOST"
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_forced_stop_keeps_the_runners_final_status(tmp_path, monkeypatch):
+    """The runner wrote stopped (handling an earlier SIGTERM) just before the SIGKILL: its record is kept."""
+    child = sleeper()
+    try:
+        run = recorded_running(tmp_path, "raced", child)
+        status = run.path / "status.json"
+        kill = os.killpg
+
+        def runner_finishes_first(pgid, sig):
+            status.write_text(status.read_text().replace('"running"', '"stopped"'))
+            kill(pgid, sig)
+        monkeypatch.setattr(os, "killpg", runner_finishes_first)
+        assert process.stop(run, force=True).endswith("; run recorded stopped")
+        assert "SIGKILL" not in status.read_text() and "forced" not in status.read_text()
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_forced_stop_not_recorded_while_the_process_lives(tmp_path, monkeypatch):
+    """No proof the process is gone (here: the signal never arrives) -> nothing written, status stays running."""
+    child = sleeper()
+    try:
+        run = recorded_running(tmp_path, "stuck", child)
+        monkeypatch.setattr(process, "FORCE_WAIT", 0.3)
+        monkeypatch.setattr(os, "killpg", lambda *a: None)
+        assert process.stop(run, force=True).endswith("; still exiting, stop not recorded")
+        assert json.loads((run.path / "status.json").read_text())["status"] == "running" and child.poll() is None
+    finally:
+        child.kill()
+        child.wait()

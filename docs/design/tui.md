@@ -541,6 +541,8 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Dashboard | `ctrl+r` | Rescan. |
 | Dashboard | `ctrl+b`, `<` / `>`, drag the explorer's right border | Hide / show the explorer; narrower / wider by 2 cells. Default 22 % of the width, at least 18 cells, at most half the screen and never leaving the right panels under 40 (the minimum wins on tiny screens); kept for the session, re-clamped on terminal resize. |
 | Description | `up` `down`, click | Select a row (read-only; headings and blank lines are skipped, the list wraps). A rescan of the same item keeps the row with the same field label. |
+| Description | `enter` / click on `View Logs  [Open]` | Fullscreen read-only log of the item's run (evaluation: its run, between Run and State; run: between Type and State; tree: its training run, between Training run and Run state). `esc` returns with the row still selected. |
+| Log viewer | `↑` `↓` `pgup` `pgdn` `home` `end`, `/` search (enter finds, `esc` closes the box), `n` / `N` next / previous match, `l` level all → INFO+ → WARNING+ → ERROR+, `esc` back | Header: run name, id, state, file, level, match i/n. An active run is polled every second and follows the end while the view is at the end; a finished run is read once. A missing log shows why, nothing is generated. At most 100 000 lines kept, first read ≤ 8 MiB from the end. |
 | Explorer, Description, Active runs | mouse drag | Select text (blue); on release it is copied to the clipboard by OSC 52 (`App.copy_to_clipboard`), so it reaches the terminal the TUI runs in, also through `ssh` / `docker exec`; a toast says how many characters. A click without a drag copies nothing; dragging the explorer border resizes, never selects. The terminal must allow OSC 52. |
 | Everywhere | `n` | New Experiment (screen not built yet: a notice). |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
@@ -615,6 +617,56 @@ Stages, matching the existing `logger.info` calls:
 - Without `events.jsonl` (runs from before this change), the Overview shows the
   stage list as unknown and the Log tab works as usual.
 
+**Schema v1 (2026-10-27, `xmr4el/telemetry/events.py`).** Every line also carries `"v": 1`; `t` is
+local time with its UTC offset (older lines: naive local time, still read). Events stay
+`stage` + `phase` (no second vocabulary): `phase` is `start`, `complete`, `failed`, `stopped`,
+`tick` or `cache_hit`, so stage_started = `start`, stage_completed = `complete`,
+stage_failed / stage_cancelled = `failed` / `stopped`, stage_progress = `tick`.
+
+- `stage: "run"` brackets the whole run: `start` (with `run_id`, `kind` train/eval,
+  `splits`), then `complete`, `failed` (`error`) or `stopped` (`signal`).
+- Every end phase of a started stage or part has `duration_seconds`, from `time.monotonic()`
+  at its start (the reader prefers it to the `t` difference).
+- On failure or a stop, the runner closes every stage and part still open (innermost first)
+  with `failed` + `error` / `stopped` + `signal`, then the run. A SIGKILLed run has none: the
+  reader shows its open stage failed (LOST) or as status.json says.
+- Eval parts (per split): `data` (read + vocabulary filter), `predict`, `metrics` (from
+  `evaluate_tree(..., events={"split": s})`), `write` (metrics_<split>.json, by the runner).
+- `layer` / `node` stay start-only detail events (hierarchy = clustering and matcher training
+  per node, one pass: no separate clustering / matcher stages exist).
+- Writes: one `write` + `flush` per line (no fsync); readers skip a torn last line
+  (`progress.read_events`). Event rate is bounded by stage boundaries, nodes and ticks (≤ 1 per 5 s).
+
+**resources.json** (`xmr4el/telemetry/resources.py`; `-resource_interval` seconds, default 5,
+`0` = off). One summary per top-level stage (`load`, `encode`, `labels`, `hierarchy`, `save`,
+`eval` + `split`), written (write-then-rename) when the stage ends; raw samples are not kept:
+
+```json
+{"v": 1, "device": "cuda", "interval_seconds": 5, "scope": {...},
+ "stages": [{"stage": "encode", "status": "completed", "duration_seconds": 123.4, "samples": 26,
+             "resources": {"cpu_avg_percent": 65.2, "rss_peak_bytes": 10737418240, "rss_avg_bytes": 9663676416,
+                           "gpu_util_avg_percent": 81.5, "torch_gpu_allocated_peak_bytes": 8589934592}}]}
+```
+
+| Field | Scope, how |
+| --- | --- |
+| `cpu_avg_percent` | this process (all threads) + exited children, CPU time / wall time (os.times, exact); 100 = one core |
+| `rss_peak_bytes`, `rss_avg_bytes` | this process, sampled (Linux `/proc/self/statm`, macOS `proc_pidinfo`); the peak is exact when the stage raised the lifetime peak (`getrusage`) |
+| `gpu_util_avg_percent` | CUDA only, whole device incl. other processes, sampled (NVML via `torch.cuda.utilization(index)`; an index, so the sampler never initialises CUDA); null without the optional `nvml` extra (`nvidia-ml-py`, in the Docker image) or an NVML driver library |
+| `torch_gpu_allocated_peak_bytes` | PyTorch tensors of this process on its GPU (the caching allocator's *allocated* bytes). CUDA: `torch.cuda.max_memory_allocated`, exact, reset at stage start only if CUDA is already initialised (never creates a context; a stage that initialises CUDA counts from then). MPS: `torch.mps.current_allocated_memory`, sampled maximum. Not total process GPU memory: excludes the allocator's reserved-but-free cache, the CUDA context (~0.3–1 GB) and non-PyTorch allocations; not device memory as `nvidia-smi` shows it. Null on CPU or while CUDA is uninitialised |
+
+Unavailable = `null`, never estimated. Stage start and end sample too (≥ 2 samples per stage).
+Measured on a 0.6 s synthetic train + eval (5 runs each, median): no telemetry 0.587 s,
+events + run.log + resources 0.589 s, sampler at 0.1 s 0.586 s, plus a 1 Hz log poller process
+0.599 s; one sample ≈ 1 µs, one event line ≈ 6 µs; files 3.1 KB events, 1.9 KB resources.
+
+**Logs.** `run.log` (format `%(asctime)s [%(levelname)s] %(name)s: %(message)s`, INFO from xmr4el,
+WARNING from libraries, Python warnings via `logging.captureWarnings`, tracebacks of failures) is
+the log the viewer shows; TUI launches also capture stdout/stderr in `outputs/runs/.console/<id>.log`,
+shown when `run.log` does not exist. `xmr4el_tui/logs.py` `LogTail` reads from a byte offset
+(torn last line held back, truncation / replacement restart, at most 8 MiB per read, so the
+first read of a large log starts near its end); continuation lines inherit their record's level.
+
 ## 9. Ownership, liveness, stopping
 
 `status.json` while running gains `pid`, `host` (`socket.gethostname()`), `uid`, an OS
@@ -643,6 +695,31 @@ identity fields in the final record. The runner touches a `heartbeat` file every
   an earlier TUI. A verified non-isolated CLI run stays RUNNING with
   `Stop unavailable: process group is shared`; use its launching terminal to stop it.
 - `procps` is already in the image; `ps` exists on macOS.
+
+**Cancellation (2026-10-27).** `process.stop(run, force=False)` is the one service a screen calls
+(confirmation is the screen's job, §5.9). It re-reads `status.json` first: a run that already
+recorded `completed` / `failed` / `stopped` is not signalled. Graceful first: SIGTERM to the group;
+SIGKILL only on an explicit `force=True`. A SIGKILLed runner writes nothing, so the supervisor records a
+forced stop (`process.record_forced`): it waits up to 10 s until the recorded process is gone (absent,
+a zombie, or its pid reused: `procinfo.identity` treats zombies as gone), then, if `status.json` is still
+`running`, rewrites it (write-then-rename, identity kept) as `stopped`, `error: "SIGKILL"`, `forced: true`;
+nothing can race that write, the writer is dead. A final status the runner wrote first is kept. If the
+process is not gone in time, nothing is written (the call says so). An unrequested SIGKILL (OOM killer,
+`kill -9`) never passes there: that run stays `running` and shows LOST. `force=True` blocks up to 10 s:
+call it from a worker. No events are appended for a forced stop: status.json is the record and the
+stage reader shows the open stage `stopped` from it. Runner side:
+the first SIGTERM raises `Stopped` -> status `stopped` (error `SIGTERM`), open stages and the run
+end `stopped` in events.jsonl, completed splits' metrics stay; a repeated SIGTERM, or one that
+arrives after the final status is decided (stop racing completion), raises nothing.
+
+| State | Recorded | Meaning |
+| --- | --- | --- |
+| COMPLETED | completed | every eval written |
+| FAILED | failed | an exception; `error` in status.json and on the failed stage |
+| STOPPED (cancelled) | stopped | SIGTERM/SIGINT (runner), or `error: SIGKILL` + `forced: true` (verified force stop, supervisor) |
+| LOST (interrupted) | running | process gone without a final status (SIGKILL, OOM, power) |
+| RUNNING / UNVERIFIED | running | live identity verified / not checkable |
+| UNKNOWN | missing | no readable status.json (old or partial runs) |
 
 ## 10. Technical design
 

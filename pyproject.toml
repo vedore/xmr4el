@@ -35,6 +35,10 @@ dependencies = [
 tui = [
     "textual==8.2.8",
 ]
+# GPU utilisation in resources.json (NVML via torch.cuda.utilization); without it the field is null
+nvml = [
+    "nvidia-ml-py",
+]
 
 [project.scripts]
 xmr4el-tui = "xmr4el_tui.__main__:main"

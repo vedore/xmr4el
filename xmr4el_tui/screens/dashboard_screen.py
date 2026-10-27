@@ -17,8 +17,9 @@ from textual.widgets import DataTable, Footer
 
 from xmr4el_tui import explorer, fmt
 from xmr4el_tui.runs import elapsed, state_word
-from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, eval_text, group_text, run_text,
-                                                   state_text, tree_text)
+from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, VIEW_LOGS, eval_text, group_text,
+                                                   run_text, state_text, tree_text)
+from xmr4el_tui.screens.log_screen import LogScreen
 from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import Description
 from xmr4el_tui.widgets.explorer import EXPLORER_STEP, Explorer, explorer_width
@@ -180,6 +181,21 @@ class DashboardScreen(Screen):
 
     def on_tree_node_highlighted(self, _):
         self.show()
+
+    def on_option_list_option_selected(self, event):
+        """enter / click on the Description's View Logs row: the run's log, fullscreen; esc comes back here with the
+        row still selected."""
+        desc = self.query_one(Description)
+        if event.option_list is not desc or desc.keys[event.option_index] != VIEW_LOGS:
+            return
+        node, _ = self.selected()
+        kind = node and node.kind
+        run = node.ref[0] if kind == "eval" else node.ref if kind == "run" else \
+            node.ref.trained_by if kind == "tree" else None
+        if run and self.run_here(run.id):
+            self.app.push_screen(LogScreen(run, self.app.root))
+        else:
+            self.notify("That run directory is no longer found.", severity="warning")
 
     def on_data_table_row_selected(self, event):
         if event.data_table.id == "active-runs":

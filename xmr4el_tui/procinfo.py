@@ -35,7 +35,7 @@ def runtime():
 
 def identity(pid):
     """uid, start token, pgid, sid of live process `pid` (a key is None when inspection is denied), or None if no
-    such process exists."""
+    such process exists or it has exited and waits to be reaped (a zombie runs nothing and writes nothing)."""
     if platform.system() == "Linux":
         try:
             stat = Path(f"/proc/{pid}/stat").read_text()
@@ -44,13 +44,19 @@ def identity(pid):
             return None
         except OSError:
             stat, uid = None, None
-        # field 22 = start time in clock ticks since boot; the command name (field 2) may contain spaces/parens
-        start = stat.rsplit(")", 1)[1].split()[19] if stat else None
+        # field 3 = state, field 22 = start time in clock ticks since boot; the command name (field 2) may contain
+        # spaces/parens
+        fields = stat.rsplit(")", 1)[1].split() if stat else None
+        if fields and fields[0] in ("Z", "X"):
+            return None
+        start = fields[19] if fields else None
     else:
-        out = _run("ps", "-o", "uid=,lstart=", "-p", str(pid))
+        out = _run("ps", "-o", "stat=,uid=,lstart=", "-p", str(pid))
         if out is None:
             return None if not _alive(pid) else {k: None for k in FIELDS}
-        uid, start = out.split(None, 1)
+        state, uid, start = out.split(None, 2)
+        if state.startswith("Z"):
+            return None
         uid = int(uid)
     ident = {"uid": uid, "start": start, "pgid": None, "sid": None}
     try:

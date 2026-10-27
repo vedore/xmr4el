@@ -16,6 +16,8 @@ STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
 STRING_COLS = ("tree", "dict", "either", "routed")
 KIND = {"train": "Training", "eval": "Evaluation", "unknown": "unknown"}
 DESCRIPTION_TITLE = {"tree": "Trained tree", "eval": "Evaluation", "dataset": "Dataset", "group": "Group"}
+VIEW_LOGS = "View Logs"  # the Description row whose enter / click opens the run's log (log_screen.LogScreen)
+OPEN = Text("[Open]", style="bold")
 
 
 def bold_heads(t, *heads):
@@ -31,7 +33,9 @@ def banner_text(run, activity=Activity(), details=Details()):
         return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", "red"),
                              f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}    2 full log")
     if word == "STOPPED":
-        return Text(f"Stopped by {run.error or 'a signal'} at {fmt.stamp(run.finished, long=True)}. "
+        how = "Force-stopped (SIGKILL, requested in the TUI)" if run.error == "SIGKILL" else \
+            f"Stopped by {run.error or 'a signal'}"
+        return Text(f"{how} at {fmt.stamp(run.finished, long=True)}. "
                     "Completed stages and saved files are kept.", style="yellow")
     if word == "LOST":
         last = activity.last
@@ -145,7 +149,7 @@ def tree_text(node, details):
                if tr.recorded_path else None),
               ("Labels", fmt.count(tr.labels) if tr.labels is not None else None)])
     if trained:
-        _rows(t, [("Training run", f"{trained.name} · {trained.id}"), ("Run state", state_text(state_word(trained))),
+        _rows(t, [("Training run", f"{trained.name} · {trained.id}"), (VIEW_LOGS, OPEN), ("Run state", state_text(state_word(trained))),
                   ("Training file", trained.train_path), ("Model config", details.spec.get("model_config")),
                   ("Config copy", str(trained.path / "model_config.json") if details.config_copy else None),
                   ("Saved", fmt.stamp(details.saved, long=True) if details.saved else None)])
@@ -178,7 +182,7 @@ def eval_text(node, tree_node, activity, details):
     (run, e), t = node.ref, Text()
     t.append(f"{e.split} · {run.name}\n", style=HEAD)
     metrics = run.path / f"metrics_{e.split}.json"
-    _rows(t, [("Run", f"{run.id} · {KIND[run.kind]} run"), ("State", state_text(node.state)),
+    _rows(t, [("Run", f"{run.id} · {KIND[run.kind]} run"), (VIEW_LOGS, OPEN), ("State", state_text(node.state)),
               ("Tree", f"{tree_node.label} · {fmt.tree(tree_node.ref.id)}" if tree_node else None),
               ("Test file", e.test_path), ("Strings from", e.train_path),
               ("Started", fmt.stamp(run.started, long=True)), ("Finished", fmt.stamp(run.finished, long=True)
@@ -204,7 +208,7 @@ def run_text(run, activity, details):
     t = Text()
     t.append(f"{run.name}\n", style=HEAD)
     spec, stage, device = details.spec, activity.stage, activity.device
-    _rows(t, [("Run id", run.id), ("Type", KIND[run.kind]), ("State", state_text(state_word(run))),
+    _rows(t, [("Run id", run.id), ("Type", KIND[run.kind]), (VIEW_LOGS, OPEN), ("State", state_text(state_word(run))),
               ("Started", fmt.stamp(run.started, long=True)),
               ("Elapsed", fmt.duration(elapsed(run, datetime.now()))),
               ("Stage", stage or ("not recorded" if run.recorded == "running" else None)), ("Device", device),

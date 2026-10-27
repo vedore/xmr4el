@@ -54,3 +54,27 @@ def test_stage_details():
     assert got["eval:dev"].detail == "acc@1 0.9463"
     assert last_event_age(events + [{"t": "bad"}], datetime(2026, 10, 20, 14, 1)) == 60
     assert last_event_age([], datetime(2026, 10, 20)) is None
+
+
+def test_ended_stages_schema_v1():
+    """failed / stopped end events, monotonic duration_seconds over timestamps, eval parts; old events still read."""
+    events = [{"v": 1, "t": "2026-10-20T13:44:00+00:00", "stage": "run", "phase": "start"},
+              {"v": 1, "t": "2026-10-20T13:44:00+00:00", "stage": "load", "phase": "start"},
+              {"v": 1, "t": "2026-10-20T13:44:09+00:00", "stage": "load", "phase": "complete",
+               "duration_seconds": 8.5},
+              {"t": "2026-10-20T13:44:10+00:00", "stage": "eval", "split": "dev", "phase": "start"},
+              {"t": "2026-10-20T13:44:10+00:00", "stage": "eval", "split": "dev", "part": "data", "phase": "start"},
+              {"t": "2026-10-20T13:44:12+00:00", "stage": "eval", "split": "dev", "part": "data", "phase": "complete"},
+              {"t": "2026-10-20T13:44:12+00:00", "stage": "eval", "split": "dev", "part": "predict", "phase": "start"},
+              {"t": "2026-10-20T13:44:20+00:00", "stage": "eval", "split": "dev", "part": "predict",
+               "phase": "stopped", "signal": "SIGTERM"},
+              {"t": "2026-10-20T13:44:20+00:00", "stage": "eval", "split": "dev", "phase": "stopped"},
+              {"t": "2026-10-20T13:44:20+00:00", "stage": "run", "phase": "stopped"}]
+    load, dev, test = stages(events, "eval", ["dev", "test"], "stopped")
+    assert (load.state, load.seconds) == ("done", 8.5), "the recorded monotonic duration wins"
+    assert (dev.state, dev.seconds, test.state) == ("stopped", 10, "pending")
+    assert [(p.key, p.state, p.seconds) for p in dev.parts] == [("data", "done", 2), ("predict", "stopped", 8)]
+    assert stages(events[:7], "eval", ["dev"], "stopped")[1].parts[1].state == "stopped", "killed: from status"
+    failed = events[:4] + [{"t": "2026-10-20T13:44:11", "stage": "eval", "split": "dev", "phase": "failed",
+                            "error": "ValueError: x"}]
+    assert stages(failed, "eval", ["dev"], "failed")[1].error == "ValueError: x"
