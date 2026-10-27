@@ -1,15 +1,15 @@
-"""Description texts of the Dashboard (tui.md §5.3, §5.4): one Rich Text per explorer item."""
+"""Description texts of the Dashboard (tui.md §5.3, §5.4): one Rich Text per explorer item. No file reads: the
+data comes from the scan's Snapshot and the repository's Details of the item."""
 import re
 from datetime import datetime
-from pathlib import Path
 
 from rich.text import Text
 
-from xmr4el_tui import explorer, fmt, runs
+from xmr4el_tui import explorer, fmt
 from xmr4el_tui.compare import RECALL
 from xmr4el_tui.fmt import STATE_SHORT, STATE_STYLE
-from xmr4el_tui.progress import event_time, read_events
-from xmr4el_tui.runs import as_dict, elapsed, heartbeat_age, state_word
+from xmr4el_tui.runs import as_dict, elapsed, state_word
+from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import HEAD
 
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
@@ -24,7 +24,7 @@ def bold_heads(t, *heads):
     return t
 
 
-def banner_text(run):
+def banner_text(run, activity=Activity(), details=Details()):
     """§5.4 banner for runs that did not complete, or None."""
     word = state_word(run)
     if word == "FAILED":
@@ -34,13 +34,12 @@ def banner_text(run):
         return Text(f"Stopped by {run.error or 'a signal'} at {fmt.stamp(run.finished, long=True)}. "
                     "Completed stages and saved files are kept.", style="yellow")
     if word == "LOST":
-        events, _ = read_events(run.path / "events.jsonl")
-        last = next((e for e in reversed(events) if e.get("stage") and event_time(e)), None)
-        where = f" Last event: {last['stage']} at {fmt.stamp(event_time(last), long=True)}." if last else ""
+        last = activity.last
+        where = f" Last event: {last[0]} at {fmt.stamp(last[1], long=True)}." if last else ""
         return Text(f"Process {run.identity['pid']} is gone and wrote no final status (killed, e.g. out of "
                     f"memory).{where}", style="red")
     if word == "UNVERIFIED":
-        age = heartbeat_age(run)
+        age = details.heartbeat
         beat = f" Heartbeat {fmt.duration(age)} ago." if age is not None else ""
         if run.live and run.live.other_runtime:
             return Text(f"Recorded running on {run.identity.get('host') or 'another host'}, another machine or "
@@ -116,8 +115,13 @@ def state_text(word):
     return Text(word, style=STATE_STYLE[word])
 
 
-def _provenance(t, run):
-    git, prov = run.git() or {}, run.provenance() or {}
+def _problems(t, problems):
+    if problems:
+        t.append("\nproblems: " + "; ".join(problems) + "\n", style="yellow")
+
+
+def _provenance(t, run, details):
+    git, prov = details.git, details.provenance
     if git or prov:
         t.append("\nProvenance\n", style=HEAD)
         _rows(t, [("Git", f"{str(git.get('commit'))[:12]} · {'dirty' if git.get('dirty') else 'clean'}"
@@ -127,7 +131,7 @@ def _provenance(t, run):
                   ("Files", str(run.path / "provenance.json") if prov else None)])
 
 
-def tree_text(node, root):
+def tree_text(node, details):
     tr, t = node.ref, Text()
     trained = tr.trained_by
     t.append(f"{node.label}\n", style=HEAD)
@@ -141,18 +145,13 @@ def tree_text(node, root):
                if tr.recorded_path else None),
               ("Labels", fmt.count(tr.labels) if tr.labels is not None else None)])
     if trained:
-        spec = trained.spec() or {}
-        snapshot = trained.path / "model_config.json"
-        try:
-            saved = fmt.stamp(datetime.fromtimestamp((trained.path / "tree.json").stat().st_mtime), long=True)
-        except OSError:
-            saved = None
         _rows(t, [("Training run", f"{trained.name} · {trained.id}"), ("Run state", state_text(state_word(trained))),
-                  ("Training file", trained.train_path), ("Model config", spec.get("model_config")),
-                  ("Config copy", str(snapshot) if snapshot.is_file() else None), ("Saved", saved)])
+                  ("Training file", trained.train_path), ("Model config", details.spec.get("model_config")),
+                  ("Config copy", str(trained.path / "model_config.json") if details.config_copy else None),
+                  ("Saved", fmt.stamp(details.saved, long=True) if details.saved else None)])
     else:
         _rows(t, [("Training run", "none recorded (trained outside run_experiment, or its run is not synced)")])
-    view = runs.read_dict(Path(root, tr.path, "xmodel.json"))
+    view = details.view
     if view:
         t.append("\nModel (xmodel.json)\n", style=HEAD)
         _rows(t, [("Features", view.get("features")), ("Transformer", _config(view.get("transformer_config"))),
@@ -170,11 +169,12 @@ def tree_text(node, root):
         t.append_text(Text(STATE_SHORT[c.state], style=STATE_STYLE[c.state]))
         t.append("\n")
     if trained:
-        _provenance(t, trained)
+        _provenance(t, trained, details)
+    _problems(t, details.problems)
     return t
 
 
-def eval_text(node, tree_node):
+def eval_text(node, tree_node, activity, details):
     (run, e), t = node.ref, Text()
     t.append(f"{e.split} · {run.name}\n", style=HEAD)
     metrics = run.path / f"metrics_{e.split}.json"
@@ -185,7 +185,7 @@ def eval_text(node, tree_node):
                                                               if run.finished else None),
               ("Duration", fmt.duration(elapsed(run, datetime.now()))),
               ("Metrics file", str(metrics) if e.metrics else "not written yet")])
-    if (banner := banner_text(run)) is not None:
+    if (banner := banner_text(run, activity, details)) is not None:
         t.append("\n")
         t.append_text(banner)
         t.append("\n")
@@ -195,15 +195,15 @@ def eval_text(node, tree_node):
         t.append("\n")
     else:
         _rows(t, [("Search", _search(e.overrides) or "the tree's saved defaults")])
-    _provenance(t, run)
+    _provenance(t, run, details)
+    _problems(t, details.problems)
     return t
 
 
-def run_text(run, info):
+def run_text(run, activity, details):
     t = Text()
     t.append(f"{run.name}\n", style=HEAD)
-    spec = run.spec() or {}
-    stage, device = info.get(run.id, (None, None))
+    spec, stage, device = details.spec, activity.stage, activity.device
     _rows(t, [("Run id", run.id), ("Type", KIND[run.kind]), ("State", state_text(state_word(run))),
               ("Started", fmt.stamp(run.started, long=True)),
               ("Elapsed", fmt.duration(elapsed(run, datetime.now()))),
@@ -212,12 +212,11 @@ def run_text(run, info):
               ("Training file", run.train_path), ("Model config", spec.get("model_config")),
               ("Evaluations", ", ".join(f"{e.split} ({e.test_path})" for e in run.evals) or None),
               ("Log", str(run.path / "run.log"))])
-    if (banner := banner_text(run)) is not None:
+    if (banner := banner_text(run, activity, details)) is not None:
         t.append("\n")
         t.append_text(banner)
         t.append("\n")
-    if run.problems:
-        t.append("\nproblems: " + "; ".join(run.problems) + "\n", style="yellow")
+    _problems(t, run.problems + details.problems)
     return t
 
 

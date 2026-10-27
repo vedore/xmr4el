@@ -130,17 +130,14 @@ def last_event_age(events, now):
     return _seconds(t, now)
 
 
-def stage_list(run):
-    """Stages from events.jsonl, or None when the run has no events file (written before the runner change)."""
-    path = run.path / "events.jsonl"
-    if not path.exists():
-        return None
-    events, _ = read_events(path)
+def current_stage(run, events):
+    """`hierarchy  layer 1/2 · …` of the run's current stage in its `events`, None without one."""
     recorded = "failed" if state_word(run) == "LOST" else run.recorded  # a lost run's current stage failed
-    return stages(events, run.kind, [e.split for e in run.evals], recorded)
-
-
-def current_stage(run):
-    """`hierarchy  layer 1/2 · …` of the run's current stage, None without one."""
-    s = next((s for s in stage_list(run) or () if s.state == "current"), None)
+    s = next((s for s in stages(events, run.kind, [e.split for e in run.evals], recorded) if s.state == "current"),
+             None)
     return f"{s.key.replace(':', ' ')}  {s.detail}".rstrip() if s else None
+
+
+def last_stage_event(events):
+    """(stage, time) of the last event with both, None without one."""
+    return next(((e["stage"], t) for e in reversed(events) if e.get("stage") and (t := event_time(e))), None)

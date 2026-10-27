@@ -7,9 +7,11 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.text import Text
+from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer
 
@@ -17,6 +19,7 @@ from xmr4el_tui import explorer, fmt
 from xmr4el_tui.runs import elapsed, state_word
 from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, eval_text, group_text, run_text,
                                                    state_text, tree_text)
+from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import Description
 from xmr4el_tui.widgets.explorer import EXPLORER_STEP, Explorer, explorer_width
 from xmr4el_tui.widgets.row_rendering import FullRow, Selectable
@@ -33,6 +36,14 @@ class ActiveRuns(Selectable, FullRow, DataTable):
 
     def cursor_at(self, y):
         return bool(self.row_count) and y >= 1 and y - 1 + self.scroll_offset.y == self.cursor_row
+
+
+class DetailsLoaded(Message):
+    """The repository read the Details of explorer item `key` (posted from a worker thread)."""
+
+    def __init__(self, key, seq, details):
+        super().__init__()
+        self.key, self.seq, self.details = key, seq, details
 
 
 class DashboardScreen(Screen):
@@ -62,6 +73,7 @@ class DashboardScreen(Screen):
         for key, label in ACTIVE_COLUMNS:
             table.add_column(label, key=key)
         self.active_ids, self.explorer_want = [], None  # None: EXPLORER_SHARE of the width
+        self.loaded, self.detail_seq = (None, Details()), 0  # (explorer key, its Details), latest request
         self.set_explorer_width(None)
         self.refresh_all()
         self.query_one(Explorer).focus()
@@ -109,7 +121,8 @@ class DashboardScreen(Screen):
         active = self.active_runs()
         table.clear()
         for r in active:
-            stage, device = self.app.snapshot.active.get(r.id, (None, None))
+            activity = self.app.snapshot.active.get(r.id, Activity())
+            stage, device = activity.stage, activity.device
             model = (r.train_path and str(Path(r.train_path).parent).removeprefix("datasets/")) if r.kind == "train" \
                 else f"tree {fmt.tree(r.tree_id)}"
             table.add_row(r.name, KIND[r.kind], model or fmt.DASH, state_text(state_word(r)),
@@ -131,22 +144,38 @@ class DashboardScreen(Screen):
         node, path = tree.index.get(tree.selected_key(), (None, ()))
         return node, tree.index[path[-1]][0] if path else None
 
-    def show(self):
+    def show(self, load=True):
+        """Describe the explorer's item now, with the Details loaded for it so far; `load` rereads its files in a
+        worker (no file I/O on the UI thread), redrawn when they land if no newer request was made."""
         node, parent = self.selected()
-        desc = self.query_one(Description)
+        desc, snap = self.query_one(Description), self.app.snapshot
+        key = node and node.key
+        details = self.loaded[1] if self.loaded[0] == key else Details()
         if node is None:
             text = Text("Nothing selected.")
         elif node.kind == "tree":
-            text = tree_text(node, self.app.root)
+            text = tree_text(node, details)
         elif node.kind == "eval":
-            text = eval_text(node, parent)
+            text = eval_text(node, parent, snap.active.get(node.ref[0].id, Activity()), details)
         elif node.kind == "run":
-            text = run_text(node.ref, self.app.snapshot.active)
+            text = run_text(node.ref, snap.active.get(node.ref.id, Activity()), details)
         else:
-            text = group_text(node, self.app.snapshot, self.app.root)
+            text = group_text(node, snap, self.app.root)
         kind = f"{KIND[node.ref.kind]} run" if node and node.kind == "run" else DESCRIPTION_TITLE.get(node and node.kind)
         desc.border_title = f"Description — {kind}" if kind else "Description"
-        desc.show(node and node.key, text)
+        desc.show(key, text)
+        if load and node is not None and node.kind in ("tree", "eval", "run"):
+            self.detail_seq += 1
+            self.load_details(node, self.detail_seq)
+
+    @work(thread=True, exclusive=True, group="details")
+    def load_details(self, node, seq):
+        self.post_message(DetailsLoaded(node.key, seq, self.app.repo.details(node)))
+
+    def on_details_loaded(self, message):
+        if message.seq == self.detail_seq:
+            self.loaded = (message.key, message.details)
+            self.show(load=False)
 
     def on_tree_node_highlighted(self, _):
         self.show()

@@ -5,6 +5,7 @@ import json
 import shutil
 import socket
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,8 +16,9 @@ from fake_runs import bad_fields_run, make_run, patch_json  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
 from xmr4el_tui import explorer, process, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
-from xmr4el_tui.screens.dashboard_details import banner_text  # noqa: E402
+from xmr4el_tui.screens.dashboard_details import banner_text, eval_text, run_text, tree_text  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import ActiveRuns, DashboardScreen  # noqa: E402
+from xmr4el_tui.services.experiment_repository import Activity, Details, ExperimentRepository  # noqa: E402
 from xmr4el_tui.widgets.description import Description  # noqa: E402
 from xmr4el_tui.widgets.explorer import EXPLORER_MIN, Explorer, explorer_width  # noqa: E402
 from xmr4el_tui.widgets.top_bar import TopBar  # noqa: E402
@@ -127,11 +129,62 @@ def test_wrong_field_types_keep_the_dashboard_usable(tmp_path):
         tree, desc, seen = app.screen.query_one(Explorer), app.screen.query_one(Description), {}
         for _ in range(40):
             await pilot.press("right", "down")
+            await settle(app, pilot)
             seen[tree.selected_key()] = desc.text()
         assert ("eval", ev.name, "dev") in seen and "acc@1 " in seen[("eval", ev.name, "dev")]
         assert "status is not a string" in seen[("run", "2026-10-20_13-36-20_bad")]
         assert app.is_running
     run_app(root, check)
+
+
+def test_slow_details_keep_the_ui_responsive(tmp_path):
+    """Details are read in a worker: while one read hangs, the cursor moves and the Description shows the scan's
+    rows; the hung read landing late, for an item no longer selected, is ignored."""
+    root = fake_root(tmp_path)
+
+    async def check(app, pilot):
+        tree, desc, real = app.screen.query_one(Explorer), app.screen.query_one(Description), app.repo.details
+        gate, entered = threading.Event(), threading.Event()
+
+        def details(node):
+            if node.key == ("tree", TREE):
+                entered.set()
+                gate.wait(10)
+            return real(node)
+        app.repo.details = details
+        await goto(pilot, app, ("dataset", "datasets/My Custom Dataset"))
+        await pilot.press("down")  # the tree: its details hang
+        await asyncio.to_thread(entered.wait, 10)
+        assert "Dataset       datasets/My Custom Dataset" in desc.text() and "Provenance" not in desc.text()
+        await pilot.press("right", "down")  # still navigable: its first evaluation
+        await pilot.pause()
+        assert tree.selected_key()[0] == "eval"
+        gate.set()
+        await settle(app, pilot)
+        assert app.screen.loaded[0] == tree.selected_key() and "Provenance" in desc.text()
+    run_app(root, check)
+
+
+def test_renderers_read_no_files(tmp_path, monkeypatch):
+    root = fake_root(tmp_path)
+    idx, repo = model(root), ExperimentRepository(root)
+    snap = repo.snapshot()
+    nodes = [n for n, _ in idx.values()]
+    loaded = {n.key: repo.details(n) for n in nodes}
+
+    def no_io(*args, **kwargs):
+        raise AssertionError("file I/O while rendering")
+    for target in ("builtins.open", "os.stat", "os.scandir", "pathlib.Path.stat", "pathlib.Path.open"):
+        monkeypatch.setattr(target, no_io)
+    for n, path in idx.values():
+        parent = idx[path[-1]][0] if path else None
+        if n.kind == "tree":
+            assert "Provenance" in tree_text(n, loaded[n.key]).plain
+        elif n.kind == "eval":
+            eval_text(n, parent, snap.active.get(n.ref[0].id, Activity()), loaded[n.key])
+        elif n.kind == "run":
+            run_text(n.ref, snap.active.get(n.ref.id, Activity()), loaded[n.key])
+            banner_text(n.ref)
 
 
 def test_banners_of_unfinished_runs(tmp_path):
@@ -140,19 +193,28 @@ def test_banners_of_unfinished_runs(tmp_path):
                                  identity=ident), tmp_path)
     other = runs.replace(run, live=process.Live("UNVERIFIED", "another machine or container", other_runtime=True))
     assert "another machine or container" in banner_text(other).plain
+    assert "Heartbeat 1:05 ago" in banner_text(other, details=Details(heartbeat=65)).plain
     gone = runs.replace(run, live=process.Live("LOST", "process 4242 is gone"))
+    last = Activity(last=("hierarchy", datetime(2026, 10, 23, 14, 30)))
     assert "Process 4242 is gone" in banner_text(gone).plain
+    assert "Last event: hierarchy at 2026-10-23 14:30." in banner_text(gone, last).plain
 
 
 def explorer_key(app):
     return app.screen.query_one(Explorer).selected_key()
 
 
+async def settle(app, pilot):
+    """Wait for the workers (scan, the Description's details) and the messages they posted."""
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
 async def goto(pilot, app, key):
     tree = app.screen.query_one(Explorer)
     for _ in range(50):
         if tree.selected_key() == key:
-            return
+            return await settle(app, pilot)
         await pilot.press("down")
     raise AssertionError(f"{key} not reached")
 
@@ -420,6 +482,7 @@ def test_full_row_selection_and_description_rows(tmp_path):
         assert focused == "#2cf5c5", "focused cursor: accent across the whole row"
         assert bg(tree.render_line(tree.cursor_line + 1)) != focused
         await pilot.press("enter")
+        await settle(app, pilot)
         assert isinstance(app.focused, Description) and desc.border_title == "Description — Trained tree"
         rows = [i for i in range(desc.option_count) if not desc.get_option_at_index(i).disabled]
         assert desc.highlighted == rows[0] and desc.keys[rows[0]] == "Tree id"
