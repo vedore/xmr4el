@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import socket
+import threading
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ def run_app(root, test, size=(120, 36), opened=None):
     async def go():
         app = XMR4ELApp(root)
         async with app.run_test(size=size) as pilot:
+            await app.workers.wait_for_complete()  # the first scan starts on mount
             await pilot.pause()
             if opened is not None:
                 app.screen.open_results = lambda f, sel: opened.append(("results", f, sel))
@@ -195,7 +197,7 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
         tree = screen.query_one(Explorer)
 
         async def rescan():
-            app.apply_scan(app.scan())
+            app.apply_scan(app.repo.snapshot())
             await pilot.pause()
         await goto(pilot, app, ("tree", TREE))
         await pilot.press("right")
@@ -243,6 +245,45 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
     assert changed == {root / "outputs/runs/2026-10-23_14-10-00_live/status.json"}, "only the test's own write"
     made = ("2026-10-24_10-00-00_alpha_eval2", "2026-10-24_11-00-00_beta", "xmodel_beef0001", "moved_eval")
     assert all(set(p.relative_to(root).parts) & set(made) for p in set(after) - set(before)), "no new files"
+
+
+def test_scans_never_overlap_and_land_in_order(tmp_path):
+    """Scan A is held inside the repository; requests meanwhile do not start a second scan beside it but make A's
+    thread scan once more; snapshots land in scan order; a cancelled (quitting) scan publishes nothing."""
+    async def check(app, pilot):
+        gate, entered = threading.Event(), threading.Event()
+        made, applied, running, overlap, real = [], [], [0], [], app.repo.snapshot
+
+        def held():
+            running[0] += 1
+            overlap.append(running[0])
+            if not made:
+                entered.set()
+                gate.wait(10)
+            made.append(real())
+            running[0] -= 1
+            return made[-1]
+        app.repo.snapshot = held
+        app.apply_scan = lambda snapshot, announce=False: applied.append(snapshot)
+        app.rescan()
+        await asyncio.to_thread(entered.wait, 10)
+        for _ in range(3):
+            await app.rescan().wait()  # returns at once: coalesced into the held scan's thread
+        gate.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(made) == 2 and applied == made and max(overlap) == 1
+
+        made.clear(), gate.clear(), entered.clear(), applied.clear()
+        worker = app.rescan()
+        await asyncio.to_thread(entered.wait, 10)
+        worker.cancel()
+        gate.set()
+        assert await asyncio.to_thread(app.scan_lock.acquire, timeout=10), "the scan thread finished"
+        app.scan_lock.release()
+        await pilot.pause()
+        assert len(made) == 1 and applied == []
+    run_app(fake_root(tmp_path), check)
 
 
 def test_empty_workspace_help_rescan_quit_style(tmp_path):
@@ -380,7 +421,7 @@ def test_full_row_selection_and_description_rows(tmp_path):
         keep, text = desc.keys[desc.highlighted], desc.text()
         await pilot.press("x", "backspace", "delete", "space", "enter")  # nothing to edit
         assert desc.text() == text and screen.query_one(Explorer).selected_key() == ("tree", TREE)
-        app.apply_scan(app.scan())  # refresh of the same subject keeps the row
+        app.apply_scan(app.repo.snapshot())  # refresh of the same subject keeps the row
         await pilot.pause()
         assert desc.keys[desc.highlighted] == keep
         await pilot.press("ctrl+tab")  # Active runs: whole row, every column and the padding after them

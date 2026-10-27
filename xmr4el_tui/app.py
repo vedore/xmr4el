@@ -1,17 +1,17 @@
 """Textual app: rescans outputs/runs every 5 s in a thread and tells the screens (tui.md §5, §7)."""
+import threading
 import time
-from dataclasses import replace
-from pathlib import Path
 
 from textual import work
 from textual.app import App
 from textual.binding import Binding
+from textual.message import Message
 from textual.theme import Theme
+from textual.worker import get_current_worker
 
-from xmr4el_tui import procinfo, process, runs
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
-from xmr4el_tui.progress import current_stage
+from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
 
 RESCAN_SECONDS = 5
 QUIT_SECONDS = 3  # second ctrl+q within this window quits
@@ -30,6 +30,14 @@ THEME = Theme(
                "screen-selection-background": "#3B6E99", "screen-selection-foreground": "#F0F4F8"})
 
 
+class Scanned(Message):
+    """A scan finished (posted from the scan thread: post_message is thread-safe and never blocks on shutdown)."""
+
+    def __init__(self, snapshot, announce):
+        super().__init__()
+        self.snapshot, self.announce = snapshot, announce
+
+
 class XMR4ELApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "XMR4EL"
@@ -38,43 +46,48 @@ class XMR4ELApp(App):
                 Binding("ctrl+c", "quit", "quit", show=False, priority=True),
                 Binding("escape", "close_help", "close help", show=False, priority=True)]
 
-    def __init__(self, root: Path):
+    def __init__(self, root):
         super().__init__()
         self.root = root
         self.quit_armed = 0.0
-        self.cache = {}  # only touched by the (exclusive) scan worker after the first scan
+        self.repo = ExperimentRepository(root)
+        self.snapshot = Snapshot()  # empty until the first scan (started on mount) lands
+        self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
+        self.scan_wanted = self.scan_announce = False  # requests the running scan picks up
         self.launched = []  # runs this TUI started, kept only so poll() reaps them
-        self.runs, self.runs_found, self.trees, self.active = self.scan()
-
-    def scan(self):
-        """(runs, outputs/runs exists, saved trees, {run id: (current stage, device)} of recorded-running runs);
-        recorded-running runs carry their live state (§9). Only reads files."""
-        try:
-            found = runs.scan(self.root, self.cache)
-        except FileNotFoundError:
-            return [], False, runs.trees(self.root, []), {}
-        here = procinfo.runtime()
-        found = [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r for r in found]
-        active = {r.id: (current_stage(r), device(r))
-                  for r in found if r.recorded == "running"}
-        return found, True, runs.trees(self.root, found), active
 
     def on_mount(self):
         self.register_theme(THEME)
         self.theme = THEME.name
         self.push_screen(DashboardScreen())
+        self.rescan()
         self.set_interval(RESCAN_SECONDS, self.rescan)
 
-    @work(thread=True, exclusive=True, group="scan")
+    @work(thread=True, group="scan")
     def rescan(self, announce=False):
-        found = self.scan()
-        self.call_from_thread(self.apply_scan, found, announce)
+        """Scan in a thread. A request while a scan runs is coalesced: the running scan goes once more, so one
+        scan touches the cache and results land in scan order. A request is served by any scan starting after it."""
+        self.scan_announce |= announce
+        self.scan_wanted = True
+        worker = get_current_worker()
+        while self.scan_wanted and not worker.is_cancelled and self.scan_lock.acquire(blocking=False):
+            try:  # re-checked after release: a request that lost the lock race is not dropped
+                while self.scan_wanted and not worker.is_cancelled:
+                    self.scan_wanted, announce, self.scan_announce = False, self.scan_announce, False
+                    snapshot = self.repo.snapshot()
+                    if not worker.is_cancelled:  # cancelled on quit: publish nothing
+                        self.post_message(Scanned(snapshot, announce))
+            finally:
+                self.scan_lock.release()
 
-    def apply_scan(self, found, announce=False):
-        self.runs, self.runs_found, self.trees, self.active = found
+    def on_scanned(self, message):
+        self.apply_scan(message.snapshot, message.announce)
+
+    def apply_scan(self, snapshot, announce=False):
+        self.snapshot = snapshot
         self.launched = [c for c in self.launched if c.poll() is None]
         if announce:
-            self.notify(f"Rescanned outputs/runs/: {len(self.runs)} runs" if self.runs_found
+            self.notify(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found
                         else "Rescanned: outputs/runs/ not found", timeout=2)
         for screen in self.screen_stack:
             screen.post_message(RunsChanged())
@@ -117,7 +130,3 @@ class XMR4ELApp(App):
     def action_close_help(self):
         self.action_help()
 
-
-def device(run):
-    prov = run.provenance()
-    return prov.get("torch_device") if isinstance(prov, dict) else None

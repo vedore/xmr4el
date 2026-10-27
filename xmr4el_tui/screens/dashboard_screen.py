@@ -92,7 +92,7 @@ class DashboardScreen(Screen):
         self.refresh_all()
 
     def refresh_all(self):
-        gone = self.query_one(Explorer).fill(explorer.build(self.app.runs, self.app.trees))
+        gone = self.query_one(Explorer).fill(explorer.build(self.app.snapshot.runs, self.app.snapshot.trees))
         if gone is not None:
             self.notify(f"The selected {gone[0]} is no longer found (moved, renamed or deleted outside the TUI).",
                         severity="warning")
@@ -101,7 +101,7 @@ class DashboardScreen(Screen):
 
     # --- panels ---------------------------------------------------------------------------------------------
     def active_runs(self):
-        return [r for r in self.app.runs if state_word(r) in explorer.ACTIVE]
+        return [r for r in self.app.snapshot.runs if state_word(r) in explorer.ACTIVE]
 
     def fill_active(self):
         table = self.query_one(ActiveRuns)
@@ -109,7 +109,7 @@ class DashboardScreen(Screen):
         active = self.active_runs()
         table.clear()
         for r in active:
-            stage, device = self.app.active.get(r.id, (None, None))
+            stage, device = self.app.snapshot.active.get(r.id, (None, None))
             model = (r.train_path and str(Path(r.train_path).parent).removeprefix("datasets/")) if r.kind == "train" \
                 else f"tree {fmt.tree(r.tree_id)}"
             table.add_row(r.name, KIND[r.kind], model or fmt.DASH, state_text(state_word(r)),
@@ -121,7 +121,7 @@ class DashboardScreen(Screen):
 
     def tick(self):
         table = self.query_one(ActiveRuns)
-        for r in self.app.runs:
+        for r in self.app.snapshot.runs:
             if r.id in self.active_ids:
                 table.update_cell(r.id, "elapsed", fmt.duration(elapsed(r, datetime.now())))
 
@@ -141,9 +141,9 @@ class DashboardScreen(Screen):
         elif node.kind == "eval":
             text = eval_text(node, parent)
         elif node.kind == "run":
-            text = run_text(node.ref, self.app.active)
+            text = run_text(node.ref, self.app.snapshot.active)
         else:
-            text = group_text(node, self.app)
+            text = group_text(node, self.app.snapshot, self.app.root)
         kind = f"{KIND[node.ref.kind]} run" if node and node.kind == "run" else DESCRIPTION_TITLE.get(node and node.kind)
         desc.border_title = f"Description — {kind}" if kind else "Description"
         desc.show(node and node.key, text)
@@ -172,7 +172,7 @@ class DashboardScreen(Screen):
 
     # --- navigation -------------------------------------------------------------------------------------------
     def run_here(self, run_id):
-        return any(r.id == run_id for r in self.app.runs)
+        return any(r.id == run_id for r in self.app.snapshot.runs)
 
     def open_run(self, run_id, split=None):
         """Run monitor of `run_id` (on `split`). The screen is not rebuilt yet: says what it would open."""

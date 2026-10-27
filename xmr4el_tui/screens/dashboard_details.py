@@ -222,7 +222,7 @@ def run_text(run, info):
     return t
 
 
-def group_text(node, app):
+def group_text(node, snapshot, root):
     t = Text()
     t.append(f"{node.label}\n", style=HEAD)
     if node.kind == "dataset":
@@ -230,9 +230,11 @@ def group_text(node, app):
                   ("Trees", len(node.children))])
     elif node.key == ("group", "models"):
         n = sum(len(d.children) for d in node.children)
-        _rows(t, [("Trees", n), ("Datasets", len(node.children)), ("Runs", len(app.runs))])
-        if not app.runs_found:
-            t.append(f"\noutputs/runs/ not found under {app.root}. Start in the repository or pass --root.\n")
+        _rows(t, [("Trees", n), ("Datasets", len(node.children)), ("Runs", len(snapshot.runs))])
+        if not snapshot.scanned:
+            t.append("\nScanning outputs/runs/ …\n")
+        elif not snapshot.found:
+            t.append(f"\noutputs/runs/ not found under {root}. Start in the repository or pass --root.\n")
         elif not n:
             t.append("\nNo saved trees yet: n starts a training run.\n")
     else:
