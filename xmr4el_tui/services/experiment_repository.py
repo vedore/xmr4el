@@ -25,8 +25,10 @@ class ExperimentRepository:
         self.cache = {}  # runs.scan cache
         self.last = Snapshot()  # last successful scan
 
-    def snapshot(self):
-        """Read everything the Dashboard shows. Only reads files."""
+    def snapshot(self, fresh=False):
+        """Read everything the Dashboard shows. Only reads files; `fresh` rereads every one (no cache)."""
+        if fresh:
+            self.cache.clear()
         try:
             found = runs.scan(self.root, self.cache)
         except FileNotFoundError:

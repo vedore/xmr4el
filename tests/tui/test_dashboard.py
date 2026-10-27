@@ -274,13 +274,13 @@ def test_scans_never_overlap_and_land_in_order(tmp_path):
         gate, entered = threading.Event(), threading.Event()
         made, applied, running, overlap, real = [], [], [0], [], app.repo.snapshot
 
-        def held():
+        def held(fresh=False):
             running[0] += 1
             overlap.append(running[0])
             if not made:
                 entered.set()
                 gate.wait(10)
-            made.append(real())
+            made.append(real(fresh))
             running[0] -= 1
             return made[-1]
         app.repo.snapshot = held

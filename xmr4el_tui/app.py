@@ -65,8 +65,9 @@ class XMR4ELApp(App):
 
     @work(thread=True, group="scan")
     def rescan(self, announce=False):
-        """Scan in a thread. A request while a scan runs is coalesced: the running scan goes once more, so one
-        scan touches the cache and results land in scan order. A request is served by any scan starting after it."""
+        """Scan in a thread; `announce` (ctrl+r) rereads every file and says so. A request while a scan runs is
+        coalesced: the running scan goes once more, so one scan touches the cache and results land in scan order.
+        A request is served by any scan starting after it."""
         self.scan_announce |= announce
         self.scan_wanted = True
         worker = get_current_worker()
@@ -74,7 +75,7 @@ class XMR4ELApp(App):
             try:  # re-checked after release: a request that lost the lock race is not dropped
                 while self.scan_wanted and not worker.is_cancelled:
                     self.scan_wanted, announce, self.scan_announce = False, self.scan_announce, False
-                    snapshot = self.repo.snapshot()
+                    snapshot = self.repo.snapshot(fresh=announce)
                     if not worker.is_cancelled:  # cancelled on quit: publish nothing
                         self.post_message(Scanned(snapshot, announce))
             finally:

@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from fake_runs import bad_fields_run, make_run
+from fake_runs import bad_fields_run, make_run, patch_json
 from xmr4el_tui import fmt, progress, runs
 from xmr4el_tui.services.experiment_repository import ExperimentRepository
 
@@ -168,4 +168,60 @@ def test_scan_failure_keeps_last_snapshot(tmp_path):
         listing.chmod(0o755)
     assert not repo.snapshot().problem
     assert not ExperimentRepository(tmp_path / "nowhere").snapshot().found
+
+
+def test_in_place_rewrites_and_fresh_rescan(tmp_path):
+    run = make_run(tmp_path, "x", tree_id=None)
+    repo = ExperimentRepository(tmp_path)
+    assert repo.snapshot().runs[0].evals[0].metrics["acc@1"] == 0.9246
+    metrics, before = run / "metrics_dev.json", (run / "metrics_dev.json").stat()
+    metrics.write_text(metrics.read_text().replace("0.9246", "0.1234"))  # same size, directory untouched
+    os.utime(metrics, ns=(before.st_atime_ns, before.st_mtime_ns + 10**9))
+    assert repo.snapshot().runs[0].evals[0].metrics["acc@1"] == 0.1234, "a rewrite in place is seen"
+    patch_json(run / "spec.json", name="renamed")
+    assert repo.snapshot().runs[0].name == "renamed"
+    after = metrics.stat()
+    metrics.write_text(metrics.read_text().replace("0.1234", "0.5555"))
+    os.utime(metrics, ns=(after.st_atime_ns, after.st_mtime_ns))  # a sync tool kept the timestamp
+    assert repo.snapshot().runs[0].evals[0].metrics["acc@1"] == 0.1234
+    assert repo.snapshot(fresh=True).runs[0].evals[0].metrics["acc@1"] == 0.5555, "ctrl+r rereads every file"
+
+
+def tree_dir(root, name, tree_id):
+    d = Path(root, "outputs/saved_trees", name)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "xmodel.json").write_text(json.dumps({"tree_id": tree_id}))
+    (d / "xmodel.pkl").write_bytes(b"")
+    return d
+
+
+def test_tree_locations_are_canonical(tmp_path):
+    tid = "8528b624aaaa"
+    make_run(tmp_path, "train", tree_id=tid, tree_here=True)
+    ev = make_run(tmp_path, "abs_eval", stamp="2026-10-21_10-00-00", kind="eval", tree_id=tid)
+    patch_json(ev / "tree.json", xmodel_path=str(tmp_path / f"outputs/saved_trees/./xmodel_{tid}"))
+    (tree,) = runs.trees(tmp_path, runs.scan(tmp_path))
+    assert (tree.path, tree.here, [r.name for r in tree.used_by], tree.trained_by.name) == (
+        f"outputs/saved_trees/xmodel_{tid}", True, ["abs_eval", "train"], "train"), "one tree, absolute or not"
+
+
+def test_moved_tree_referenced_by_a_newer_run(tmp_path):
+    tid = "8528b624aaaa"
+    make_run(tmp_path, "train", tree_id=tid)  # records outputs/saved_trees/xmodel_<tid>, now gone
+    tree_dir(tmp_path, "renamed", tid)
+    ev = make_run(tmp_path, "eval", stamp="2026-10-21_10-00-00", kind="eval", tree_id=tid)
+    patch_json(ev / "tree.json", xmodel_path="outputs/saved_trees/renamed")
+    (tree,) = runs.trees(tmp_path, runs.scan(tmp_path))
+    assert (tree.path, tree.recorded_path, [r.name for r in tree.used_by]) == (
+        "outputs/saved_trees/renamed", f"outputs/saved_trees/xmodel_{tid}", ["eval", "train"])
+
+
+def test_copied_tree_is_ambiguous(tmp_path):
+    tid = "8528b624aaaa"
+    make_run(tmp_path, "train", tree_id=tid)
+    tree_dir(tmp_path, "copy_a", tid), tree_dir(tmp_path, "copy_b", tid)
+    found = {t.path: t for t in runs.trees(tmp_path, runs.scan(tmp_path))}
+    assert set(found) == {f"outputs/saved_trees/xmodel_{tid}", "outputs/saved_trees/copy_a",
+                          "outputs/saved_trees/copy_b"}
+    assert not found[f"outputs/saved_trees/xmodel_{tid}"].here, "two copies: not guessed, stays missing"
 

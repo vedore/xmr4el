@@ -4,6 +4,7 @@ Every read tolerates missing or corrupt files and fields of the wrong JSON type:
 `Run.problems`, never raised; a field of the wrong type reads as absent.
 """
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass, replace
@@ -20,6 +21,7 @@ SPLIT_FILE = re.compile(r"(?:.*[_-])?(train|dev|test)\.pubtator|.*pubtator[_-](t
 SPLITS = ("train", "dev", "test")
 # status.json keys that are not process identity (§9)
 STATUS_KEYS = {"status", "started", "finished", "error"}
+RUN_FILES = ("status.json", "spec.json", "tree.json")  # with metrics_*.json: every file read_run reads
 
 
 @dataclass(frozen=True)
@@ -208,25 +210,33 @@ def tree_on_disk(root, tree_path):
     return bool(tree_path) and (Path(root) / tree_path / "xmodel.pkl").is_file()
 
 
+def signature(path):
+    """(name, mtime, size) of every file read_run reads: adding, removing or rewriting one in place changes it."""
+    with os.scandir(path) as entries:
+        return tuple(sorted((e.name, st.st_mtime_ns, st.st_size) for e in entries
+                            if e.name in RUN_FILES or (e.name.startswith("metrics_") and e.name.endswith(".json"))
+                            for st in (e.stat(),)))
+
+
 def scan(root, cache=None):
     """Every non-dot directory under <root>/outputs/runs, newest first. `cache` (dict, updated in place) reuses a
-    Run whose directory and status.json mtimes are unchanged. Raises FileNotFoundError without outputs/runs (OSError
-    when it cannot be listed); a run directory that vanishes while it is read is left out."""
+    Run whose files are unchanged (`signature`). Raises FileNotFoundError without outputs/runs (OSError when it
+    cannot be listed); a run directory that vanishes while it is read is left out."""
     cache = {} if cache is None else cache
     runs = []
     for path in sorted(Path(root, RUNS_DIR).iterdir()):
         if path.name.startswith(".") or not path.is_dir():
             continue
         try:
-            status_mtime = (path / "status.json").stat().st_mtime_ns
-        except OSError:
-            status_mtime = None
-        try:
-            key = (path.stat().st_mtime_ns, status_mtime)
-        except OSError:  # gone since iterdir
-            continue
+            key = signature(path)
+        except FileNotFoundError:  # gone since iterdir (or a file of it: read it again next scan)
+            if not path.is_dir():
+                continue
+            key = None
+        except OSError:  # unreadable: read_run records why, never cached
+            key = None
         hit = cache.get(path.name)
-        if hit and hit[0] == key:  # trees are synced separately from runs: recheck that one file
+        if key is not None and hit and hit[0] == key:  # trees are synced separately from runs: recheck that one file
             run = replace(hit[1], tree_here=tree_on_disk(root, hit[1].tree_path))
         else:
             run = read_run(path, root)
@@ -264,40 +274,55 @@ class Tree:
     trained_by: Run | None    # None: training run not synced, or trained outside run_experiment
     used_by: tuple[Run, ...]  # every run on this tree, newest first (trained_by included)
     labels: int | None
-    recorded_path: str | None = None  # the runs' tree.json path when the tree was found moved to `path`
+    recorded_path: str | None = None  # a missing tree.json path of runs whose tree was found moved to `path`
 
     def train_path(self):
         """Training file of the tree (its training run's spec), or None."""
         return self.trained_by.train_path if self.trained_by else None
 
 
+def canonical(root, path):
+    """The one spelling of a tree location (relative to `root` or absolute, as recorded): relative to the real root
+    when inside it, `..` and symlinks resolved. Two runs on the same directory always agree on it."""
+    full, base = Path(os.path.realpath(Path(root, path))), Path(os.path.realpath(root))
+    return str(full.relative_to(base)) if full.is_relative_to(base) else str(full)
+
+
 def trees(root, all_runs):
     """Saved trees: those runs point at (tree.json), then tree directories no run mentions (xmodel.json), newest
-    use first. A recorded tree missing at its path is matched by tree_id to an unmentioned directory (moved by hand);
-    paths in the run files are never rewritten. No pickle is read."""
+    use first. Locations are compared canonically. A recorded tree missing at its path joins the one other location
+    of its tree_id that exists (moved by hand; several = copies, ambiguous: it stays missing). Paths in the run
+    files are never rewritten. No pickle is read."""
     found = {}
     for r in all_runs:  # newest first
         if r.tree_path:
-            found.setdefault(r.tree_path, []).append(r)
+            found.setdefault(canonical(root, r.tree_path), []).append(r)
+    here = {p: tree_on_disk(root, p) for p in found}
     unmentioned = {}  # path -> (tree_id, labels) of directories no run mentions
     on_disk = sorted(Path(root, TREES_DIR).glob("*/xmodel.json")) if Path(root, TREES_DIR).is_dir() else []
     for view_path in reversed(on_disk):
-        path = str(view_path.parent.relative_to(root))
+        path = canonical(root, view_path.parent)
         if path not in found:
             view = read_dict(view_path)
             n = dig(view, "initial_labels", "len")
             unmentioned[path] = (text(view, "tree_id"), n if isinstance(n, int) else None)
-    out = []
+    merged = {}  # location -> (runs on it, a recorded location of them that is missing)
     for path, used in found.items():
+        tree_id, at = used[0].tree_id, path
+        if not here[path] and tree_id:
+            places = [q for q in found if q != path and here[q] and found[q][0].tree_id == tree_id]
+            places += [q for q, (i, _) in unmentioned.items() if i == tree_id]
+            at = places[0] if len(places) == 1 else path
+        runs_at, recorded = merged.get(at, ([], None))
+        merged[at] = (runs_at + used, recorded or (path if at != path else None))
+    out = []
+    for path, (used, recorded) in merged.items():
+        unmentioned.pop(path, None)
+        used = sorted(used, key=lambda r: (r.started or datetime.min, r.id), reverse=True)
         labels = next((e.metrics.get("labels") for r in used for e in r.evals if e.metrics), None)
-        tree_id, here, recorded = used[0].tree_id, tree_on_disk(root, path), None
-        moved = None if here or not tree_id else next((p for p, (i, _) in unmentioned.items() if i == tree_id), None)
-        if moved:
-            del unmentioned[moved]
-            path, here, recorded = moved, tree_on_disk(root, moved), path
-        out.append(Tree(id=tree_id, path=path, here=here, trained_by=next((r for r in used if r.kind == "train"), None),
-                        used_by=tuple(used), labels=labels if isinstance(labels, int) else None,
-                        recorded_path=recorded))
+        out.append(Tree(id=used[0].tree_id, path=path, here=tree_on_disk(root, path),
+                        trained_by=next((r for r in used if r.kind == "train"), None), used_by=tuple(used),
+                        labels=labels if isinstance(labels, int) else None, recorded_path=recorded))
     out += [Tree(id=i, path=p, here=tree_on_disk(root, p), trained_by=None, used_by=(), labels=n)
             for p, (i, n) in unmentioned.items()]
     return out
