@@ -21,6 +21,17 @@ class Activity:
 
 
 @dataclass(frozen=True)
+class Tail:
+    """How far a recorded-running run's events.jsonl was read, and what that gave."""
+    file: tuple | None        # (device, inode): another file at the path = start over
+    size: int                 # file size at the last read: unchanged with the same state word = nothing to do
+    offset: int               # bytes consumed (a torn last line stays unread)
+    events: list              # ponytail: every parsed event of the run kept; a streaming reducer if files get huge
+    word: str                 # state word the activity was derived with (LOST fails the current stage)
+    activity: Activity
+
+
+@dataclass(frozen=True)
 class Snapshot:
     runs: tuple = ()          # newest first, recorded-running runs carry their live state (§9)
     found: bool = False       # outputs/runs exists
@@ -47,12 +58,14 @@ class ExperimentRepository:
     def __init__(self, root):
         self.root = Path(root)
         self.cache = {}  # runs.scan cache
+        self.tails = {}  # recorded-running run id -> Tail
         self.last = Snapshot()  # last successful scan
 
     def snapshot(self, fresh=False):
         """Read everything the Dashboard lists. Only reads files; `fresh` rereads every one (no cache)."""
         if fresh:
             self.cache.clear()
+            self.tails.clear()
         try:
             found = runs.scan(self.root, self.cache)
         except FileNotFoundError:
@@ -64,13 +77,30 @@ class ExperimentRepository:
         here = procinfo.runtime()
         found = [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r for r in found]
         active = {r.id: self.activity(r) for r in found if r.recorded == "running"}
+        self.tails = {k: v for k, v in self.tails.items() if k in active}
         self.last = Snapshot(tuple(found), True, tuple(runs.trees(self.root, found)), active, scanned=True)
         return self.last
 
     def activity(self, run):
-        events, _ = read_events(run.path / "events.jsonl")
-        return Activity(current_stage(run, events), runs.text(runs.read_dict(run.path / "provenance.json"),
-                                                              "torch_device"), last_stage_event(events))
+        """Activity of a recorded-running run. Reads only the events appended since the last scan; a replaced or
+        truncated events.jsonl is read again from the start; an unchanged one is not touched."""
+        path, word = run.path / "events.jsonl", runs.state_word(run)
+        try:
+            st = path.stat()
+            file, size = (st.st_dev, st.st_ino), st.st_size
+        except OSError:
+            file, size = None, 0
+        old = self.tails.get(run.id)
+        if old and (old.file, old.size, old.word) == (file, size, word):
+            return old.activity
+        events, offset = (old.events, old.offset) if old and old.file == file and size >= old.offset else ([], 0)
+        if size > offset:
+            new, offset = read_events(path, offset)
+            events = events + new
+        activity = Activity(current_stage(run, events), runs.text(runs.read_dict(run.path / "provenance.json"),
+                                                                  "torch_device"), last_stage_event(events))
+        self.tails[run.id] = Tail(file, size, offset, events, word, activity)
+        return activity
 
     def details(self, node):
         """Details of explorer node `node` (explorer.Node): a tree, an evaluation or a run; others have none."""

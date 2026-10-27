@@ -225,3 +225,32 @@ def test_copied_tree_is_ambiguous(tmp_path):
                           "outputs/saved_trees/copy_b"}
     assert not found[f"outputs/saved_trees/xmodel_{tid}"].here, "two copies: not guessed, stays missing"
 
+
+def test_events_are_read_incrementally(tmp_path, monkeypatch):
+    t = "2026-10-23T14:1{}:00"
+    start = [{"t": t.format(0), "stage": "load", "phase": "start"}]
+    run = make_run(tmp_path, "r", status="running", tree_id=None, metrics={"dev": None}, events=start)
+    events, reads, real = run / "events.jsonl", [], progress.read_events
+    monkeypatch.setattr("xmr4el_tui.services.experiment_repository.read_events",
+                        lambda path, offset=0: reads.append(offset) or real(path, offset))
+    repo = ExperimentRepository(tmp_path)
+
+    def activity():
+        return repo.snapshot().active[run.name]
+    assert activity().stage == "load" and reads == [0]
+    assert activity().stage == "load" and reads == [0], "unchanged file: not read again"
+    size = events.stat().st_size
+    with events.open("a") as f:  # load completes; encode starts, its line torn
+        f.write(json.dumps({"t": t.format(1), "stage": "load", "phase": "complete"}) + "\n")
+        f.write('{"t": "2026-10-23T14:12:00", "stage": "encode", "pha')
+    assert activity().stage is None and reads == [0, size], "only the appended bytes; the torn line waits"
+    with events.open("a") as f:
+        f.write('se": "start"}\n')
+    a = activity()
+    assert a.stage == "encode" and a.last[0] == "encode" and len(repo.tails[run.name].events) == 3, "no duplicates"
+    events.write_text(json.dumps(start[0]) + "\n")  # truncated (rewritten from scratch)
+    assert activity().stage == "load" and reads[-1] == 0
+    replacement = run / "events.new"
+    replacement.write_text(json.dumps({**start[0], "stage": "labels"}) + "\n")  # another file at the path
+    replacement.replace(events)
+    assert activity().stage == "labels" and reads[-1] == 0
