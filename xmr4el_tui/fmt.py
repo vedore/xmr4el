@@ -5,6 +5,10 @@ import sys
 
 DASH = "—"
 MARKERS = {"done": "✓", "current": "▸", "pending": "·", "failed": "✗"}
+STATE_STYLE = {"RUNNING": "bold #5CC8FF", "UNVERIFIED": "#F5C451", "LOST": "#FF6B6B", "COMPLETED": "#7BD88F",
+               "FAILED": "#FF6B6B", "STOPPED": "#F5C451", "UNKNOWN": ""}
+STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",
+               "STOPPED": "STOP", "UNKNOWN": "?"}
 ASCII_MARKERS = {"done": "ok", "current": ">>", "pending": "..", "failed": "xx"}
 
 

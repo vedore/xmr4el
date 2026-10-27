@@ -9,7 +9,8 @@ from textual.binding import Binding
 from textual.theme import Theme
 
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.dashboard import DashboardScreen, RunsChanged
+from xmr4el_tui.messages import RunsChanged
+from xmr4el_tui.screens.dashboard_screen import DashboardScreen
 from xmr4el_tui.progress import current_stage
 
 RESCAN_SECONDS = 5

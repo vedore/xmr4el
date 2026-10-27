@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fake_runs import make_run
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.dashboard import banner_text
+from xmr4el_tui.screens.dashboard_details import banner_text
 from xmr4el_tui.runs import state_word
 
 OK = {"ok": True, "error": None, "model_config_sha256": "a" * 64, "tree_id": None,

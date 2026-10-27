@@ -14,8 +14,10 @@ from fake_runs import make_run  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
 from xmr4el_tui import explorer, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
-from xmr4el_tui.dashboard import (EXPLORER_MIN, ActiveRuns, DashboardScreen, Description, Explorer,  # noqa: E402
-                                  TopBar, explorer_width)
+from xmr4el_tui.screens.dashboard_screen import ActiveRuns, DashboardScreen  # noqa: E402
+from xmr4el_tui.widgets.description import Description  # noqa: E402
+from xmr4el_tui.widgets.explorer import EXPLORER_MIN, Explorer, explorer_width  # noqa: E402
+from xmr4el_tui.widgets.top_bar import TopBar  # noqa: E402
 
 TREE = "8528b624aaaa"
 
