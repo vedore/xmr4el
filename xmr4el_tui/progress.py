@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from xmr4el_tui.fmt import count
+from xmr4el_tui.runs import state_word
 
 TRAIN_STAGES = ("load", "encode", "labels", "hierarchy", "save")
 EVAL_STAGES = ("load",)
@@ -130,3 +131,19 @@ def last_event_age(events, now):
     """Seconds since the last event with a readable time, None without one."""
     t = next((t for t in map(event_time, reversed(events)) if t), None)
     return _seconds(t, now)
+
+
+def stage_list(run):
+    """Stages from events.jsonl, or None when the run has no events file (written before the runner change)."""
+    path = run.path / "events.jsonl"
+    if not path.exists():
+        return None
+    events, _ = read_events(path)
+    recorded = "failed" if state_word(run) == "LOST" else run.recorded  # a lost run's current stage failed
+    return stages(events, run.kind, [e.split for e in run.evals], recorded)
+
+
+def current_stage(run):
+    """`hierarchy  layer 1/2 · …` of the run's current stage, None without one."""
+    s = next((s for s in stage_list(run) or () if s.state == "current"), None)
+    return f"{s.key.replace(':', ' ')}  {s.detail}".rstrip() if s else None

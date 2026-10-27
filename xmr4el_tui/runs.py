@@ -47,6 +47,7 @@ class Run:
     identity: dict | None     # pid/host/... from status.json (§9), None for old runs
     problems: tuple[str, ...] # "metrics_dev.json: invalid JSON", ...
     live: object = None       # process.Live of a recorded-running run (set by the app's scan), else None
+    train_path: str | None = None  # spec train_path of a train run
 
     def spec(self):
         return read_json(self.path / "spec.json")[0]
@@ -131,7 +132,28 @@ def read_run(path, root):
                started=_time(status.get("started")) or (datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S") if m else None),
                finished=_time(status.get("finished")), error=status.get("error"),
                tree_id=tree.get("tree_id"), tree_path=tree_path, tree_here=tree_on_disk(root, tree_path),
-               evals=tuple(evals), identity=identity, problems=tuple(problems))
+               evals=tuple(evals), identity=identity, problems=tuple(problems),
+               train_path=(spec or {}).get("train_path") if isinstance((spec or {}).get("train_path"), str) else None)
+
+
+def state_word(run):
+    """Shown state: the live check for recorded-running runs (UNVERIFIED without one), else the recorded state."""
+    if run.recorded == "running":
+        return run.live.state if run.live else "UNVERIFIED"
+    return run.recorded.upper()
+
+
+def elapsed(run, now=None):
+    end = run.finished or (now or datetime.now() if run.recorded == "running" else None)
+    return (end - run.started).total_seconds() if end and run.started else None
+
+
+def heartbeat_age(run, now=None):
+    """Seconds since the runner last touched `heartbeat`, None without one."""
+    try:
+        return (now or datetime.now()).timestamp() - (run.path / "heartbeat").stat().st_mtime
+    except OSError:
+        return None
 
 
 def tree_on_disk(root, tree_path):
@@ -188,26 +210,22 @@ class Tree:
     trained_by: Run | None    # None: training run not synced, or trained outside run_experiment
     used_by: tuple[Run, ...]  # every run on this tree, newest first (trained_by included)
     labels: int | None
+    recorded_path: str | None = None  # the runs' tree.json path when the tree was found moved to `path`
 
     def train_path(self):
         """Training file of the tree (its training run's spec), or None."""
-        spec = self.trained_by.spec() if self.trained_by else None
-        return spec.get("train_path") if isinstance(spec, dict) else None
+        return self.trained_by.train_path if self.trained_by else None
 
 
 def trees(root, all_runs):
     """Saved trees: those runs point at (tree.json), then tree directories no run mentions (xmodel.json), newest
-    use first. No pickle is read."""
+    use first. A recorded tree missing at its path is matched by tree_id to an unmentioned directory (moved by hand);
+    paths in the run files are never rewritten. No pickle is read."""
     found = {}
     for r in all_runs:  # newest first
         if r.tree_path:
             found.setdefault(r.tree_path, []).append(r)
-    out = []
-    for path, used in found.items():
-        labels = next((e.metrics.get("labels") for r in used for e in r.evals if e.metrics), None)
-        out.append(Tree(id=used[0].tree_id, path=path, here=tree_on_disk(root, path),
-                        trained_by=next((r for r in used if r.kind == "train"), None), used_by=tuple(used),
-                        labels=labels if isinstance(labels, int) else None))
+    unmentioned = {}  # path -> (tree_id, labels) of directories no run mentions
     on_disk = sorted(Path(root, TREES_DIR).glob("*/xmodel.json")) if Path(root, TREES_DIR).is_dir() else []
     for view_path in reversed(on_disk):
         path = str(view_path.parent.relative_to(root))
@@ -215,8 +233,20 @@ def trees(root, all_runs):
             view = read_json(view_path)[0]
             view = view if isinstance(view, dict) else {}
             n = (view.get("initial_labels") or {}).get("len") if isinstance(view.get("initial_labels"), dict) else None
-            out.append(Tree(id=view.get("tree_id"), path=path, here=tree_on_disk(root, path), trained_by=None,
-                            used_by=(), labels=n if isinstance(n, int) else None))
+            unmentioned[path] = (view.get("tree_id"), n if isinstance(n, int) else None)
+    out = []
+    for path, used in found.items():
+        labels = next((e.metrics.get("labels") for r in used for e in r.evals if e.metrics), None)
+        tree_id, here, recorded = used[0].tree_id, tree_on_disk(root, path), None
+        moved = None if here or not tree_id else next((p for p, (i, _) in unmentioned.items() if i == tree_id), None)
+        if moved:
+            del unmentioned[moved]
+            path, here, recorded = moved, tree_on_disk(root, moved), path
+        out.append(Tree(id=tree_id, path=path, here=here, trained_by=next((r for r in used if r.kind == "train"), None),
+                        used_by=tuple(used), labels=labels if isinstance(labels, int) else None,
+                        recorded_path=recorded))
+    out += [Tree(id=i, path=p, here=tree_on_disk(root, p), trained_by=None, used_by=(), labels=n)
+            for p, (i, n) in unmentioned.items()]
     return out
 
 

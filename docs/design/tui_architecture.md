@@ -7,7 +7,9 @@ to it. Nothing here is implemented yet.
 
 - `xmr4el_tui` never imports `xmr4el` (torch at import, §10). It reads run files and
   spawns `scripts/run_experiment.py`.
-- Only `app.py` / `screens.py` / `launch.py` / `widgets.py` import Textual. Everything else is
+- Only `app.py` / `dashboard.py` import Textual (2026-10-27: the old Runs/Run/Trees/Compare/Setup/Review screens,
+  `screens.py` / `launch.py` / `widgets.py`, were removed; the backend modules stay for the screens rebuilt next;
+  the old code is in git at `58cdffd`). Everything else is
   stdlib-only, pure where possible, and tested without a terminal.
 - Run directories are the only durable state. The app holds a scan result, the
   current draft, and Popen handles of children it started (to reap them); nothing else.
@@ -22,20 +24,20 @@ xmr4el_tui/
   __init__.py      empty (no Textual import: the runner imports procinfo without the extra)
   __main__.py      argparse (--root), App(root).run()
   procinfo.py      process identity, stdlib only; shared by the runner and the TUI
-  runs.py          scan outputs/runs/ -> Run records; spec normalization; tree links
-  progress.py      events.jsonl -> stage list
+  runs.py          scan outputs/runs/ -> Run records; spec normalization; tree links; state_word, elapsed
+  progress.py      events.jsonl -> stage list; stage_list(run), current_stage(run)
   compare.py       comparability verdict and deltas for two selected evaluations
   fmt.py           durations, timestamps, metrics, counts, stage markers
   process.py       spawn, -check, derived state, stop            (increment 2)
-  app.py           App: scan timer, global keys, command palette, theme
-  screens.py       RunsScreen, RunScreen, CompareScreen; StopModal (inc. 2)
-  launch.py        SetupScreen, ReviewScreen (inc. 2): form -> spec, -check by revision, spawn
-  widgets.py       RunTable, Details, StageList, MetricsBlock, Banner, LogView
+  explorer.py      Dashboard explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels
+  app.py           App: scan timer (runs, trees, active-run stage/device), global keys, theme
+  dashboard.py     DashboardScreen (only screen): Explorer tree, Description, Active runs; read-only; TopBar,
+                   banner_text, metrics_text
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
   test_runs.py  test_progress.py  test_compare.py  test_fmt.py  test_procinfo.py
-  test_screens.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_dashboard.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
 Split `screens.py` when it passes ~600 lines, not before.
@@ -151,12 +153,12 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 | Class | Shows | Reads |
 | --- | --- | --- |
 | `App` | header right side (host, running count), footer, command palette, theme | `scan` every 5 s -> posts `RunsChanged` |
-| `RunsScreen` | §5.1 table + details | `App.runs`; `same_tree`, `previous_completed` |
-| `RunScreen` | §5.2-5.4 tabs Overview / Log / Inputs | the `Run`, `progress`, `LogView` tail |
-| `CompareScreen` | §5.8 | `compare.verdict`, `compare.rows` |
-| `RunTable` | DataTable, column priority by width (§5.1) | |
-| `StageList`, `MetricsBlock`, `Banner` | §5.2-5.4 blocks | |
-| `LogView` | bounded tail of `run.log` (last 256 KB, older on request), follow, search, `w` filter | polls size every 1 s |
+| `DashboardScreen` | only screen: explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.runs`, `App.trees`, `App.active`; `explorer.build`; tree's `xmodel.json` on selection (no pickle) |
+
+Results and Run monitor are not rebuilt yet: `DashboardScreen.open_results(filter, select)` and
+`open_run(run_id, split)` resolve the target (tree id or run id, run, split) and only say what they would open.
+Backend kept for them and for Setup: `process.check/spawn/rejection/stop/derived_state`, `compare.verdict/rows`,
+`progress.stages`, `runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
 scroll and marks by run `id` (§7).

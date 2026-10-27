@@ -1,6 +1,7 @@
 # XMR4EL TUI design
 
-Status: proposed, not implemented (2026-10-23). Wireframe values come from the ten
+Status (2026-10-27): only the Dashboard is built (§7 Dashboard rows); the screens of §5 were removed and are to be
+rebuilt on the same backend. Earlier status: proposed (2026-10-23). Wireframe values come from the ten
 runs in `outputs/runs/` (2026-10-20) unless marked *illustrative*.
 
 ## 1. Concept
@@ -525,6 +526,13 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Everywhere | `ctrl+p` | Command palette (every action below is also a command). |
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
 | Everywhere | `ctrl+q` | Quit. Running children keep running (§2); nothing to confirm. |
+| Dashboard | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[` where the terminal sends ctrl+tab as tab) | Next / previous panel: Explorer, Description, Active runs. |
+| Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. |
+| Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
+| Explorer | `enter` | Describe the item and focus Description. |
+| Description | `left` / `right` / `esc` | Results on the item's tree (cursor on its run) / Run monitor of its run (tree: training run) / back to Explorer. Both screens not rebuilt yet: a notice names the target. |
+| Active runs | `up` `down`, `enter` | Move, open the run. |
+| Dashboard | `ctrl+r` | Rescan. |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |
 | Runs | `n` | New training run. |

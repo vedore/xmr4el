@@ -11,7 +11,8 @@ from textual.app import App
 from textual.binding import Binding
 
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.screens import RunsChanged, RunScreen, RunsScreen
+from xmr4el_tui.dashboard import DashboardScreen, RunsChanged
+from xmr4el_tui.progress import current_stage
 
 RESCAN_SECONDS = 5
 QUIT_SECONDS = 3  # second ctrl+q within this window quits
@@ -35,17 +36,20 @@ class XMR4ELApp(App):
         self.quit_armed = 0.0
         self.cache = {}  # only touched by the (exclusive) scan worker after the first scan
         self.launched = []  # runs this TUI started, kept only so poll() reaps them
-        self.runs, self.runs_found = self.scan()
+        self.runs, self.runs_found, self.trees, self.active = self.scan()
 
     def scan(self):
-        """(runs, outputs/runs exists); recorded-running runs carry their live state (§9)."""
+        """(runs, outputs/runs exists, saved trees, {run id: (current stage, device)} of recorded-running runs);
+        recorded-running runs carry their live state (§9). Only reads files."""
         try:
             found = runs.scan(self.root, self.cache)
         except FileNotFoundError:
-            return [], False
+            return [], False, runs.trees(self.root, []), {}
         here = procinfo.runtime()
-        return [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r
-                for r in found], True
+        found = [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r for r in found]
+        active = {r.id: (current_stage(r), device(r))
+                  for r in found if r.recorded == "running"}
+        return found, True, runs.trees(self.root, found), active
 
     def on_mount(self):
         try:
@@ -55,7 +59,7 @@ class XMR4ELApp(App):
         if theme in self.available_themes:
             self.theme = theme
         self.theme_changed_signal.subscribe(self, self.save_theme)
-        self.push_screen(RunsScreen())
+        self.push_screen(DashboardScreen())
         self.set_interval(RESCAN_SECONDS, self.rescan)
 
     @work(thread=True, exclusive=True, group="scan")
@@ -64,19 +68,13 @@ class XMR4ELApp(App):
         self.call_from_thread(self.apply_scan, found, announce)
 
     def apply_scan(self, found, announce=False):
-        self.runs, self.runs_found = found
+        self.runs, self.runs_found, self.trees, self.active = found
         self.launched = [c for c in self.launched if c.poll() is None]
         if announce:
             self.notify(f"Rescanned outputs/runs/: {len(self.runs)} runs" if self.runs_found
                         else "Rescanned: outputs/runs/ not found", timeout=2)
         for screen in self.screen_stack:
             screen.post_message(RunsChanged())
-
-    async def started(self, run_id):
-        """Review -> the new run's screen once its status.json exists (Setup and Review leave the stack)."""
-        self.apply_scan(self.scan())
-        await self.pop_screen()
-        await self.switch_screen(RunScreen(run_id))
 
     async def action_quit(self):
         """ctrl+q twice: the first press only warns."""
@@ -96,14 +94,10 @@ class XMR4ELApp(App):
             self.notify(f"Theme not saved: {exc}", severity="warning")
 
     def action_help(self):
-        """Help takes the right-hand panel; the selected-run details come back when it closes."""
-        show = not self.screen.query("HelpPanel")
-        if show:
-            self.action_show_help_panel()
-        else:
+        if self.screen.query("HelpPanel"):
             self.action_hide_help_panel()
-        for panel in self.screen.query(".side-panel"):
-            panel.display = not show
+        else:
+            self.action_show_help_panel()
         self.refresh_bindings()
 
     def check_action(self, action, parameters):
@@ -112,3 +106,8 @@ class XMR4ELApp(App):
 
     def action_close_help(self):
         self.action_help()
+
+
+def device(run):
+    prov = run.provenance()
+    return prov.get("torch_device") if isinstance(prov, dict) else None
