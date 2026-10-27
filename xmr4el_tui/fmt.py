@@ -34,28 +34,33 @@ def stamp(dt, long=False):
     return dt.strftime("%Y-%m-%d %H:%M" if long else "%m-%d %H:%M")
 
 
+def number(x):
+    """A JSON number (not a bool): what the formats below accept; anything else shows as a dash."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
 def metric(x):
-    return DASH if x is None else f"{x:.4f}"
+    return f"{x:.4f}" if number(x) else DASH
 
 
 def delta(x):
-    return DASH if x is None else f"{x:+.4f}"
+    return f"{x:+.4f}" if number(x) else DASH
 
 
 def count(n):
-    return DASH if n is None else f"{n:,}"
+    return f"{n:,}" if number(n) else DASH
 
 
 def pct(a, b):
-    return DASH if a is None or not b else f"{a / b:.1%}"
+    return f"{a / b:.1%}" if number(a) and number(b) and b else DASH
 
 
 def ms(x):
-    return DASH if x is None else f"{x:.2f} ms/query"
+    return f"{x:.2f} ms/query" if number(x) else DASH
 
 
 def tree(tree_id):
-    return tree_id[:8] if tree_id else DASH
+    return tree_id[:8] if isinstance(tree_id, str) and tree_id else DASH
 
 
 def marker(state, ascii=False):

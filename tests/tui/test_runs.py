@@ -1,12 +1,14 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from fake_runs import make_run
-from xmr4el_tui import fmt, runs
+from fake_runs import bad_fields_run, make_run
+from xmr4el_tui import fmt, progress, runs
+from xmr4el_tui.services.experiment_repository import ExperimentRepository
 
 
 def test_scan_states_and_fields(tmp_path):
@@ -100,5 +102,70 @@ def test_helpers_need_only_the_standard_library():
     """The non-UI modules load under `python -S` (no site-packages: no Textual, no backend, no torch); the runner
     imports procinfo without the tui extra."""
     mods = ", ".join(f"xmr4el_tui.{m}" for m in ("runs", "progress", "explorer", "compare", "fmt", "process",
-                                                  "procinfo"))
+                                                  "procinfo", "services.experiment_repository"))
     subprocess.run([sys.executable, "-S", "-c", f"import {mods}"], cwd=Path(__file__).parents[2], check=True)
+
+
+def test_wrong_field_types_read_as_absent(tmp_path):
+    bad_fields_run(tmp_path)
+    make_run(tmp_path, "ok", stamp="2026-10-21_10-00-00", tree_id=None)  # naive times sort with the converted one
+    ok, bad = runs.scan(tmp_path)
+    assert set(bad.problems) == {"status.json: status is not a string", "status.json: finished is not a string",
+                                 "status.json: error is not a string", "spec.json: name is not a string"}
+    assert (bad.recorded, bad.name, bad.error, bad.finished, bad.started.tzinfo) == ("unknown", "bad", None, None,
+                                                                                     None)
+    assert bad.evals[0].test_path == "datasets/x/dev.pubtator", "falls back to the metrics' path"
+    assert runs.dig(bad.provenance(), "inputs", "x") is None and fmt.metric("0.9") == fmt.count("7") == fmt.DASH
+    assert runs.parse_time("2026-10-20T08:36:20+00:00") == runs.parse_time("2026-10-20T08:36:20Z")
+
+
+def test_vanished_and_unreadable_run_files(tmp_path, monkeypatch):
+    make_run(tmp_path, "keep", tree_id=None)
+    gone = make_run(tmp_path, "gone", stamp="2026-10-21_10-00-00", tree_id=None)
+    read_run = runs.read_run
+
+    def vanish(path, root):  # deleted by a sync tool while it is read
+        if path == gone:
+            shutil.rmtree(gone)
+        return read_run(path, root)
+    monkeypatch.setattr(runs, "read_run", vanish)
+    assert [r.name for r in runs.scan(tmp_path)] == ["keep"], "a vanished run is left out, the others kept"
+    monkeypatch.undo()
+
+    events = make_run(tmp_path, "ev", stamp="2026-10-22_10-00-00", tree_id=None, events=[{"stage": "load"}]) \
+        / "events.jsonl"
+    events.chmod(0)
+    try:
+        if events.stat().st_mode & 0o777 == 0 and not os.access(events, os.R_OK):  # not root
+            assert progress.read_events(events) == ([], 0)
+    finally:
+        events.chmod(0o644)
+
+
+def test_bad_events_do_not_raise():
+    events = [{"t": "2026-10-20T13:36:20+00:00", "stage": "encode", "phase": "start"},
+              {"t": "2026-10-20T13:36:21", "stage": "encode", "part": ["x"], "phase": "start"},
+              {"t": 5, "stage": "encode", "phase": "complete", "rows": "many"},
+              {"stage": "eval", "split": "dev", "phase": "complete", "acc@1": "high"},
+              {"stage": ["load"], "phase": "start"}]
+    got = progress.stages(events, "train", ["dev"], "running")
+    assert got[1].key == "encode" and got[1].state == "done" and got[1].parts == ()
+    assert got[-1].detail == f"acc@1 {fmt.DASH}"
+
+
+def test_scan_failure_keeps_last_snapshot(tmp_path):
+    make_run(tmp_path, "a", tree_id=None)
+    repo = ExperimentRepository(tmp_path)
+    good = repo.snapshot()
+    assert good.found and not good.problem and [r.name for r in good.runs] == ["a"]
+    listing = tmp_path / "outputs/runs"
+    listing.chmod(0)
+    try:
+        if not os.access(listing, os.R_OK):  # not root
+            failed = repo.snapshot()
+            assert failed.runs == good.runs and "cannot be read (PermissionError)" in failed.problem
+    finally:
+        listing.chmod(0o755)
+    assert not repo.snapshot().problem
+    assert not ExperimentRepository(tmp_path / "nowhere").snapshot().found
+

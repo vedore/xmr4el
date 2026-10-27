@@ -6,8 +6,8 @@ before the population hash are compared by derivation through the tree's trainin
 from dataclasses import dataclass
 from pathlib import Path
 
-from xmr4el_tui.fmt import DASH, count, metric
-from xmr4el_tui.runs import training_run
+from xmr4el_tui.fmt import DASH, count, metric, number
+from xmr4el_tui.runs import as_dict, dig, training_run
 
 RECALL = ("R@5", "R@10", "R@20", "R@50", "R@100")
 PREPROCESSING = ("context_window", "abbrev_expansion")
@@ -26,7 +26,7 @@ class Verdict:
 
 
 def _sha(run, path):
-    return ((run.provenance() or {}).get("inputs") or {}).get(path) if path else None
+    return dig(run.provenance(), "inputs", path) if path else None
 
 
 def _preprocessing(run, metrics, runs):
@@ -55,11 +55,11 @@ def _clean_commit(runs_involved):
 
 def _differs(a, ma, b, mb):
     out = ["tree"] if ma.get("tree") != mb.get("tree") else []
-    sa, sb = ma.get("search") or {}, mb.get("search") or {}
+    sa, sb = as_dict(ma.get("search")), as_dict(mb.get("search"))
     out += [f"{k} {sa.get(k)} -> {sb.get(k)}" for k in dict.fromkeys([*sa, *sb]) if sa.get(k) != sb.get(k)]
     if ma.get("features") != mb.get("features"):
         out.append(f"features {ma.get('features')} -> {mb.get('features')}")
-    pa, pb = ((r.provenance() or {}).get("packages") or {} for r in (a, b))
+    pa, pb = (as_dict(dig(r.provenance(), "packages")) for r in (a, b))
     out += [f"{k} {pa.get(k)} -> {pb.get(k)}" for k in dict.fromkeys([*pa, *pb]) if pa.get(k) != pb.get(k)]
     return tuple(out)
 
@@ -73,7 +73,7 @@ def verdict(a, a_split, b, b_split, runs):
         return Verdict("unknown", tuple(missing), (), False, False, False, False)
     ma, mb = ea.metrics, eb.metrics
     differs = _differs(a, ma, b, mb)
-    devices = tuple((r.provenance() or {}).get("torch_device") for r in (a, b))
+    devices = tuple(dig(r.provenance(), "torch_device") for r in (a, b))
     same_rows = ma.get("rows_total") == mb.get("rows_total")
     breakdown = _sha(a, ea.train_path)
     breakdown_same = breakdown is not None and breakdown == _sha(b, eb.train_path)
@@ -134,7 +134,7 @@ def rows(ma, mb, v):
     """[(metric, A, B, B - A or "")] for every recorded metric; a delta only where the verdict allows it."""
     def num(key, allowed, fmt=metric, dfmt="{:+.4f}"):
         x, y = ma.get(key), mb.get(key)
-        d = dfmt.format(y - x) if allowed and isinstance(x, (int, float)) and isinstance(y, (int, float)) else ""
+        d = dfmt.format(y - x) if allowed and number(x) and number(y) else ""
         return key, fmt(x), fmt(y), d
 
     def n_rows(m):
@@ -147,7 +147,7 @@ def rows(ma, mb, v):
     if "hybrid" in ma or "hybrid" in mb:
         out += [num("hybrid", v.subset_deltas and v.breakdown_same),
                 num("hybrid_all", v.all_rows_delta and v.breakdown_same)]
-    key, x, y, d = num("ms_per_query", v.timing_delta, fmt=lambda t: DASH if t is None else f"{t:.2f}",
+    key, x, y, d = num("ms_per_query", v.timing_delta, fmt=lambda t: f"{t:.2f}" if number(t) else DASH,
                        dfmt="{:+.2f}")
     da, db = v.devices
     if d:

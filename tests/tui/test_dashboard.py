@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("textual")
 
-from fake_runs import make_run  # noqa: E402
+from fake_runs import bad_fields_run, make_run, patch_json  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
 from xmr4el_tui import explorer, process, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
@@ -112,6 +112,26 @@ def test_moved_tree_found_by_tree_id(tmp_path):
     assert json.loads(Path(tmp_path, "outputs/runs/2026-10-20_13-36-20_alpha/tree.json").read_text())[
         "xmodel_path"] == f"outputs/saved_trees/xmodel_{TREE}", "the recorded path is never rewritten"
     assert model(tmp_path)[("tree", TREE)][0].note == "moved"
+
+
+def test_wrong_field_types_keep_the_dashboard_usable(tmp_path):
+    """Every explorer item is described without an exception; the bad run shows its problems."""
+    root = fake_root(tmp_path)
+    bad_fields_run(root)
+    ev = make_run(root, "odd_eval", stamp="2026-10-25_10-00-00", kind="eval", tree_id=TREE, splits=("dev",))
+    patch_json(ev / "metrics_dev.json", **{"acc@1": "0.9", "search": [], "strings": {"all": []}, "ms_per_query": "x"})
+    patch_json(ev / "provenance.json", packages=["numpy"], inputs=[])
+    patch_json(ev / "status.json", finished="2026-10-25T10:05:00+02:00")
+
+    async def check(app, pilot):
+        tree, desc, seen = app.screen.query_one(Explorer), app.screen.query_one(Description), {}
+        for _ in range(40):
+            await pilot.press("right", "down")
+            seen[tree.selected_key()] = desc.text()
+        assert ("eval", ev.name, "dev") in seen and "acc@1 " in seen[("eval", ev.name, "dev")]
+        assert "status is not a string" in seen[("run", "2026-10-20_13-36-20_bad")]
+        assert app.is_running
+    run_app(root, check)
 
 
 def test_banners_of_unfinished_runs(tmp_path):

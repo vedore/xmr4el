@@ -1,6 +1,7 @@
 """Read outputs/runs/<run-id>/ into Run records (tui.md §10 "Run browser data"). Stdlib only, no UI.
 
-Every read tolerates missing or corrupt files: problems are recorded in `Run.problems`, never raised.
+Every read tolerates missing or corrupt files and fields of the wrong JSON type: problems are recorded in
+`Run.problems`, never raised; a field of the wrong type reads as absent.
 """
 import json
 import re
@@ -50,16 +51,16 @@ class Run:
     train_path: str | None = None  # spec train_path of a train run
 
     def spec(self):
-        return read_json(self.path / "spec.json")[0]
+        return read_dict(self.path / "spec.json")
 
     def provenance(self):
-        return read_json(self.path / "provenance.json")[0]
+        return read_dict(self.path / "provenance.json")
 
     def git(self):
-        return read_json(self.path / "git.json")[0]
+        return read_dict(self.path / "git.json")
 
     def model_config(self):
-        return read_json(self.path / "model_config.json")[0]
+        return read_dict(self.path / "model_config.json")
 
     def eval(self, split):
         return next((e for e in self.evals if e.split == split), None)
@@ -77,11 +78,39 @@ def read_json(path):
         return None, f"{Path(path).name}: {reason}"
 
 
-def _time(value):
+def read_dict(path):
+    """The JSON object in `path`, None when missing, unreadable or not an object."""
+    obj = read_json(path)[0]
+    return obj if isinstance(obj, dict) else None
+
+
+def as_dict(obj):
+    return obj if isinstance(obj, dict) else {}
+
+
+def dig(obj, *keys):
+    """obj[k1][k2]..., None when a level is missing or not a JSON object."""
+    for k in keys:
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(k)
+    return obj
+
+
+def text(obj, key):
+    """obj[key] when it is a string, else None."""
+    value = obj.get(key) if isinstance(obj, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def parse_time(value):
+    """ISO time -> naive local datetime (one with an offset is converted, so all times compare), None when absent or
+    invalid."""
     try:
-        return datetime.fromisoformat(value) if isinstance(value, str) else None
+        t = datetime.fromisoformat(value) if isinstance(value, str) else None
     except ValueError:
         return None
+    return t.astimezone().replace(tzinfo=None) if t and t.tzinfo else t
 
 
 def read_run(path, root):
@@ -97,6 +126,20 @@ def read_run(path, root):
             obj = None
         return obj
 
+    def string(obj, name, key):
+        """obj[key] when a string; present with another type: a problem, read as absent."""
+        value = (obj or {}).get(key)
+        if value is not None and not isinstance(value, str):
+            problems.append(f"{name}: {key} is not a string")
+            return None
+        return value
+
+    def time(name, key):
+        value = string(status, name, key)
+        if value is not None and parse_time(value) is None:
+            problems.append(f"{name}: {key} is not an ISO time")
+        return parse_time(value)
+
     status, spec, tree = load("status.json"), load("spec.json"), load("tree.json")
     if status is None and not any(p.startswith("status.json") for p in problems):
         problems.append("status.json: missing")
@@ -105,7 +148,10 @@ def read_run(path, root):
     status, tree = status or {}, tree or {}
 
     m = RUN_ID.fullmatch(path.name)
-    recorded = status.get("status") if status.get("status") in RECORDED_STATES else "unknown"
+    recorded = string(status, "status.json", "status")
+    if recorded is not None and recorded not in RECORDED_STATES:
+        problems.append(f"status.json: unknown status {recorded!r}")
+    recorded = recorded if recorded in RECORDED_STATES else "unknown"
     if spec is not None:
         kind = "train" if spec.get("xmodel_path") is None else "eval"
     elif "trained" in tree:
@@ -121,19 +167,21 @@ def read_run(path, root):
     evals = []
     for split, e in splits:
         metrics = load(f"metrics_{split}.json")
-        evals.append(Eval(split=split, test_path=e.get("test_path") or (metrics or {}).get("test_path"),
-                          train_path=e.get("train_path") or (metrics or {}).get("train_path"),
+        evals.append(Eval(split=split, test_path=text(e, "test_path") or text(metrics, "test_path"),
+                          train_path=text(e, "train_path") or text(metrics, "train_path"),
                           overrides={k: e[k] for k in SEARCH_KEYS if k in e}, metrics=metrics))
 
-    tree_path = tree.get("xmodel_path") if isinstance(tree.get("xmodel_path"), str) else None
+    tree_path = string(tree, "tree.json", "xmodel_path")
     identity = {k: v for k, v in status.items() if k not in STATUS_KEYS} or None
-    return Run(id=path.name, path=path, name=(spec or {}).get("name") or (m.group(2) if m else path.name),
+    return Run(id=path.name, path=path, name=string(spec, "spec.json", "name") or (m.group(2) if m else path.name),
                kind=kind, recorded=recorded,
-               started=_time(status.get("started")) or (datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S") if m else None),
-               finished=_time(status.get("finished")), error=status.get("error"),
-               tree_id=tree.get("tree_id"), tree_path=tree_path, tree_here=tree_on_disk(root, tree_path),
+               started=time("status.json", "started") or (datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S")
+                                                          if m else None),
+               finished=time("status.json", "finished"), error=string(status, "status.json", "error"),
+               tree_id=string(tree, "tree.json", "tree_id"), tree_path=tree_path,
+               tree_here=tree_on_disk(root, tree_path),
                evals=tuple(evals), identity=identity, problems=tuple(problems),
-               train_path=(spec or {}).get("train_path") if isinstance((spec or {}).get("train_path"), str) else None)
+               train_path=string(spec, "spec.json", "train_path"))
 
 
 def state_word(run):
@@ -162,7 +210,8 @@ def tree_on_disk(root, tree_path):
 
 def scan(root, cache=None):
     """Every non-dot directory under <root>/outputs/runs, newest first. `cache` (dict, updated in place) reuses a
-    Run whose directory and status.json mtimes are unchanged. Raises FileNotFoundError without outputs/runs."""
+    Run whose directory and status.json mtimes are unchanged. Raises FileNotFoundError without outputs/runs (OSError
+    when it cannot be listed); a run directory that vanishes while it is read is left out."""
     cache = {} if cache is None else cache
     runs = []
     for path in sorted(Path(root, RUNS_DIR).iterdir()):
@@ -172,12 +221,17 @@ def scan(root, cache=None):
             status_mtime = (path / "status.json").stat().st_mtime_ns
         except OSError:
             status_mtime = None
-        key = (path.stat().st_mtime_ns, status_mtime)
+        try:
+            key = (path.stat().st_mtime_ns, status_mtime)
+        except OSError:  # gone since iterdir
+            continue
         hit = cache.get(path.name)
         if hit and hit[0] == key:  # trees are synced separately from runs: recheck that one file
             run = replace(hit[1], tree_here=tree_on_disk(root, hit[1].tree_path))
         else:
             run = read_run(path, root)
+            if not path.is_dir():  # gone while read: its files read as missing, not as a broken run
+                continue
         cache[path.name] = (key, run)
         runs.append(run)
     for gone in set(cache) - {r.id for r in runs}:
@@ -230,10 +284,9 @@ def trees(root, all_runs):
     for view_path in reversed(on_disk):
         path = str(view_path.parent.relative_to(root))
         if path not in found:
-            view = read_json(view_path)[0]
-            view = view if isinstance(view, dict) else {}
-            n = (view.get("initial_labels") or {}).get("len") if isinstance(view.get("initial_labels"), dict) else None
-            unmentioned[path] = (view.get("tree_id"), n if isinstance(n, int) else None)
+            view = read_dict(view_path)
+            n = dig(view, "initial_labels", "len")
+            unmentioned[path] = (text(view, "tree_id"), n if isinstance(n, int) else None)
     out = []
     for path, used in found.items():
         labels = next((e.metrics.get("labels") for r in used for e in r.evals if e.metrics), None)

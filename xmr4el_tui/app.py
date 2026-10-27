@@ -84,6 +84,8 @@ class XMR4ELApp(App):
         self.apply_scan(message.snapshot, message.announce)
 
     def apply_scan(self, snapshot, announce=False):
+        if snapshot.problem and snapshot.problem != self.snapshot.problem:
+            self.notify(snapshot.problem, title="Scan failed", severity="warning")
         self.snapshot = snapshot
         self.launched = [c for c in self.launched if c.poll() is None]
         if announce:

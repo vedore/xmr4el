@@ -9,7 +9,7 @@ from xmr4el_tui import explorer, fmt, runs
 from xmr4el_tui.compare import RECALL
 from xmr4el_tui.fmt import STATE_SHORT, STATE_STYLE
 from xmr4el_tui.progress import event_time, read_events
-from xmr4el_tui.runs import elapsed, heartbeat_age, state_word
+from xmr4el_tui.runs import as_dict, elapsed, heartbeat_age, state_word
 from xmr4el_tui.widgets.description import HEAD
 
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
@@ -53,7 +53,7 @@ def banner_text(run):
                     "change), so liveness cannot be checked.", style="yellow")
     if word == "UNKNOWN":
         reason = next((p for p in run.problems if p.startswith("status.json")), "status.json: missing")
-        return Text(f"status.json is missing or unreadable: {reason.split(': ', 1)[1]}. "
+        return Text(f"status.json is missing, unreadable or has no usable status: {reason.split(': ', 1)[1]}. "
                     "Showing the files that exist.")
     return None
 
@@ -62,7 +62,7 @@ def metrics_text(m, split):
     """Evaluation block of §5.3 for one metrics dict."""
     if not m:
         return Text(f"{split}: no metrics (not produced yet)")
-    search = m.get("search") or {}
+    search = as_dict(m.get("search"))
     lines = ["Search      " + " · ".join(f"{k} {v}" for k, v in search.items()),
              f"Rows        {fmt.count(m.get('rows'))} / {fmt.count(m.get('rows_total'))} have a gold label in the "
              f"tree ({fmt.pct(m.get('rows'), m.get('rows_total'))}) · {fmt.count(m.get('labels'))} labels", ""]
@@ -77,11 +77,11 @@ def metrics_text(m, split):
             row = []
     lines += ["      ".join(row)] if row else []
     lines += [f"{fmt.ms(m.get('ms_per_query'))}, batch incl. encoding", ""]
-    strings = m.get("strings")
+    strings = as_dict(m.get("strings"))
     if strings:
         lines.append(f"{'Mention strings':<16} {'n':>6}" + "".join(f"{k:>10}" for k in STRING_COLS))
         for g in STRING_GROUPS:
-            s = strings.get(g, {})
+            s = as_dict(strings.get(g))
             lines.append(f"{g:<16} {fmt.count(s.get('n')):>6}" + "".join(
                 f"{fmt.metric(s.get(k)):>10}" for k in STRING_COLS))
     else:
@@ -117,14 +117,13 @@ def state_text(word):
 
 
 def _provenance(t, run):
-    git = run.git() if isinstance(run.git(), dict) else {}
-    prov = run.provenance() if isinstance(run.provenance(), dict) else {}
+    git, prov = run.git() or {}, run.provenance() or {}
     if git or prov:
         t.append("\nProvenance\n", style=HEAD)
         _rows(t, [("Git", f"{str(git.get('commit'))[:12]} · {'dirty' if git.get('dirty') else 'clean'}"
                    if git.get("commit") else None),
                   ("Python", prov.get("python")), ("Device", prov.get("torch_device")),
-                  ("Packages", " · ".join(f"{k} {v}" for k, v in (prov.get("packages") or {}).items()) or None),
+                  ("Packages", " · ".join(f"{k} {v}" for k, v in as_dict(prov.get("packages")).items()) or None),
                   ("Files", str(run.path / "provenance.json") if prov else None)])
 
 
@@ -142,7 +141,7 @@ def tree_text(node, root):
                if tr.recorded_path else None),
               ("Labels", fmt.count(tr.labels) if tr.labels is not None else None)])
     if trained:
-        spec = trained.spec() if isinstance(trained.spec(), dict) else {}
+        spec = trained.spec() or {}
         snapshot = trained.path / "model_config.json"
         try:
             saved = fmt.stamp(datetime.fromtimestamp((trained.path / "tree.json").stat().st_mtime), long=True)
@@ -153,8 +152,8 @@ def tree_text(node, root):
                   ("Config copy", str(snapshot) if snapshot.is_file() else None), ("Saved", saved)])
     else:
         _rows(t, [("Training run", "none recorded (trained outside run_experiment, or its run is not synced)")])
-    view, _ = runs.read_json(Path(root, tr.path, "xmodel.json"))
-    if isinstance(view, dict):
+    view = runs.read_dict(Path(root, tr.path, "xmodel.json"))
+    if view:
         t.append("\nModel (xmodel.json)\n", style=HEAD)
         _rows(t, [("Features", view.get("features")), ("Transformer", _config(view.get("transformer_config"))),
                   ("Vectorizer", _config(view.get("vectorizer_config"))),
@@ -203,7 +202,7 @@ def eval_text(node, tree_node):
 def run_text(run, info):
     t = Text()
     t.append(f"{run.name}\n", style=HEAD)
-    spec = run.spec() if isinstance(run.spec(), dict) else {}
+    spec = run.spec() or {}
     stage, device = info.get(run.id, (None, None))
     _rows(t, [("Run id", run.id), ("Type", KIND[run.kind]), ("State", state_text(state_word(run))),
               ("Started", fmt.stamp(run.started, long=True)),
@@ -231,6 +230,8 @@ def group_text(node, snapshot, root):
     elif node.key == ("group", "models"):
         n = sum(len(d.children) for d in node.children)
         _rows(t, [("Trees", n), ("Datasets", len(node.children)), ("Runs", len(snapshot.runs))])
+        if snapshot.problem:
+            t.append(f"\n{snapshot.problem}\n", style="yellow")
         if not snapshot.scanned:
             t.append("\nScanning outputs/runs/ …\n")
         elif not snapshot.found:

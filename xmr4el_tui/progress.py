@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
-from xmr4el_tui.fmt import count
-from xmr4el_tui.runs import state_word
+from xmr4el_tui.fmt import count, metric
+from xmr4el_tui.runs import parse_time, state_word
 
 TRAIN_STAGES = ("load", "encode", "labels", "hierarchy", "save")
 EVAL_STAGES = ("load",)
@@ -26,12 +26,12 @@ class Stage:
 
 def read_events(path, offset=0):
     """Events appended after byte `offset` -> (events, new offset). A torn last line stays unread until complete;
-    a malformed complete line is skipped. Missing file -> ([], offset)."""
+    a malformed complete line is skipped. Missing or unreadable file -> ([], offset)."""
     try:
         with open(path, "rb") as f:
             f.seek(offset)
             data = f.read()
-    except FileNotFoundError:
+    except OSError:
         return [], offset
     end = data.rfind(b"\n") + 1
     events = []
@@ -46,10 +46,7 @@ def read_events(path, offset=0):
 
 
 def event_time(event):
-    try:
-        return datetime.fromisoformat(event["t"])
-    except (KeyError, TypeError, ValueError):
-        return None
+    return parse_time(event.get("t"))
 
 
 def _seconds(a, b):
@@ -81,7 +78,7 @@ def stages(events, kind, splits, recorded):
             continue
         key = f"eval:{ev.get('split')}" if stage == "eval" else stage
         part = ev.get("part")
-        if stage == "encode" and part:
+        if stage == "encode" and isinstance(part, str) and part:
             if part not in parts:
                 parts.append(part)
             if phase == "start":
@@ -100,7 +97,7 @@ def stages(events, kind, splits, recorded):
         elif phase == "complete":
             end[key] = t
             if "acc@1" in ev:
-                detail[key] = f"acc@1 {ev['acc@1']:.4f}"
+                detail[key] = f"acc@1 {metric(ev['acc@1'])}"
             elif _detail(key, ev):
                 detail[key] = _detail(key, ev)
     if layer:

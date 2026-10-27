@@ -57,3 +57,18 @@ def make_run(root, name, *, stamp="2026-10-20_13-36-20", kind="train", status="c
         (run / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
     (run / "run.log").write_text("2026-10-20 13:36:21 [INFO] xmr4el.run_experiment: Run started\n")
     return run
+
+
+def patch_json(path, **fields):
+    path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
+
+
+def bad_fields_run(root):
+    """A train run whose JSON files parse but hold fields of the wrong type; one time has an offset."""
+    path = make_run(root, "bad", splits=("dev",), tree_id=None)
+    patch_json(path / "status.json", status=[], started="2026-10-20T13:36:20+05:00", finished=7, error={"x": 1})
+    patch_json(path / "spec.json", name=3, model_config=[], evals=[{"split": "dev", "test_path": 5}])
+    patch_json(path / "metrics_dev.json", **{"acc@1": "0.9", "search": [], "strings": [1], "rows": "7", "labels": []})
+    patch_json(path / "provenance.json", packages=[], inputs=[], torch_device=1)
+    patch_json(path / "git.json", commit=["c"])
+    return path
