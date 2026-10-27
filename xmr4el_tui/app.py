@@ -1,7 +1,4 @@
 """Textual app: rescans outputs/runs every 5 s in a thread and tells the screens (tui.md §5, §7)."""
-import json
-import os
-import socket
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -9,6 +6,7 @@ from pathlib import Path
 from textual import work
 from textual.app import App
 from textual.binding import Binding
+from textual.theme import Theme
 
 from xmr4el_tui import procinfo, process, runs
 from xmr4el_tui.dashboard import DashboardScreen, RunsChanged
@@ -17,22 +15,30 @@ from xmr4el_tui.progress import current_stage
 RESCAN_SECONDS = 5
 QUIT_SECONDS = 3  # second ctrl+q within this window quits
 
-
-def settings_path():
-    """Per-user TUI settings (theme), outside the repository."""
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "xmr4el" / "tui.json"
+# The one style (no theme picker). Screens use only theme variables in app.tcss, so another Theme can be registered
+# later without touching them. Status colours stay semantic (dashboard.STATE_STYLE).
+THEME = Theme(
+    name="xmr4el", dark=True, primary="#2CF5C5", accent="#2CF5C5", foreground="#F0F4F8", background="#101418",
+    surface="#1B2229", panel="#1B2229",
+    variables={"foreground-muted": "#A5B4C3", "border": "#2CF5C5", "border-blurred": "#3A4754",
+               "block-cursor-background": "#2CF5C5", "block-cursor-foreground": "#101418",
+               "block-cursor-text-style": "bold", "block-cursor-blurred-background": "#2B5C55",
+               "block-cursor-blurred-foreground": "#F0F4F8", "block-cursor-blurred-text-style": "none",
+               "block-hover-background": "#F0F4F8 8%", "footer-key-foreground": "#2CF5C5",
+               "footer-description-foreground": "#A5B4C3"})
 
 
 class XMR4ELApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "XMR4EL"
-    BINDINGS = [Binding("question_mark", "help", "help"), Binding("f1", "help", "help", show=False),
+    BINDINGS = [Binding("question_mark", "help", "keys"), Binding("f1", "help", "keys", show=False),
+                Binding("n", "new_experiment", "new"),
+                Binding("ctrl+c", "quit", "quit", show=False, priority=True),
                 Binding("escape", "close_help", "close help", show=False, priority=True)]
 
     def __init__(self, root: Path):
         super().__init__()
         self.root = root
-        self.host = socket.gethostname()
         self.quit_armed = 0.0
         self.cache = {}  # only touched by the (exclusive) scan worker after the first scan
         self.launched = []  # runs this TUI started, kept only so poll() reaps them
@@ -52,13 +58,8 @@ class XMR4ELApp(App):
         return found, True, runs.trees(self.root, found), active
 
     def on_mount(self):
-        try:
-            theme = json.loads(settings_path().read_text()).get("theme")
-        except (OSError, ValueError, AttributeError):
-            theme = None
-        if theme in self.available_themes:
-            self.theme = theme
-        self.theme_changed_signal.subscribe(self, self.save_theme)
+        self.register_theme(THEME)
+        self.theme = THEME.name
         self.push_screen(DashboardScreen())
         self.set_interval(RESCAN_SECONDS, self.rescan)
 
@@ -77,21 +78,20 @@ class XMR4ELApp(App):
             screen.post_message(RunsChanged())
 
     async def action_quit(self):
-        """ctrl+q twice: the first press only warns."""
+        """ctrl+c (or ctrl+q) twice: the first press only warns."""
         now = time.monotonic()
         if now - self.quit_armed < QUIT_SECONDS:
             self.exit()
         else:
             self.quit_armed = now
-            self.notify("Press ctrl+q again to quit.", title="Quit?", severity="warning", timeout=QUIT_SECONDS)
+            self.notify("Press ctrl+c again to quit.", title="Quit?", severity="warning", timeout=QUIT_SECONDS)
 
-    def save_theme(self, theme):
-        path = settings_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({"theme": theme.name}) + "\n")
-        except OSError as exc:
-            self.notify(f"Theme not saved: {exc}", severity="warning")
+    def get_system_commands(self, screen):
+        """The palette without its theme picker: one style only."""
+        yield from (c for c in super().get_system_commands(screen) if c.title != "Theme")
+
+    def action_new_experiment(self):
+        self.notify("New Experiment: screen not built yet")
 
     def action_help(self):
         if self.screen.query("HelpPanel"):

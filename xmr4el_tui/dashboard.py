@@ -7,21 +7,24 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from rich.segment import Segment
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Static, Tree
+from textual.strip import Strip
+from textual.widgets import DataTable, Footer, OptionList, Static, Tree
+from textual.widgets.option_list import Option
 
 from xmr4el_tui import explorer, fmt, runs
 from xmr4el_tui.compare import RECALL
 from xmr4el_tui.progress import event_time, read_events
 from xmr4el_tui.runs import elapsed, heartbeat_age, state_word
 
-STATE_STYLE = {"RUNNING": "bold blue", "UNVERIFIED": "yellow", "LOST": "red", "COMPLETED": "green",
-               "FAILED": "red", "STOPPED": "yellow", "UNKNOWN": ""}
+STATE_STYLE = {"RUNNING": "bold #5CC8FF", "UNVERIFIED": "#F5C451", "LOST": "#FF6B6B", "COMPLETED": "#7BD88F",
+               "FAILED": "#FF6B6B", "STOPPED": "#F5C451", "UNKNOWN": ""}
 STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",
                "STOPPED": "STOP", "UNKNOWN": "?"}
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
@@ -32,26 +35,51 @@ class RunsChanged(Message):
     """The app rescanned outputs/runs."""
 
 
-ACTIVE_COLUMNS = (("run", "Run"), ("type", "Type"), ("state", "State"), ("elapsed", "Elapsed"), ("stage", "Stage"),
-                  ("model", "Model"), ("started", "Started"), ("device", "Device"), ("id", "Run id"))
+ACTIVE_COLUMNS = (("run", "Run"), ("type", "Type"), ("model", "Model"), ("state", "State"), ("elapsed", "Elapsed"),
+                  ("stage", "Stage"), ("started", "Started"), ("device", "Device"), ("id", "Run id"))
 KIND = {"train": "Training", "eval": "Evaluation", "unknown": "unknown"}
+TITLE = "XMR4EL"
+AREAS = ("Dashboard", "New Experiment", "Run Monitor", "Results")
+HEAD = "bold"  # a line wholly in this style is a Description heading: shown, not selectable
+EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN, EXPLORER_STEP = 0.22, 18, 0.5, 40, 2
+
+
+def explorer_width(want, total):
+    """Explorer cells on a `total`-cell screen: `want` (None: EXPLORER_SHARE of it), at least EXPLORER_MIN, at most
+    half the screen and never leaving the right panels under RIGHT_MIN (the minimum wins on tiny screens)."""
+    want = round(total * EXPLORER_SHARE) if want is None else want
+    return max(EXPLORER_MIN, min(want, int(total * EXPLORER_MAX_SHARE), total - RIGHT_MIN))
 
 
 class TopBar(Static):
-    """`XMR4EL  <place>` left, state · host right (§4)."""
+    """XMR4EL centred on the full width; the areas on the right, `area` highlighted, dropped when they would reach
+    the title. Shared by every screen."""
+    COMPONENT_CLASSES = {"topbar--title", "topbar--area", "topbar--current"}
 
-    def __init__(self, **kwargs):
+    def __init__(self, area, **kwargs):
         super().__init__("", **kwargs)
-        self.left, self.right = "", Text()
-
-    def set(self, left, right):
-        self.left, self.right = left, right if isinstance(right, Text) else Text(right)
-        self.refresh()
+        self.area = area
 
     def render(self):
-        left = Text(f"XMR4EL  {self.left}", style="bold")
-        gap = max(1, self.size.width - left.cell_len - self.right.cell_len)
-        return Text.assemble(left, " " * gap, self.right)
+        width, style = self.size.width, self.get_component_rich_style
+        # centred on the app, not the bar (the help panel narrows the bar)
+        start = max(0, min(width - len(TITLE), (self.app.size.width - len(TITLE)) // 2 - self.region.x))
+        nav = Text(" ").join(Text(f" {a} ", style=style("topbar--current" if a == self.area else "topbar--area"))
+                             for a in AREAS)
+        gap = width - start - len(TITLE) - nav.cell_len - 1
+        return Text.assemble(" " * start, (TITLE, style("topbar--title")), *((" " * gap, nav) if gap >= 2 else ()))
+
+
+class FullRow:
+    """Paints the cursor style over the whole row (guides, padding, every column), not only the label or cells."""
+    CURSOR = ""
+
+    def render_line(self, y):
+        strip = super().render_line(y)
+        if not self.cursor_at(y):
+            return strip
+        return Strip(Segment.apply_style(list(strip), post_style=self.get_component_rich_style(self.CURSOR)),
+                     strip.cell_length)
 
 
 def bold_heads(t, *heads):
@@ -168,7 +196,7 @@ def _provenance(t, run):
     git = run.git() if isinstance(run.git(), dict) else {}
     prov = run.provenance() if isinstance(run.provenance(), dict) else {}
     if git or prov:
-        t.append("\nProvenance\n", style="bold")
+        t.append("\nProvenance\n", style=HEAD)
         _rows(t, [("Git", f"{str(git.get('commit'))[:12]} · {'dirty' if git.get('dirty') else 'clean'}"
                    if git.get("commit") else None),
                   ("Python", prov.get("python")), ("Device", prov.get("torch_device")),
@@ -179,7 +207,7 @@ def _provenance(t, run):
 def tree_text(node, root):
     tr, t = node.ref, Text()
     trained = tr.trained_by
-    t.append(f"{node.label}\n", style="bold")
+    t.append(f"{node.label}\n", style=HEAD)
     dataset = explorer.dataset_of(tr)
     place = Text("on this machine", style="green") if tr.here else Text(
         f"missing: {tr.path}/xmodel.pkl (moved, deleted or not synced)", style="yellow")
@@ -203,14 +231,14 @@ def tree_text(node, root):
         _rows(t, [("Training run", "none recorded (trained outside run_experiment, or its run is not synced)")])
     view, _ = runs.read_json(Path(root, tr.path, "xmodel.json"))
     if isinstance(view, dict):
-        t.append("\nModel (xmodel.json)\n", style="bold")
+        t.append("\nModel (xmodel.json)\n", style=HEAD)
         _rows(t, [("Features", view.get("features")), ("Transformer", _config(view.get("transformer_config"))),
                   ("Vectorizer", _config(view.get("vectorizer_config"))),
                   ("Reduction", _config(view.get("dimension_config"))), ("Depth", view.get("depth")),
                   ("Clustering", _config(view.get("clustering_config"))),
                   ("Matcher", _config(view.get("matcher_config"))), ("Min leaf", view.get("min_leaf_size")),
                   ("Search", _search(view.get("predict_config")))])
-    t.append("\nEvaluations\n", style="bold")
+    t.append("\nEvaluations\n", style=HEAD)
     if not node.children:
         t.append("none recorded\n", style="dim")
     for c in node.children:
@@ -225,7 +253,7 @@ def tree_text(node, root):
 
 def eval_text(node, tree_node):
     (run, e), t = node.ref, Text()
-    t.append(f"{e.split} · {run.name}\n", style="bold")
+    t.append(f"{e.split} · {run.name}\n", style=HEAD)
     metrics = run.path / f"metrics_{e.split}.json"
     _rows(t, [("Run", f"{run.id} · {KIND[run.kind]} run"), ("State", _state(node.state)),
               ("Tree", f"{tree_node.label} · {fmt.tree(tree_node.ref.id)}" if tree_node else None),
@@ -250,7 +278,7 @@ def eval_text(node, tree_node):
 
 def run_text(run, info):
     t = Text()
-    t.append(f"{run.name}\n", style="bold")
+    t.append(f"{run.name}\n", style=HEAD)
     spec = run.spec() if isinstance(run.spec(), dict) else {}
     stage, device = info.get(run.id, (None, None))
     _rows(t, [("Run id", run.id), ("Type", KIND[run.kind]), ("State", _state(state_word(run))),
@@ -271,7 +299,8 @@ def run_text(run, info):
 
 
 def group_text(node, app):
-    t = Text(f"{node.label}\n", style="bold")
+    t = Text()
+    t.append(f"{node.label}\n", style=HEAD)
     if node.kind == "dataset":
         _rows(t, [("Path", node.key[1] or "no training file recorded for these trees"),
                   ("Trees", len(node.children))])
@@ -288,9 +317,12 @@ def group_text(node, app):
     return t
 
 
-class Explorer(Tree):
+class Explorer(FullRow, Tree):
     """Keyboard tree of explorer.build() nodes; node data = node key. Expanded keys and the cursor survive
-    rebuilds; a cursor whose item vanished lands on its nearest surviving ancestor."""
+    rebuilds; a cursor whose item vanished lands on its nearest surviving ancestor. Dragging its right border
+    resizes it."""
+    CURSOR = "tree--cursor"
+    dragging, lit = False, None  # class defaults: Tree.__init__ already runs the cursor watcher
     BINDINGS = [Binding("tab", "cursor_down", "next", show=False),
                 Binding("shift+tab", "cursor_up", "previous", show=False),
                 Binding("left", "collapse_or_parent", "collapse", show=False),
@@ -301,6 +333,41 @@ class Explorer(Tree):
         super().__init__("outputs", **kwargs)
         self.show_root, self.auto_expand = False, False
         self.expanded, self.seen, self.sig, self.index = set(), set(), None, {}
+
+    def cursor_at(self, y):
+        return self.cursor_line >= 0 and y + self.scroll_offset.y == self.cursor_line
+
+    def watch_cursor_line(self, previous_line, line):
+        super().watch_cursor_line(previous_line, line)
+        self.light()
+
+    def light(self):
+        """Accent guides on the cursor's branch: Tree lights only the cursor node's own children, so on a leaf (or a
+        collapsed node) its parent's branch is lit too, keeping the line from the tree / dataset down to it."""
+        if self.lit is not None and self.lit is not self.cursor_node:
+            self.lit._selected = False
+        node = self.cursor_node
+        self.lit = node.parent if node is not None and not node.is_expanded and node.parent is not self.root \
+            else None
+        if self.lit is not None:
+            self.lit._selected = True
+        self._line_cache.clear()
+        self.refresh()
+
+    def on_mouse_down(self, event):
+        if event.x >= self.outer_size.width - 1:
+            self.dragging = True
+            self.capture_mouse()
+            event.stop()
+
+    def on_mouse_move(self, event):
+        if self.dragging:
+            self.screen.set_explorer_width(event.screen_x - self.region.x + 1)
+
+    def on_mouse_up(self, _):
+        if self.dragging:
+            self.dragging = False
+            self.release_mouse()
 
     def selected_key(self):
         return self.cursor_node.data if self.cursor_node else None
@@ -338,9 +405,11 @@ class Explorer(Tree):
 
     def on_tree_node_expanded(self, event):
         self.expanded.add(event.node.data)
+        self.light()
 
     def on_tree_node_collapsed(self, event):
         self.expanded.discard(event.node.data)
+        self.light()
 
     def action_collapse_or_parent(self):
         node = self.cursor_node
@@ -355,38 +424,115 @@ class Explorer(Tree):
             node.expand()
 
 
-class Description(VerticalScroll):
-    """Read-only text of the selected item; left / right leave for Results / Run monitor."""
+def selectable(line):
+    """A Description line the cursor stops on: not blank, not a heading."""
+    head = str(line.style) == HEAD or any(str(sp.style) == HEAD and sp.start == 0 and sp.end >= len(line.plain)
+                                          for sp in line.spans)
+    return bool(line.plain.strip()) and not head
+
+
+class Description(FullRow, OptionList):
+    """Read-only lines of the selected item, one option each: up / down (or a click) select a row, headings and
+    blank lines are skipped, nothing is editable. left / right leave for Results / Run monitor. The selected row is
+    one colour (a green COMPLETED would vanish on the accent)."""
+    CURSOR = "option-list--option-highlighted"
     BINDINGS = [Binding("left", "screen.results", "results"), Binding("right", "screen.monitor", "monitor"),
                 Binding("escape", "screen.focus_explorer", "explorer")]
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.subject, self.shown, self.keys = None, [], []
+
+    def show(self, subject, text):
+        """Show `text` for `subject` (an explorer key). Unchanged content is not redrawn; a refresh of the same
+        subject keeps the row with the same field label selected."""
+        lines = text.copy()
+        lines.rstrip()
+        lines = lines.split("\n", allow_blank=True)
+        shown = [(line.plain, tuple(line.spans), str(line.style)) for line in lines]
+        if subject == self.subject and shown == self.shown:
+            return
+        old = self.keys[self.highlighted] if subject == self.subject and self.highlighted is not None else None
+        self.clear_options()
+        self.add_options([Option(line, disabled=not selectable(line)) for line in lines])
+        self.subject, self.shown, self.keys = subject, shown, [line.plain[:14].strip() for line in lines]
+        rows = [i for i, line in enumerate(lines) if selectable(line)]
+        self.highlighted = next((i for i in rows if self.keys[i] == old), rows[0] if rows else None)
+
+    def cursor_at(self, y):
+        try:
+            return self.highlighted is not None and self._lines[self.scroll_offset.y + y][0] == self.highlighted
+        except IndexError:
+            return False
+
+    def text(self):
+        return "\n".join(plain for plain, _, _ in self.shown)
+
+
+class ActiveRuns(FullRow, DataTable):
+    """Active training and evaluation runs; enter opens the Run monitor."""
+    CURSOR = "datatable--cursor"
+    BINDINGS = [Binding("enter", "select_cursor", "monitor")]
+
+    def cursor_at(self, y):
+        return bool(self.row_count) and y >= 1 and y - 1 + self.scroll_offset.y == self.cursor_row
+
+
+DESCRIPTION_TITLE = {"tree": "Trained tree", "eval": "Evaluation", "dataset": "Dataset", "group": "Group"}
+
 
 class DashboardScreen(Screen):
-    BINDINGS = [Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", key_display="ctrl+tab/]"),
+    """Explorer | Description over Active runs. Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [)
+    cycle panels, ctrl+b hides / shows the explorer, < / > resize it, ctrl+r rescans."""
+    BINDINGS = [Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+                Binding("ctrl+b", "toggle_explorer", "hide / show explorer", show=False),
+                Binding("less_than_sign", f"resize_explorer({-EXPLORER_STEP})", "narrower explorer", show=False),
+                Binding("greater_than_sign", f"resize_explorer({EXPLORER_STEP})", "wider explorer", show=False),
                 Binding("ctrl+r", "rescan", "rescan", show=False)]
 
     def compose(self) -> ComposeResult:
-        yield TopBar(id="top")
+        yield TopBar("Dashboard", id="top")
         with Horizontal(id="dash"):
             yield Explorer(id="explorer")
             with Vertical(id="dash-right"):
-                with Description(id="description"):
-                    yield Static(id="description-text")
-                yield DataTable(id="active-runs", cursor_type="row")
+                yield Description(id="description")
+                yield ActiveRuns(id="active-runs", cursor_type="row")
         yield Footer(show_command_palette=False)
 
     def on_mount(self):
-        for wid, title in (("explorer", "Models and evaluations"), ("description", "Description"),
+        for wid, title in (("explorer", "Explorer"), ("description", "Description"),
                            ("active-runs", "Active runs")):
             self.query_one(f"#{wid}").border_title = title
-        table = self.query_one("#active-runs", DataTable)
+        table = self.query_one(ActiveRuns)
         for key, label in ACTIVE_COLUMNS:
             table.add_column(label, key=key)
-        self.active_ids = []
+        self.active_ids, self.explorer_want = [], None  # None: EXPLORER_SHARE of the width
+        self.set_explorer_width(None)
         self.refresh_all()
         self.query_one(Explorer).focus()
         self.set_interval(1, self.tick)
+
+    # --- explorer size ----------------------------------------------------------------------------------------
+    def set_explorer_width(self, want):
+        """Keep `want` cells (clamped) for this session; terminal resizes re-clamp it."""
+        self.explorer_want = None if want is None else explorer_width(want, self.size.width)
+        self.query_one(Explorer).styles.width = explorer_width(self.explorer_want, self.size.width)
+
+    def on_resize(self, _):
+        self.set_explorer_width(self.explorer_want)
+
+    def action_resize_explorer(self, step):
+        self.query_one(Explorer).display = True
+        self.set_explorer_width(explorer_width(self.explorer_want, self.size.width) + step)
+
+    def action_toggle_explorer(self):
+        tree = self.query_one(Explorer)
+        tree.display = not tree.display
+        if tree.display:
+            tree.focus()
+        elif self.focused is None or self.focused is tree:
+            self.query_one(Description).focus()
 
     def on_runs_changed(self, _):
         self.refresh_all()
@@ -404,7 +550,7 @@ class DashboardScreen(Screen):
         return [r for r in self.app.runs if state_word(r) in explorer.ACTIVE]
 
     def fill_active(self):
-        table = self.query_one("#active-runs", DataTable)
+        table = self.query_one(ActiveRuns)
         keep = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value if table.row_count else None
         active = self.active_runs()
         table.clear()
@@ -412,16 +558,15 @@ class DashboardScreen(Screen):
             stage, device = self.app.active.get(r.id, (None, None))
             model = (r.train_path and str(Path(r.train_path).parent).removeprefix("datasets/")) if r.kind == "train" \
                 else f"tree {fmt.tree(r.tree_id)}"
-            table.add_row(r.name, KIND[r.kind], _state(state_word(r)), fmt.duration(elapsed(r, datetime.now())),
-                          stage or fmt.DASH, model or fmt.DASH, fmt.stamp(r.started), device or fmt.DASH, r.id,
-                          key=r.id)
+            table.add_row(r.name, KIND[r.kind], model or fmt.DASH, _state(state_word(r)),
+                          fmt.duration(elapsed(r, datetime.now())), stage or fmt.DASH, fmt.stamp(r.started),
+                          device or fmt.DASH, r.id, key=r.id)
         self.active_ids = [r.id for r in active]
         if keep in self.active_ids:
             table.move_cursor(row=self.active_ids.index(keep))
-        self.query_one(TopBar).set("Dashboard", f"{len(self.app.trees)} trees · {len(active)} active · {self.app.host}")
 
     def tick(self):
-        table = self.query_one("#active-runs", DataTable)
+        table = self.query_one(ActiveRuns)
         for r in self.app.runs:
             if r.id in self.active_ids:
                 table.update_cell(r.id, "elapsed", fmt.duration(elapsed(r, datetime.now())))
@@ -434,17 +579,20 @@ class DashboardScreen(Screen):
 
     def show(self):
         node, parent = self.selected()
-        text = self.query_one("#description-text", Static)
+        desc = self.query_one(Description)
         if node is None:
-            text.update("Nothing selected.")
+            text = Text("Nothing selected.")
         elif node.kind == "tree":
-            text.update(tree_text(node, self.app.root))
+            text = tree_text(node, self.app.root)
         elif node.kind == "eval":
-            text.update(eval_text(node, parent))
+            text = eval_text(node, parent)
         elif node.kind == "run":
-            text.update(run_text(node.ref, self.app.active))
+            text = run_text(node.ref, self.app.active)
         else:
-            text.update(group_text(node, self.app))
+            text = group_text(node, self.app)
+        kind = f"{KIND[node.ref.kind]} run" if node and node.kind == "run" else DESCRIPTION_TITLE.get(node and node.kind)
+        desc.border_title = f"Description — {kind}" if kind else "Description"
+        desc.show(node and node.key, text)
 
     def on_tree_node_highlighted(self, _):
         self.show()
@@ -458,10 +606,13 @@ class DashboardScreen(Screen):
         self.query_one(Description).focus()
 
     def action_focus_explorer(self):
-        self.query_one(Explorer).focus()
+        tree = self.query_one(Explorer)
+        tree.display = True
+        tree.focus()
 
     def action_panel(self, step):
-        panels = [self.query_one(Explorer), self.query_one(Description), self.query_one("#active-runs")]
+        panels = [p for p in (self.query_one(Explorer), self.query_one(Description), self.query_one(ActiveRuns))
+                  if p.display]
         i = panels.index(self.focused) if self.focused in panels else -step
         panels[(i + step) % len(panels)].focus()
 

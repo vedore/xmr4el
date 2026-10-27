@@ -1,8 +1,29 @@
+/* One style for every screen; only theme variables (app.THEME), so a later theme needs no CSS change. */
+
+Screen {
+    background: $background;
+}
+
 TopBar {
     dock: top;
     height: 1;
-    padding: 0 1;
-    background: $panel;
+    background: $surface;
+    color: $foreground-muted;
+}
+
+TopBar > .topbar--title {
+    color: $foreground;
+    text-style: bold;
+}
+
+TopBar > .topbar--area {
+    color: $foreground-muted;
+}
+
+TopBar > .topbar--current {
+    color: $block-cursor-foreground;
+    background: $accent;
+    text-style: bold;
 }
 
 * {
@@ -10,9 +31,9 @@ TopBar {
     scrollbar-color: $foreground 25%;
     scrollbar-color-hover: $foreground 40%;
     scrollbar-color-active: $foreground 50%;
-    scrollbar-background: $background;
-    scrollbar-background-hover: $background;
-    scrollbar-background-active: $background;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
 }
 
 HelpPanel {
@@ -25,10 +46,8 @@ HelpPanel {
     height: 1fr;
 }
 
+/* width is set by DashboardScreen.set_explorer_width (resizable, clamped) */
 #explorer {
-    width: 40%;
-    min-width: 30;
-    max-width: 60;
     height: 1fr;
 }
 
@@ -38,19 +57,26 @@ HelpPanel {
 
 #description {
     height: 2fr;
-    padding: 0 1;
 }
 
 #active-runs {
     height: 1fr;
 }
 
+/* Panels: muted border; the focused one gets the accent border and title. The cursor row of a blurred panel
+   keeps a dim accent background (selected, not focused). */
 #explorer, #description, #active-runs {
-    border: round $foreground 30%;
-    border-title-color: $foreground 60%;
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
 }
 
 #explorer:focus, #description:focus, #active-runs:focus {
-    border: round $accent;
+    border: round $border;
     border-title-color: $accent;
+    border-title-style: bold;
+}
+
+Description > .option-list--option-disabled {
+    color: $foreground;
 }

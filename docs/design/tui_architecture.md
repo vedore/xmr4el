@@ -31,7 +31,8 @@ xmr4el_tui/
   process.py       spawn, -check, derived state, stop            (increment 2)
   explorer.py      Dashboard explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels
   app.py           App: scan timer (runs, trees, active-run stage/device), global keys, theme
-  dashboard.py     DashboardScreen (only screen): Explorer tree, Description, Active runs; read-only; TopBar,
+  dashboard.py     DashboardScreen (only screen): Explorer tree (resizable), Description (OptionList rows), Active
+                   runs; FullRow cursor; read-only; TopBar (shared header),
                    banner_text, metrics_text
   app.tcss
 tests/tui/

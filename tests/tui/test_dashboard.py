@@ -3,6 +3,7 @@ restart, that nothing under the root is written; app keys (help, rescan, quit, t
 import asyncio
 import json
 import shutil
+import socket
 from pathlib import Path
 
 import pytest
@@ -10,10 +11,11 @@ import pytest
 pytest.importorskip("textual")
 
 from fake_runs import make_run  # noqa: E402
-from textual.widgets import DataTable, Static  # noqa: E402
+from textual.widgets import DataTable  # noqa: E402
 from xmr4el_tui import explorer, runs  # noqa: E402
-from xmr4el_tui.app import XMR4ELApp, settings_path  # noqa: E402
-from xmr4el_tui.dashboard import DashboardScreen, Description, Explorer  # noqa: E402
+from xmr4el_tui.app import XMR4ELApp  # noqa: E402
+from xmr4el_tui.dashboard import (EXPLORER_MIN, ActiveRuns, DashboardScreen, Description, Explorer,  # noqa: E402
+                                  TopBar, explorer_width)
 
 TREE = "8528b624aaaa"
 
@@ -142,7 +144,7 @@ def test_keyboard(tmp_path):
         assert explorer_key(app) == ("eval", "2026-10-20_13-36-20_alpha", "dev")
         await pilot.press("enter")
         assert isinstance(app.focused, Description)
-        assert text(screen.query_one("#description-text", Static)).startswith("dev · alpha\n")
+        assert screen.query_one(Description).text().startswith("dev · alpha\n")
         await pilot.press("ctrl+tab")
         assert app.focused.id == "active-runs"
         await pilot.press("ctrl+tab")
@@ -216,7 +218,7 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
         shutil.rmtree(root / f"outputs/saved_trees/xmodel_{TREE}")
         await rescan()
         assert tree.index[("tree", TREE)][0].note == "missing"
-        assert "missing: outputs/saved_trees" in text(screen.query_one("#description-text", Static))
+        assert "missing: outputs/saved_trees" in screen.query_one(Description).text()
         await pilot.press("enter", "left", "right", "escape")  # still navigable after refresh
         assert app.screen is screen and isinstance(app.focused, Explorer)
         assert [o[0] for o in opened] == ["results", "monitor"]
@@ -230,16 +232,14 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
     assert all(set(p.relative_to(root).parts) & set(made) for p in set(after) - set(before)), "no new files"
 
 
-def test_empty_workspace_help_rescan_quit_theme(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-
+def test_empty_workspace_help_rescan_quit_style(tmp_path):
     async def missing(app, pilot):
-        assert "outputs/runs/ not found" in text(app.screen.query_one("#description-text", Static))
+        assert "outputs/runs/ not found" in app.screen.query_one(Description).text()
     run_app(tmp_path / "nowhere", missing)
     (tmp_path / "empty/outputs/runs").mkdir(parents=True)
 
     async def empty(app, pilot):
-        assert "No saved trees yet" in text(app.screen.query_one("#description-text", Static))
+        assert "No saved trees yet" in app.screen.query_one(Description).text()
         await pilot.press("question_mark")
         assert app.screen.query("HelpPanel")
         await pilot.press("escape")  # closes help
@@ -248,14 +248,131 @@ def test_empty_workspace_help_rescan_quit_theme(tmp_path, monkeypatch):
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert any("Rescanned" in str(n.message) for n in app._notifications)
-        await pilot.press("ctrl+q")  # first press warns only
+        await pilot.press("ctrl+c")  # first press warns only
         await pilot.pause()
         assert app.is_running and any("again to quit" in str(n.message) for n in app._notifications)
-        app.theme = "nord"
-        await pilot.pause()
-    run_app(tmp_path / "empty", empty)
-    assert '"nord"' in settings_path().read_text()
+        assert app.theme == "xmr4el" and "Theme" not in [c.title for c in app.get_system_commands(app.screen)]
+    run_app(tmp_path / "empty", empty, size=(60, 20))
 
-    async def restored(app, pilot):
-        assert app.theme == "nord"
-    run_app(tmp_path / "empty", restored)
+
+def test_header_centred_without_system_info(tmp_path):
+    for size in ((120, 36), (81, 24), (60, 20)):
+        async def check(app, pilot, w=size[0]):
+            line = app.screen.query_one(TopBar).render().plain
+            assert line.index("XMR4EL") == (w - len("XMR4EL")) // 2, "centred on the whole width"
+            assert ("Results" in line) == (w >= 100), "areas only where they do not reach the title"
+            assert socket.gethostname() not in line and "trees" not in line and "active" not in line
+            if w < 100:  # the 40-cell help panel covers the centre
+                return
+            await pilot.press("question_mark")  # help docks right, the title stays centred on the app
+            await pilot.pause()
+            assert app.screen.query_one(TopBar).render().plain.index("XMR4EL") == (w - len("XMR4EL")) // 2
+        run_app(fake_root(tmp_path / str(size[0])), check, size=size)
+
+
+def bg(strip):
+    """Background of a rendered line's last cell (the far right of the row)."""
+    return list(strip)[-1].style.bgcolor.triplet.hex
+
+
+def test_explorer_resize_collapse_and_narrow(tmp_path):
+    root = fake_root(tmp_path)
+
+    async def check(app, pilot):
+        screen, tree = app.screen, app.screen.query_one(Explorer)
+        assert tree.outer_size.width == 26, "22% of 120"
+        await pilot.press("greater_than_sign", "greater_than_sign")
+        assert tree.outer_size.width == 30
+        await pilot.press(*["less_than_sign"] * 20)
+        assert tree.outer_size.width == EXPLORER_MIN
+        await pilot.press(*["greater_than_sign"] * 40)
+        assert tree.outer_size.width == 60, "at most half the screen"
+        await pilot.mouse_down(Explorer, offset=(59, 5))  # drag the right border
+        await pilot.hover(None, offset=(39, 5))
+        await pilot.mouse_up(None, offset=(39, 5))
+        assert tree.outer_size.width == 40 and isinstance(app.focused, Explorer)
+        await pilot.press("ctrl+b")  # collapse: focus moves on, panels cycle without it
+        assert not tree.display and isinstance(app.focused, Description)
+        await pilot.press("ctrl+tab", "ctrl+tab")
+        assert isinstance(app.focused, Description)
+        await pilot.press("escape")  # esc restores it, same width
+        assert tree.display and isinstance(app.focused, Explorer) and tree.outer_size.width == 40
+        await pilot.resize_terminal(60, 20)
+        await pilot.pause()
+        assert tree.outer_size.width == 20 and screen.query_one(Description).outer_size.width >= 40
+        await pilot.press("down", "enter", "down")  # still navigable when narrow
+        assert isinstance(app.focused, Description)
+    run_app(root, check)
+    assert [explorer_width(None, w) for w in (40, 60, 80, 120, 200)] == [18, 18, 18, 26, 44]
+    assert [explorer_width(999, w) for w in (40, 60, 80, 120)] == [18, 20, 40, 60]
+
+
+async def goto_row(pilot, desc, key):
+    for _ in range(50):
+        if desc.keys[desc.highlighted] == key:
+            return
+        await pilot.press("down")
+    raise AssertionError(f"{key} not reached")
+
+
+def colours(strip):
+    return {seg.style.color.triplet.hex for seg in strip if seg.text.strip() and seg.style.color}
+
+
+def test_branch_guides_stay_lit(tmp_path):
+    async def check(app, pilot):
+        tree = app.screen.query_one(Explorer)
+        await goto(pilot, app, ("tree", TREE))
+        await pilot.press("right")
+        sibling = tree.cursor_line + 2 - int(tree.scroll_offset.y)  # second evaluation of the tree
+        assert "#2cf5c5" in colours(tree.render_line(sibling)), "on the tree: its evaluations' guides lit"
+        await pilot.press("down")  # on the first evaluation (a leaf): the branch stays lit
+        assert "#2cf5c5" in colours(tree.render_line(sibling))
+        await pilot.press("left")  # back on the tree (expanded): its own children lit
+        assert explorer_key(app) == ("tree", TREE) and tree.lit is None
+        await pilot.press("left")  # collapsed: its dataset's branch is lit
+        assert tree.lit is tree.cursor_node.parent and tree.cursor_node.parent._selected
+    run_app(fake_root(tmp_path), check)
+
+
+def test_full_row_selection_and_description_rows(tmp_path):
+    root = fake_root(tmp_path)
+
+    async def check(app, pilot):
+        screen, tree = app.screen, app.screen.query_one(Explorer)
+        desc = screen.query_one(Description)
+        await goto(pilot, app, ("tree", TREE))
+        focused = bg(tree.render_line(tree.cursor_line - int(tree.scroll_offset.y)))
+        assert focused == "#2cf5c5", "focused cursor: accent across the whole row"
+        assert bg(tree.render_line(tree.cursor_line + 1)) != focused
+        await pilot.press("enter")
+        assert isinstance(app.focused, Description) and desc.border_title == "Description — Trained tree"
+        rows = [i for i in range(desc.option_count) if not desc.get_option_at_index(i).disabled]
+        assert desc.highlighted == rows[0] and desc.keys[rows[0]] == "Tree id"
+        blurred = bg(tree.render_line(tree.cursor_line - int(tree.scroll_offset.y)))
+        assert blurred not in (focused, bg(tree.render_line(tree.cursor_line + 1))), "selected, not focused"
+        assert "Evaluations" in desc.keys and desc.get_option_at_index(desc.keys.index("Evaluations")).disabled
+        await pilot.press("down")
+        assert desc.keys[desc.highlighted] == "Dataset"
+        await goto_row(pilot, desc, "Run state")  # COMPLETED is green elsewhere; on the cursor row one colour
+        line = desc.highlighted - int(desc.scroll_offset.y)
+        assert {seg.style.color.triplet.hex for seg in desc.render_line(line) if seg.text.strip()} == {"#101418"}
+        await pilot.press("home", "down")
+        seen = [desc.highlighted]
+        for _ in rows[2:]:
+            await pilot.press("down")
+            seen.append(desc.highlighted)
+        assert seen == rows[1:], "every stop is a row, never a heading or a blank line"
+        await pilot.press("up", "up")
+        keep, text = desc.keys[desc.highlighted], desc.text()
+        await pilot.press("x", "backspace", "delete", "space", "enter")  # nothing to edit
+        assert desc.text() == text and screen.query_one(Explorer).selected_key() == ("tree", TREE)
+        app.apply_scan(app.scan())  # refresh of the same subject keeps the row
+        await pilot.pause()
+        assert desc.keys[desc.highlighted] == keep
+        await pilot.press("ctrl+tab")  # Active runs: whole row, every column and the padding after them
+        table = screen.query_one(ActiveRuns)
+        assert table.row_count == 1 and bg(table.render_line(1)) == focused
+        await pilot.press("ctrl+shift+tab")  # back to Description: its selection survived
+        assert isinstance(app.focused, Description) and desc.keys[desc.highlighted] == keep
+    run_app(root, check)

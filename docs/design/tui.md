@@ -36,8 +36,7 @@ docker run -d --name xmr4el-tui --init --gpus all --hostname "$(hostname)-xmr4el
 ssh -t server docker exec -it -e TERM -e COLORTERM xmr4el-tui python3 -m xmr4el_tui
 ```
 
-- `--hostname` gives the container a readable name; the TUI shows it in the header
-  and records it with each run (§9). Without it the name is the container ID.
+- `--hostname` gives the container a readable name; each run records it (§9). Without it the name is the container ID.
 - `-e TERM -e COLORTERM` passes the client terminal's color support into the
   container; otherwise Textual sees a plain `xterm` and drops to 16 colors.
 - `--init` reaps finished children, so runs started by an exited TUI leave no zombies.
@@ -84,10 +83,11 @@ and a valid input specification so a run can be repeated outside the TUI (§10).
 groups. The Runs and Trees details block is a 40-column panel on the right (under the table below
 100 columns); header and footer span the full width. Help (`?`) replaces the panel and `esc`
 closes it. No boxes around sections. Scrollbars are one cell wide and muted.
-The theme chosen in the command palette is kept in `~/.config/xmr4el/tui.json`.
-`ctrl+q` quits only when pressed twice within 3 s; `ctrl+r` shows a toast with the run count.
+`ctrl+c` / `ctrl+q` quit only when pressed twice within 3 s; `ctrl+r` shows a toast with the run count.
 
-**Header.** `XMR4EL  <place>` on the left; state, elapsed time and host on the right.
+**Header (2026-10-27).** `XMR4EL` centred on the app width; the areas Dashboard · New Experiment · Run Monitor ·
+Results on the right with the current one highlighted, dropped when they would reach the title. No host, counts or
+other summaries (they live in the panels).
 The right side is the same on every screen, so state is always in one place.
 
 **Footer.** The main context keys only, then `? help` always last; it must fit 80 columns.
@@ -135,8 +135,14 @@ component. Lines in other formats are shown unchanged; `run.log` itself is not r
 **Stage markers.** Unicode: `✓` done, `▸` current, `·` pending, `✗` failed.
 ASCII (`NO_COLOR` or a non-UTF-8 locale): `ok`, `>>`, `..`, `xx`.
 
-**Themes.** Textual's `textual-dark` (default) and `textual-light` (command palette).
-Textual honours `NO_COLOR`; that is the monochrome mode. No custom 16-color theme.
+**Style (2026-10-27).** One high-contrast theme `xmr4el` (`app.THEME`: background `#101418`, surface `#1B2229`,
+text `#F0F4F8` / muted `#A5B4C3`, accent and cursor `#2CF5C5` with `#101418` text); no theme picker (the palette's
+Theme command is removed). CSS uses only theme variables, so a later theme is one more `Theme`. The cursor row is
+painted across the whole row (explorer guides, every table column, the padding after them); a blurred panel keeps
+a dim accent cursor (selected, not focused); the cursor row of Description is one colour (a green COMPLETED
+would vanish on the accent); explorer guides of the cursor's branch stay accent (on a leaf or a collapsed node,
+its parent's branch); the focused panel has the accent border and title. Status colours
+stay semantic (`dashboard.STATE_STYLE`). Textual honours `NO_COLOR`; that is the monochrome mode.
 No animation except the encoding progress bar.
 
 ## 5. Wireframes
@@ -525,7 +531,7 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Everywhere | `?` (`F1` inside text fields) | Help for this screen and the focused field. |
 | Everywhere | `ctrl+p` | Command palette (every action below is also a command). |
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
-| Everywhere | `ctrl+q` | Quit. Running children keep running (§2); nothing to confirm. |
+| Everywhere | `ctrl+c` (also `ctrl+q`) twice within 3 s | Quit; the first press only warns. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
 | Dashboard | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[` where the terminal sends ctrl+tab as tab) | Next / previous panel: Explorer, Description, Active runs. |
 | Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
@@ -533,6 +539,9 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Description | `left` / `right` / `esc` | Results on the item's tree (cursor on its run) / Run monitor of its run (tree: training run) / back to Explorer. Both screens not rebuilt yet: a notice names the target. |
 | Active runs | `up` `down`, `enter` | Move, open the run. |
 | Dashboard | `ctrl+r` | Rescan. |
+| Dashboard | `ctrl+b`, `<` / `>`, drag the explorer's right border | Hide / show the explorer; narrower / wider by 2 cells. Default 22 % of the width, at least 18 cells, at most half the screen and never leaving the right panels under 40 (the minimum wins on tiny screens); kept for the session, re-clamped on terminal resize. |
+| Description | `up` `down`, click | Select a row (read-only; headings and blank lines are skipped, the list wraps). A rescan of the same item keeps the row with the same field label. |
+| Everywhere | `n` | New Experiment (screen not built yet: a notice). |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |
 | Runs | `n` | New training run. |

@@ -11,7 +11,7 @@ from xmr4el_tui import fmt
 from xmr4el_tui.runs import state_word
 
 ACTIVE = ("RUNNING", "UNVERIFIED")  # recorded running and not proven gone
-UNKNOWN_DATASET = "Unknown dataset"
+UNKNOWN_DATASET = "Uncategorized"
 
 
 @dataclass(frozen=True)
