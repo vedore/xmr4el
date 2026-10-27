@@ -119,9 +119,8 @@ class EvalBlock(Vertical):
         yield from row("breakdown", Checkbox("mention strings vs training file", self.breakdown and self.can_breakdown,
                                              id=f"e{self.n}-breakdown", disabled=not self.can_breakdown,
                                              compact=True), "breakdown")
-        for k, v in self.search.items():
-            yield from row(k, Input("" if v is None else str(v), id=f"e{self.n}-{k}", compact=True), k,
-                           Static("", id=f"hint-e{self.n}-{k}", classes="hint"))
+        for k, v in self.search.items():  # the placeholder shows the value an empty field inherits
+            yield from row(k, Input("" if v is None else str(v), id=f"e{self.n}-{k}", compact=True), k)
 
     def heading(self):
         return f"Evaluation {self.split()}"
@@ -182,6 +181,10 @@ class SetupScreen(Screen):
         self.saved_tree = next((t for t in runs.trees(self.app.root, self.app.runs) if t.path == xmodel_path), None)
         self.name0 = spec.pop("name", None)
         self.config0, self.train0 = spec.pop("model_config", None), spec.pop("train_path", None)
+        if not loaded and self.config0 is None:  # a new draft starts from the newest training run's config
+            configs = runs.model_configs(self.app.root)
+            self.config0 = next((c for r in self.app.runs if r.kind == "train" and isinstance(rs := r.spec(), dict)
+                                 and (c := rs.get("model_config")) in configs), None)
         self.evals0 = spec.pop("evals", None) or [{}]
         self.extra = spec  # unknown keys: the runner rejects them
         root = self.app.root
@@ -217,7 +220,7 @@ class SetupScreen(Screen):
                 yield self.new_block(e if isinstance(e, dict) else {})
             yield Button("+ Add evaluation", id="add", compact=True)
             yield Static(id="check-line")
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def train_options(self, dataset):
         return [(Path(p).name, p) for p in runs.training_files(self.app.root, dataset)] if dataset else []
@@ -416,10 +419,8 @@ class SetupScreen(Screen):
         for block in self.query(EvalBlock):
             search = self.hints.get(block.split(), {})
             for k in SEARCH_TYPES:
-                typed = self.value(f"e{block.n}-{k}")
-                hint = "" if typed or k not in search else \
+                self.query_one(f"#e{block.n}-{k}", Input).placeholder = "" if k not in search else \
                     f"{label if isinstance(predict, dict) and k in predict else 'default'} {search[k]}"
-                self.query_one(f"#hint-e{block.n}-{k}", Static).update(hint)
 
     def update_notes(self):
         """Evaluation headings, tree facts."""
@@ -502,14 +503,14 @@ class SetupScreen(Screen):
 
 class ReviewScreen(Screen):
     """The exact validated snapshot (§5.7); Start passes it with its model-config hash / tree id."""
-    BINDINGS = [Binding("enter", "start", "start"), Binding("a", "save", "save spec as…"),
-                Binding("escape", "back", "back")]
+    BINDINGS = [Binding("enter", "start", "start"), Binding("j", "json", "json"),
+                Binding("a", "save", "save spec as…"), Binding("escape", "back", "back")]
 
     def __init__(self, spec, xmodel_path, result):
         super().__init__()
         self.spec, self.xmodel_path, self.result = spec, xmodel_path, result
         self.run_id = f"{datetime.now():%Y-%m-%d_%H-%M-%S}_{spec['name']}"
-        self.child, self.timer = None, None
+        self.child, self.timer, self.json = None, None, False
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
@@ -520,12 +521,13 @@ class ReviewScreen(Screen):
                 yield Button("Back", id="back", compact=True)
                 yield Button("Start run", id="start", variant="primary", compact=True)
             yield Input(placeholder="save the spec as (path); esc cancels", id="save")
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def on_mount(self):
         self.query_one("#save").display = False
         self.query_one(TopBar).set(f"Review  {self.spec['name']}", self.app.host)
         self.query_one("#start", Button).focus()
+        self.call_after_refresh(self.query_one(VerticalScroll).scroll_home, animate=False)  # summary first
 
     def body(self):
         splits = ", ".join(e["split"] for e in self.spec["evals"])
@@ -533,16 +535,22 @@ class ReviewScreen(Screen):
                  f"Evaluates tree {fmt.tree(self.result.tree_id)} ({self.xmodel_path}) on {splits}.\n")
         t.append("Run directory  ", style="bold")
         t.append(f"{RUNS_DIR / self.run_id} (new)\n\n")
-        t.append(json.dumps(self.spec, indent=2) + "\n\n")
-        for i, (split, s) in enumerate(self.result.search.items()):
-            t.append("Effective search  " if i == 0 else " " * 18, style="bold")
-            t.append(f"{split}: " + " · ".join(f"{k} {s[k]}" for k in SEARCH_TYPES if k in s) + "\n")
+        if self.json:
+            t.append(json.dumps(self.spec, indent=2) + "\n\n")
         if self.xmodel_path is None:
             t.append("Model config      ", style="bold")
-            t.append(f"sha256 {self.result.model_config_sha256[:8]}… (bound; full hash in Inputs after start)\n")
+            t.append(f"{self.spec['model_config']}\n" + " " * 18 +
+                     f"sha256 {self.result.model_config_sha256[:8]}… (bound; full hash in Inputs after start)\n")
+            t.append("Training file     ", style="bold")
+            t.append(f"{self.spec['train_path']}\n")
         else:
             t.append("Tree              ", style="bold")
             t.append(f"tree_id {self.result.tree_id} (bound)\n")
+        for e in self.spec["evals"]:
+            s = self.result.search.get(e["split"], {})
+            t.append(f"\n{e['split']:<18}", style="bold")
+            t.append(e["test_path"] + (" · breakdown" if e.get("train_path") else "") + "\n" + " " * 18)
+            t.append(" · ".join(f"{k} {s[k]}" for k in SEARCH_TYPES if k in s) + "\n")
         t.append("\n✓ runner checks passed (keys, names, search, files, model config)\n", style="green")
         t.append("  Corpus contents are checked when the run reads them.\n")
         running = [r.name for r in self.app.runs if r.live is not None and r.live.state == "RUNNING"]
@@ -553,6 +561,10 @@ class ReviewScreen(Screen):
 
     def on_button_pressed(self, event):
         self.action_start() if event.button.id == "start" else self.action_back()
+
+    def action_json(self):
+        self.json = not self.json
+        self.query_one("#review-text", Static).update(self.body())
 
     def action_back(self):
         box = self.query_one("#save", Input)

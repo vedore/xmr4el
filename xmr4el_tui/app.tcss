@@ -5,7 +5,26 @@ TopBar {
     background: $panel;
 }
 
-#runs {
+* {
+    scrollbar-size: 1 1;
+    scrollbar-color: $foreground 25%;
+    scrollbar-color-hover: $foreground 40%;
+    scrollbar-color-active: $foreground 50%;
+    scrollbar-background: $background;
+    scrollbar-background-hover: $background;
+    scrollbar-background-active: $background;
+}
+
+#body {
+    height: 1fr;
+}
+
+.-narrow #body {
+    layout: vertical;
+}
+
+#runs, #trees {
+    width: 1fr;
     height: 1fr;
 }
 
@@ -14,14 +33,12 @@ TopBar {
 }
 
 .side-panel {
-    split: right;
     width: 40;
     height: 1fr;
     border-left: vkey $foreground 30%;
 }
 
 .-narrow .side-panel {
-    split: none;
     width: 1fr;
     height: auto;
     max-height: 12;
@@ -174,10 +191,40 @@ SpecPicker {
     margin: 1 0 0 0;
 }
 
-#trees {
-    height: 1fr;
-}
-
 #tree-details {
     padding: 1 2;
+}
+
+#run-actions {
+    height: 1;
+    margin: 0 1;
+}
+
+#stop-line {
+    width: 1fr;
+    padding: 0 0 0 1;
+}
+
+StopModal {
+    align: center middle;
+}
+
+#stop-box {
+    width: 60;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border: round $error;
+}
+
+#stop-text {
+    margin: 1 0;
+}
+
+#stop-buttons {
+    height: 1;
+}
+
+#stop-buttons Button {
+    margin: 0 4 0 0;
 }

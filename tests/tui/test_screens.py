@@ -7,7 +7,8 @@ pytest.importorskip("textual")
 from fake_runs import make_run  # noqa: E402
 from textual.widgets import DataTable, Static, TabbedContent  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp, settings_path  # noqa: E402
-from xmr4el_tui.screens import CompareScreen, RunScreen, RunsScreen, columns_for  # noqa: E402
+from xmr4el_tui import process  # noqa: E402
+from xmr4el_tui.screens import CompareScreen, RunScreen, RunsScreen, StopModal, columns_for  # noqa: E402
 from xmr4el_tui.widgets import LogView  # noqa: E402
 
 
@@ -40,7 +41,7 @@ def test_runs_table_details_and_open(tmp_path):
         assert table.row_count == 4
         assert [c.value for c in table.columns] == ["mark", "started", "run", "kind", "tree", "split", "acc@1",
                                                     "state"]
-        assert table.get_row_at(0)[-1].plain == "UNVERIFIED"  # recorded running, no process identity
+        assert table.get_row_at(0)[-1].plain == "UNVER"  # recorded running, no process identity
         await pilot.press("down")  # ncbi_disease_test
         details = text(screen.query_one("#details", Static))
         assert details.startswith("ncbi_disease_test\neval · COMPLETED") and "Also      ncbi_disease\n" in details
@@ -165,3 +166,29 @@ def test_help_replaces_details_and_theme_persists(tmp_path, monkeypatch):
     async def restored(app, pilot):
         assert app.theme == "nord"
     run_app(root, restored)
+
+
+def test_stop_button_modal_and_stopping(tmp_path, monkeypatch):
+    make_run(tmp_path, "chem", stamp="2026-10-23_14-10-00", status="running", tree_id=None, metrics={"dev": None},
+             identity={"pid": 4182, "pgid": 4182})
+    monkeypatch.setattr(process, "derived_state", lambda run, here: process.Live("RUNNING", stoppable=True))
+    sent = []
+    monkeypatch.setattr(process, "stop", lambda run, force=False: sent.append(force) or "SIGTERM sent to pid 4182")
+
+    async def check(app, pilot):
+        await pilot.press("enter")
+        screen = app.screen
+        assert isinstance(screen, RunScreen) and screen.query_one("#run-actions").display
+        await pilot.click("#stop")
+        assert isinstance(app.screen, StopModal) and app.focused.id == "keep", "focus starts on Keep running"
+        await pilot.press("enter")
+        assert app.screen is screen and sent == [], "Keep running sends nothing"
+        await pilot.press("s", "tab", "enter")  # Stop run
+        await pilot.pause()
+        assert sent == [False] and "STOPPING" in text(screen.query_one("#top"))
+        assert not screen.check_action("stop", ()) and not screen.check_action("force_stop", ())
+        screen.stopping -= 31
+        assert screen.check_action("force_stop", ())
+        await pilot.press("k")
+        assert sent == [False, True]
+    run_app(tmp_path, check)

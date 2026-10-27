@@ -110,12 +110,14 @@ def test_setup_review_start(tmp_path):
                                    "evals": [{"split": "test", "test_path": "datasets/x/test.pubtator",
                                               "train_path": "datasets/x/train.pubtator", "beam_size": 5}]}
         body = text(app.screen.query_one("#review-text", Static))
-        assert "test: beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10.0" in body and "sha256 cccccccc…" in body
+        assert "datasets/x/test.pubtator · breakdown\n" + " " * 18 + "beam_size 5 · leaf_candidates 100 · topk 0 · " \
+               "knn_beta 10.0" in body and "sha256 cccccccc…" in body and '"evals"' not in body
+        await pilot.press("j")
+        assert '"evals"' in text(app.screen.query_one("#review-text", Static)), "j shows the spec JSON"
         await pilot.press("escape")
         assert app.screen is setup
-        assert text(setup.query_one("#hint-e1-knn_beta", Static)) == "config 10.0"
-        assert text(setup.query_one("#hint-e1-leaf_candidates", Static)) == "default 100"
-        assert text(setup.query_one("#hint-e1-beam_size", Static)) == "", "a typed value replaces the hint"
+        assert setup.query_one("#e1-knn_beta", Input).placeholder == "config 10.0"
+        assert setup.query_one("#e1-leaf_candidates", Input).placeholder == "default 100"
         await pilot.press("ctrl+s")
         await settle(pilot, setup, lambda: isinstance(app.screen, ReviewScreen))
         run_id = app.screen.run_id
@@ -188,7 +190,7 @@ def test_trees_evaluate(tmp_path):
         assert "Evaluate tree 8528b624" in text(setup.query_one("#top"))
         assert setup.chosen("e1-split") == "datasets/x/test.pubtator" and setup.value("name") == "ncbi_disease_eval"
         await settle(pilot, setup, lambda: setup.result is not None)
-        assert text(setup.query_one("#hint-e1-beam_size", Static)) == "tree 10"
+        assert setup.query_one("#e1-beam_size", Input).placeholder == "tree 10"
         await pilot.press("ctrl+s")
         await settle(pilot, setup, lambda: isinstance(app.screen, ReviewScreen))
         assert app.screen.spec["evals"] == [{"split": "test", "test_path": "datasets/x/test.pubtator",

@@ -14,11 +14,14 @@ from xmr4el_tui.progress import event_time, read_events, stages
 
 STATE_STYLE = {"RUNNING": "bold blue", "UNVERIFIED": "yellow", "LOST": "red", "COMPLETED": "green",
                "FAILED": "red", "STOPPED": "yellow", "UNKNOWN": ""}
+STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",
+               "STOPPED": "STOP", "UNKNOWN": "?"}  # Runs table: all columns fit 80 wide
 LOG_TAIL = 256 * 1024
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
 STRING_COLS = ("tree", "dict", "either", "routed")
-LOG_STYLES = ((r"^\d{4}-\d\d-\d\d [\d:,]+", "dim"), (r"\] [\w.]+:", "dim"), (r"\[WARNING\]", "yellow"),
-              (r"\[(ERROR|CRITICAL)\]", "bold red"))
+LOG_LINE = re.compile(r"\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d),\d+ \[(\w+)\] (?:xmr4el\.)?(?:[\w.]*\.)?(\w+): (.*)")
+LOG_STYLES = ((r"^\d\d:\d\d:\d\d \w \w+ *", "dim"), (r"(?<=^\d\d:\d\d:\d\d )W(?= )", "bold yellow"),
+              (r"(?<=^\d\d:\d\d:\d\d )[EC](?= )", "bold red"))
 
 
 def bold_heads(t, *heads):
@@ -42,9 +45,15 @@ def heartbeat_age(run, now=None):
         return None
 
 
-def state_text(run):
+def state_text(run, short=False):
     word = state_word(run)
-    return Text(word, style=STATE_STYLE[word])
+    return Text(STATE_SHORT[word] if short else word, style=STATE_STYLE[word])
+
+
+def log_line(line):
+    """`15:04:44 I tree           Routing started…` from the logging format; other lines unchanged."""
+    m = LOG_LINE.fullmatch(line)
+    return f"{m[1]} {m[2][0]} {m[3]:<14} {m[4]}" if m else line
 
 
 def elapsed(run, now=None):
@@ -281,7 +290,7 @@ def inputs_text(run):
 
 
 class LogHighlighter(Highlighter):
-    """Dim timestamp and logger, colour WARNING / ERROR."""
+    """Dim time, level and logger; colour WARNING / ERROR."""
 
     def highlight(self, text):
         for pattern, style in LOG_STYLES:
@@ -325,7 +334,7 @@ class LogView(Log):
         if skip and lines:  # the first line of a tail starts mid-line
             lines = lines[1:]
         self.lines_seen += lines
-        self.write_lines([ln for ln in lines if self.keep(ln)])
+        self.write_lines([log_line(ln) for ln in lines if self.keep(ln)])
 
     def keep(self, line):
         return not self.warnings or "[WARNING]" in line or "[ERROR]" in line or "[CRITICAL]" in line
@@ -333,5 +342,5 @@ class LogView(Log):
     def toggle_warnings(self):
         self.warnings = not self.warnings
         self.clear()
-        self.write_lines([ln for ln in self.lines_seen if self.keep(ln)])
+        self.write_lines([log_line(ln) for ln in self.lines_seen if self.keep(ln)])
         return self.warnings

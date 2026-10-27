@@ -80,16 +80,18 @@ and a valid input specification so a run can be repeated outside the TUI (§10).
 ## 4. Visual language
 
 **Layout.** One header line, one footer line, content between. Blank lines separate
-groups. The Runs details block is a 40-column panel on the right (under the table below
-100 columns); help (`?`) takes the same panel and `esc` closes it. No boxes around sections.
+groups. The Runs and Trees details block is a 40-column panel on the right (under the table below
+100 columns); header and footer span the full width. Help (`?`) replaces the panel and `esc`
+closes it. No boxes around sections. Scrollbars are one cell wide and muted.
 The theme chosen in the command palette is kept in `~/.config/xmr4el/tui.json`.
 `ctrl+q` quits only when pressed twice within 3 s; `ctrl+r` shows a toast with the run count.
 
 **Header.** `XMR4EL  <place>` on the left; state, elapsed time and host on the right.
 The right side is the same on every screen, so state is always in one place.
 
-**Footer.** At most six context keys, then `? help` always last. `ctrl+p commands`
-is available everywhere and listed in help, not in every footer.
+**Footer.** The main context keys only, then `? help` always last; it must fit 80 columns.
+Secondary keys (`/` filter, `y` copy path, `ctrl+p` commands) work everywhere and are listed
+in help, not in the footer.
 
 **Wireframe notation** (this document only):
 
@@ -114,6 +116,13 @@ is available everywhere and listed in help, not in every footer.
 | UNKNOWN | plain | `status.json` missing or unreadable. |
 
 LOST and UNVERIFIED are derived on screen; the TUI never rewrites `status.json`.
+The Runs table's State column uses short words so every column fits 80 wide: RUN, UNVER,
+LOST, DONE, FAIL, STOP, `?` (same colours; the filter matches both forms). Headers and
+details use the full word.
+
+**Log lines.** The Log tab shows `HH:MM:SS L logger message`. `L` is the level's first
+letter (W yellow, E/C red). The `xmr4el.` package path is dropped, leaving the last logger
+component. Lines in other formats are shown unchanged; `run.log` itself is not rewritten.
 
 **Formats.**
 - Timestamps: `MM-DD HH:MM` in tables, `YYYY-MM-DD HH:MM` in details.
@@ -136,16 +145,16 @@ No animation except the encoding progress bar.
 ```text
 XMR4EL  Runs  10                                    gpu01-xmr4el · 1 running
   Started      Run                   Kind   Tree      Split   acc@1  State
-> 10-23 14:10  bc5cdr_chemical       train  —         dev         —  RUNNING
-  10-20 15:04  nlm_chem_test         eval   f15e98b4  test   0.8423  COMPLETED
-  10-20 14:41  nlm_chem              train  f15e98b4  dev    0.8753  COMPLETED
-  10-20 14:37  biored_chemical_test  eval   e1348683  test   0.9121  COMPLETED
-  10-20 14:14  biored_chemical       train  e1348683  dev    0.8703  COMPLETED
-  10-20 14:05  bc5cdr_chemical_test  eval   906338e3  test   0.9303  COMPLETED
-  10-20 13:44  bc5cdr_chemical       train  906338e3  dev    0.9463  COMPLETED
-  10-20 13:42  biored_disease_test   eval   dd438500  test   0.8816  COMPLETED
-  10-20 13:40  biored_disease        train  dd438500  dev    0.8828  COMPLETED
-  10-20 13:38  ncbi_disease_test     eval   8528b624  test   0.8960  COMPLETED
+> 10-23 14:10  bc5cdr_chemical       train  —         dev         —  RUN
+  10-20 15:04  nlm_chem_test         eval   f15e98b4  test   0.8423  DONE
+  10-20 14:41  nlm_chem              train  f15e98b4  dev    0.8753  DONE
+  10-20 14:37  biored_chemical_test  eval   e1348683  test   0.9121  DONE
+  10-20 14:14  biored_chemical       train  e1348683  dev    0.8703  DONE
+  10-20 14:05  bc5cdr_chemical_test  eval   906338e3  test   0.9303  DONE
+  10-20 13:44  bc5cdr_chemical       train  906338e3  dev    0.9463  DONE
+  10-20 13:42  biored_disease_test   eval   dd438500  test   0.8816  DONE
+  10-20 13:40  biored_disease        train  dd438500  dev    0.8828  DONE
+  10-20 13:38  ncbi_disease_test     eval   8528b624  test   0.8960  DONE
 ───────────────────────────────────────────────────────────────────────────────
  bc5cdr_chemical · train · started 2026-10-23 14:10 · 14:38 so far
  stage  Hierarchy layer 1/2 · previous bc5cdr_chemical took 21:15
@@ -326,10 +335,12 @@ ctrl+o load spec  ctrl+e edit model_config  tab next  ? help
 
 - Field names are the spec's JSON keys. Help (`?` on a field) gives the long
   description: e.g. `leaf_candidates: labels kept per reached leaf`.
-- Empty search fields inherit. The resolved value and its source sit on the right:
-  `config` (the model config's `predict_config`), `default` (the runner's defaults),
-  `tree` (the saved tree's `predict_config`, not an earlier evaluation's overrides).
-  A typed value replaces the hint.
+- Empty search fields inherit. The field's placeholder shows the resolved value and its
+  source (`config 10`): `config` (the model config's `predict_config`), `default` (the
+  runner's defaults), `tree` (the saved tree's `predict_config`, not an earlier evaluation's
+  overrides). A typed value replaces it.
+- A new training draft starts with the newest training run's `model_config`; with no
+  training runs it starts with the first `configs/*.json`.
 - One evaluation is inline. `+ Add evaluation` appends another block below it;
   each block has its own `< Remove >`.
 - `ctrl+o` fills the form from an input spec or a recorded `spec.json`, using the
@@ -372,25 +383,23 @@ XMR4EL  Review  nlm_chem_beam5                            gpu01-xmr4el
  Trains a new tree, then evaluates dev.
  Run directory  outputs/runs/2026-10-23_14-10-02_nlm_chem_beam5 (new)
 
- {
-   "name": "nlm_chem_beam5",
-   "model_config": "configs/xmr4el_bc5cdr_config.json",
-   "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator",
-   "evals": [{"split": "dev", "test_path": "datasets/nlm_chem/dev.pubtator",
-              "train_path": "datasets/nlm_chem/train_plus_ctd.pubtator",
-              "beam_size": 5}]
- }
- Effective search  dev: beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10
- Model config      sha256 8d105231… (bound; full hash in Inputs after start)
+ Model config      configs/xmr4el_bc5cdr_config.json
+                   sha256 8d105231… (bound; full hash in Inputs after start)
+ Training file     datasets/nlm_chem/train_plus_ctd.pubtator
+
+ dev               datasets/nlm_chem/dev.pubtator · breakdown
+                   beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10
 
  ✓ runner checks passed (keys, names, search, files, model config)
    Corpus contents are checked when the run reads them.
  ! bc5cdr_chemical is running on this host and shares the GPU.
 
  < Back >                                                  < Start run >
-enter start  a save spec as…  esc back  ? help
+enter start  j json  a save spec as…  esc back  ? help
 ```
 
+- Review opens at the top. Each evaluation shows its effective search. `j` toggles the
+  exact spec JSON above the summary.
 - The spec is not written into `configs/experiments/`. It goes to the runner on
   stdin; the runner already stores it as `spec.json` in the run directory.
   `save spec as…` writes a file only when asked.
@@ -473,6 +482,7 @@ show `same device` or `devices differ: cuda vs mps` from `provenance.json`.
 └─────────────────────────────────────────────────────────┘
 ```
 
+`s` or the `Stop run` button under the header (shown only while the run is stoppable) opens it.
 Focus starts on `Keep running`. After `Stop run`, the header shows `STOPPING`. If the
 process still runs after 30 s (a long torch call delays the signal), the banner adds
 `k force stop (SIGKILL; shown as LOST if no final status was written)`. Revalidate

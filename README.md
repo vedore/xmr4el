@@ -53,6 +53,13 @@ Train on a PubTator corpus, then evaluate the saved tree on a held-out split:
 `-ds_len N` trains on the first `N` label groups only (a fast smoke run); it counts labels, not documents
 or mentions. Trees are saved to `outputs/saved_trees/xmodel_<timestamp>/`.
 
+A tiny dataset for trying the TUI end to end (40 / 10 / 10 NCBI disease documents, 95 training labels) uses
+`configs/xmr4el_tiny_config.json` (4 clusters, 64 SVD components). Build it once from the local NCBI files:
+
+```bash
+mkdir -p datasets/ncbi_tiny && for s in train:40 dev:10 test:10; do awk -v n=${s#*:} 'BEGIN{RS="";ORS="\n\n"} NR<=n' datasets/ncbi_disease/${s%%:*}.pubtator > datasets/ncbi_tiny/${s%%:*}.pubtator; done
+```
+
 Predict from Python:
 
 ```python

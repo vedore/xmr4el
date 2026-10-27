@@ -1,22 +1,24 @@
-"""Runs and Run screens (tui.md §5.1-5.4, §7)."""
+"""Runs and Run screens (tui.md §5.1-5.4, §5.9, §7)."""
+import time
 from datetime import datetime
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, DataTable, Footer, Input, Select, Static, TabbedContent, TabPane
 
-from xmr4el_tui import compare, fmt, runs
+from xmr4el_tui import compare, fmt, process, runs
 from xmr4el_tui.launch import SetupScreen
-from xmr4el_tui.widgets import (LogView, TopBar, acc1, details_text, elapsed, inputs_text, overview_text,
-                                split_cell, state_text, state_word)
+from xmr4el_tui.widgets import (STATE_SHORT, LogView, TopBar, acc1, details_text, elapsed, inputs_text,
+                                overview_text, split_cell, state_text, state_word)
 
 SORTS = ("started", "run", "acc@1")
 DETAILS_WIDTH = 40  # = HelpPanel width in app.tcss
 NARROW = 100  # below this terminal width the details panel sits under the table
+FORCE_AFTER = 30  # seconds after SIGTERM before `k` (SIGKILL) is offered (§5.9)
 
 
 class RunsChanged(Message):
@@ -53,7 +55,7 @@ class RunTable(DataTable):
 class RunsScreen(Screen):
     BINDINGS = [Binding("enter", "open", "open"), Binding("n", "new", "new run"), Binding("t", "trees", "trees"),
                 Binding("space", "mark", "mark"), Binding("c", "compare", "compare"),
-                Binding("slash", "filter", "filter"),
+                Binding("slash", "filter", "filter", show=False),
                 Binding("o", "sort", "sort", show=False), Binding("ctrl+r", "rescan", "rescan", show=False),
                 Binding("escape", "clear_filter", "clear filter", show=False)]
 
@@ -63,11 +65,13 @@ class RunsScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
-        yield RunTable(id="runs", cursor_type="row")
-        yield Input(placeholder="filter: run name, run id, tree id or state", id="filter")
-        with VerticalScroll(classes="side-panel"):
-            yield Static(id="details")
-        yield Footer()
+        with Horizontal(id="body"):
+            with Vertical(id="main"):
+                yield RunTable(id="runs", cursor_type="row")
+                yield Input(placeholder="filter: run name, run id, tree id or state", id="filter")
+            with VerticalScroll(classes="side-panel"):
+                yield Static(id="details")
+        yield Footer(show_command_palette=False)
 
     def on_mount(self):
         self.query_one("#filter").display = False
@@ -89,7 +93,8 @@ class RunsScreen(Screen):
     def visible(self):
         needle = self.filter.lower()
         shown = [r for r in self.app.runs if not needle or any(
-            needle in (s or "").lower() for s in (r.name, r.id, r.tree_id, state_word(r)))]
+            needle in (s or "").lower() for s in (r.name, r.id, r.tree_id, state_word(r),
+                                                  STATE_SHORT[state_word(r)]))]
         if self.sort == "run":
             shown.sort(key=lambda r: r.name)  # stable: newest first within a name
         elif self.sort == "acc@1":  # dev and test never ranked together
@@ -111,7 +116,7 @@ class RunsScreen(Screen):
                  "duration": fmt.duration(elapsed(run)), "run": run.name, "kind": run.kind,
                  "tree": Text(fmt.tree(run.tree_id), style="bold" if bold_tree else ""),
                  "split": split_cell(run), "acc@1": Text(fmt.metric(acc1(run)), justify="right"),
-                 "state": state_text(run)}
+                 "state": state_text(run, short=True)}
         return [value[c] for c in self.cols]
 
     def rebuild(self):
@@ -223,10 +228,36 @@ class RunsScreen(Screen):
         self.app.rescan(announce=True)
 
 
+class StopModal(ModalScreen):
+    """Confirm a stop; focus starts on Keep running (§5.9). Dismisses with True to stop."""
+    BINDINGS = [Binding("escape", "dismiss(False)", "keep running")]
+
+    def __init__(self, run):
+        super().__init__()
+        self.run = run
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="stop-box"):
+            yield Static(Text(f"Stop {self.run.name}?", style="bold"))
+            yield Static(f"Sends SIGTERM to {self.run.name} (pid {self.run.identity['pid']}) and its workers. It is "
+                         "recorded as STOPPED. The current stage is lost; stages already done and saved files are "
+                         "kept.", id="stop-text")
+            with Horizontal(id="stop-buttons"):
+                yield Button("Keep running", id="keep", compact=True)
+                yield Button("Stop run", id="confirm", variant="error", compact=True)
+
+    def on_mount(self):
+        self.query_one("#keep", Button).focus()
+
+    def on_button_pressed(self, event):
+        self.dismiss(event.button.id == "confirm")
+
+
 class RunScreen(Screen):
     BINDINGS = [Binding("1", "tab('overview')", "overview"), Binding("2", "tab('log')", "log"),
                 Binding("3", "tab('inputs')", "inputs"), Binding("w", "warnings", "warnings"),
-                Binding("y", "copy", "copy path"),
+                Binding("s", "stop", "stop"), Binding("k", "force_stop", "force stop"),
+                Binding("y", "copy", "copy path", show=False),
                 Binding("escape", "app.pop_screen", "runs")]
 
     def __init__(self, run_id):
@@ -234,9 +265,13 @@ class RunScreen(Screen):
         self.run_id = run_id
         self.run = next(r for r in self.app.runs if r.id == run_id)
         self.split = self.run.evals[0].split if self.run.evals else None
+        self.stopping = None  # time.monotonic() of the SIGTERM this screen sent
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
+        with Horizontal(id="run-actions"):
+            yield Button("Stop run", id="stop", variant="error", compact=True)
+            yield Static(id="stop-line")
         with TabbedContent(initial="overview"):
             with TabPane("Overview", id="overview"):
                 with VerticalScroll():
@@ -249,7 +284,7 @@ class RunScreen(Screen):
             with TabPane("Inputs", id="inputs"):
                 with VerticalScroll():
                     yield Static(id="inputs-text")
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def on_mount(self):
         self.render_run()
@@ -259,12 +294,36 @@ class RunScreen(Screen):
         found = next((r for r in self.app.runs if r.id == self.run_id), None)
         if found is not None:
             self.run = found
+            if not self.stoppable():  # recorded STOPPED, or gone (LOST) after a force stop
+                self.stopping = None
             self.render_run()
 
+    def stoppable(self):
+        return self.run.live is not None and self.run.live.stoppable
+
+    def force_offered(self):
+        return self.stopping is not None and time.monotonic() - self.stopping >= FORCE_AFTER and self.stoppable()
+
+    def check_action(self, action, parameters):
+        if action == "stop":
+            return self.stoppable() and self.stopping is None
+        if action == "force_stop":
+            return self.force_offered()
+        return True
+
     def update_top(self):
-        right = Text.assemble(state_text(self.run), f" {fmt.duration(elapsed(self.run, datetime.now()))}"
-                                                    f" · {self.app.host}")
+        state = Text("STOPPING", style="yellow") if self.stopping is not None else state_text(self.run)
+        right = Text.assemble(state, f" {fmt.duration(elapsed(self.run, datetime.now()))} · {self.app.host}")
         self.query_one(TopBar).set(self.run.name, right)
+        self.query_one("#run-actions").display = self.stoppable() or self.stopping is not None
+        self.query_one("#stop", Button).display = self.stopping is None
+        if self.stopping is not None:
+            waited = time.monotonic() - self.stopping
+            self.query_one("#stop-line", Static).update(
+                Text("k force stop (SIGKILL; shown as LOST if no final status was written)", style="yellow")
+                if self.force_offered() else Text(f"SIGTERM sent {fmt.duration(waited)} ago; waiting for the run "
+                                                  "to record STOPPED", style="dim"))
+        self.refresh_bindings()
 
     def render_run(self):
         self.update_top()
@@ -287,6 +346,27 @@ class RunScreen(Screen):
         self.app.copy_to_clipboard(str(self.run.path))
         self.notify(f"Copied {self.run.path}")
 
+    def on_button_pressed(self, event):
+        if event.button.id == "stop":
+            self.action_stop()
+
+    def action_stop(self):
+        if self.stoppable() and self.stopping is None:
+            self.app.push_screen(StopModal(self.run), self.stop_confirmed)
+
+    def stop_confirmed(self, confirmed):
+        if not confirmed:
+            return
+        result = process.stop(self.run)  # re-verifies identity and group before signalling (§9)
+        if result.startswith("SIGTERM"):
+            self.stopping = time.monotonic()
+        self.notify(result, severity="information" if self.stopping is not None else "warning")
+        self.update_top()
+
+    def action_force_stop(self):
+        if self.force_offered():
+            self.notify(process.stop(self.run, force=True), severity="warning")
+
 
 class TreesScreen(Screen):
     """Saved trees (from the runs' tree.json and outputs/saved_trees/); enter evaluates the selected one (§5.6)."""
@@ -295,10 +375,11 @@ class TreesScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
-        yield RunTable(id="trees", cursor_type="row")
-        with VerticalScroll(classes="side-panel"):
-            yield Static(id="tree-details")
-        yield Footer()
+        with Horizontal(id="body"):
+            yield RunTable(id="trees", cursor_type="row")
+            with VerticalScroll(classes="side-panel"):
+                yield Static(id="tree-details")
+        yield Footer(show_command_palette=False)
 
     def on_mount(self):
         self.set_class((self.size.width or self.app.size.width) < NARROW, "-narrow")
@@ -397,7 +478,7 @@ class CompareScreen(Screen):
                     yield Static(self.splits[i] or fmt.DASH)
         with VerticalScroll():
             yield Static(id="compare-text")
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def on_mount(self):
         self.query_one(TopBar).set("Compare", self.app.host)
