@@ -317,7 +317,36 @@ def group_text(node, app):
     return t
 
 
-class Explorer(FullRow, Tree):
+class Selectable:
+    """Mouse drag selects text in a line-based widget, as Textual does for its text widgets (the app copies it on
+    release). Each rendered line is remembered with its scroll x, so the selection is extracted from what was shown.
+    ponytail: offsets are cells, so a wide character shifts the range; fine for the ASCII paths, ids and metrics."""
+    ALLOW_SELECT = True  # Tree, OptionList and DataTable turn it off
+
+    def __init__(self, *args, **kwargs):
+        self.plain = {}  # virtual line -> (scroll x, text shown)
+        super().__init__(*args, **kwargs)
+
+    def render_line(self, y):
+        strip = super().render_line(y)
+        x, y = self.scroll_offset.x, self.scroll_offset.y + y
+        self.plain[y] = (x, "".join(seg.text for seg in strip))
+        span = self.text_selection.get_span(y) if self.text_selection else None
+        if span is not None:
+            start, end = max(0, span[0] - x), strip.cell_length if span[1] == -1 else min(strip.cell_length, span[1] - x)
+            if start < end:
+                style = self.screen.get_component_rich_style("screen--selection")
+                strip = Strip.join([strip.crop(0, start), Strip(Segment.apply_style(
+                    list(strip.crop(start, end)), post_style=style), end - start), strip.crop(end)])
+        return strip.apply_offsets(x, y)
+
+    def get_selection(self, selection):
+        text = "\n".join(" " * self.plain[i][0] + self.plain[i][1] if i in self.plain else ""
+                         for i in range(max(self.plain, default=-1) + 1))
+        return "\n".join(line.rstrip() for line in selection.extract(text).split("\n")), "\n"
+
+
+class Explorer(Selectable, FullRow, Tree):
     """Keyboard tree of explorer.build() nodes; node data = node key. Expanded keys and the cursor survive
     rebuilds; a cursor whose item vanished lands on its nearest surviving ancestor. Dragging its right border
     resizes it."""
@@ -358,6 +387,7 @@ class Explorer(FullRow, Tree):
         if event.x >= self.outer_size.width - 1:
             self.dragging = True
             self.capture_mouse()
+            self.screen.clear_selection()  # a resize is not a text selection
             event.stop()
 
     def on_mouse_move(self, event):
@@ -431,7 +461,7 @@ def selectable(line):
     return bool(line.plain.strip()) and not head
 
 
-class Description(FullRow, OptionList):
+class Description(Selectable, FullRow, OptionList):
     """Read-only lines of the selected item, one option each: up / down (or a click) select a row, headings and
     blank lines are skipped, nothing is editable. left / right leave for Results / Run monitor. The selected row is
     one colour (a green COMPLETED would vanish on the accent)."""
@@ -469,7 +499,7 @@ class Description(FullRow, OptionList):
         return "\n".join(plain for plain, _, _ in self.shown)
 
 
-class ActiveRuns(FullRow, DataTable):
+class ActiveRuns(Selectable, FullRow, DataTable):
     """Active training and evaluation runs; enter opens the Run monitor."""
     CURSOR = "datatable--cursor"
     BINDINGS = [Binding("enter", "select_cursor", "monitor")]

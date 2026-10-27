@@ -376,3 +376,34 @@ def test_full_row_selection_and_description_rows(tmp_path):
         await pilot.press("ctrl+shift+tab")  # back to Description: its selection survived
         assert isinstance(app.focused, Description) and desc.keys[desc.highlighted] == keep
     run_app(root, check)
+
+
+async def drag(pilot, start, end):
+    await pilot.mouse_down(None, offset=start)
+    await pilot.hover(None, offset=end)
+    await pilot.mouse_up(None, offset=end)
+    await pilot.pause()
+
+
+async def drag_over(pilot, widget, word):
+    """Drag from the first to the last cell of `word` where `widget` shows it."""
+    vy, (_, shown) = next((y, v) for y, v in sorted(widget.plain.items()) if word in v[1])
+    box = widget.content_region
+    x, y = box.x + shown.index(word), box.y + vy - int(widget.scroll_offset.y)
+    await drag(pilot, (x, y), (x + len(word) - 1, y))
+
+
+def test_mouse_selection_copies(tmp_path):
+    async def check(app, pilot):
+        await goto(pilot, app, ("tree", TREE))
+        desc, tree = app.screen.query_one(Description), app.screen.query_one(Explorer)
+        await drag_over(pilot, desc, TREE)
+        assert app.clipboard == TREE and any("Copied" in str(n.message) for n in app._notifications)
+        await drag_over(pilot, app.screen.query_one(ActiveRuns), "UNVERIFIED")
+        assert app.clipboard == "UNVERIFIED"
+        await drag_over(pilot, tree, "My Custom")
+        assert app.clipboard == "My Custom"
+        await pilot.click(Description, offset=(5, 3))  # a click selects a row, copies nothing
+        await drag(pilot, (tree.region.right - 1, 5), (tree.region.right + 9, 5))  # border drag: a resize only
+        assert app.clipboard == "My Custom" and tree.outer_size.width == 36
+    run_app(fake_root(tmp_path), check)

@@ -541,6 +541,7 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Dashboard | `ctrl+r` | Rescan. |
 | Dashboard | `ctrl+b`, `<` / `>`, drag the explorer's right border | Hide / show the explorer; narrower / wider by 2 cells. Default 22 % of the width, at least 18 cells, at most half the screen and never leaving the right panels under 40 (the minimum wins on tiny screens); kept for the session, re-clamped on terminal resize. |
 | Description | `up` `down`, click | Select a row (read-only; headings and blank lines are skipped, the list wraps). A rescan of the same item keeps the row with the same field label. |
+| Explorer, Description, Active runs | mouse drag | Select text (blue); on release it is copied to the clipboard by OSC 52 (`App.copy_to_clipboard`), so it reaches the terminal the TUI runs in, also through `ssh` / `docker exec`; a toast says how many characters. A click without a drag copies nothing; dragging the explorer border resizes, never selects. The terminal must allow OSC 52. |
 | Everywhere | `n` | New Experiment (screen not built yet: a notice). |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |

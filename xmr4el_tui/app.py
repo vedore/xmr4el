@@ -25,7 +25,8 @@ THEME = Theme(
                "block-cursor-text-style": "bold", "block-cursor-blurred-background": "#2B5C55",
                "block-cursor-blurred-foreground": "#F0F4F8", "block-cursor-blurred-text-style": "none",
                "block-hover-background": "#F0F4F8 8%", "footer-key-foreground": "#2CF5C5",
-               "footer-description-foreground": "#A5B4C3"})
+               "footer-description-foreground": "#A5B4C3",
+               "screen-selection-background": "#3B6E99", "screen-selection-foreground": "#F0F4F8"})
 
 
 class XMR4ELApp(App):
@@ -85,6 +86,14 @@ class XMR4ELApp(App):
         else:
             self.quit_armed = now
             self.notify("Press ctrl+c again to quit.", title="Quit?", severity="warning", timeout=QUIT_SECONDS)
+
+    def on_text_selected(self, _):
+        """Text selected with the mouse goes to the clipboard on release (OSC 52: the terminal running the TUI,
+        also through ssh and docker exec)."""
+        text = self.screen.get_selected_text()
+        if text:
+            self.copy_to_clipboard(text)
+            self.notify(f"Copied {len(text)} characters", timeout=2)
 
     def get_system_commands(self, screen):
         """The palette without its theme picker: one style only."""
