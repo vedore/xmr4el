@@ -99,6 +99,7 @@ class Explorer(Selectable, FullRow, Tree):
             return None
         self.sig, y = sig, self.scroll_y
         self.clear()
+        self.forget_lines()
         nodes = {}
 
         def add(parent, node):

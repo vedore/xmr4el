@@ -13,6 +13,8 @@ import pytest
 pytest.importorskip("textual")
 
 from fake_runs import bad_fields_run, make_run, patch_json  # noqa: E402
+from rich.text import Text  # noqa: E402
+from textual.selection import Selection  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
 from xmr4el_tui import explorer, process, runs  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
@@ -185,6 +187,20 @@ def test_renderers_read_no_files(tmp_path, monkeypatch):
         elif n.kind == "run":
             run_text(n.ref, snap.active.get(n.ref.id, Activity()), loaded[n.key])
             banner_text(n.ref)
+
+
+def test_replaced_content_leaves_no_selectable_lines(tmp_path):
+    async def check(app, pilot):
+        desc = app.screen.query_one(Description)
+        desc.show("long", Text("\n".join(f"row {i}" for i in range(80))))
+        desc.scroll_end(animate=False)
+        await pilot.pause()
+        assert any("row 75" in text for _, text in desc.plain.values()), "rendered past the first screen"
+        desc.show("short", Text("only row"))
+        await pilot.pause()
+        assert not any("row" in text for _, text in list(desc.plain.values())[1:])
+        assert desc.get_selection(Selection(None, None))[0].strip() == "only row"
+    run_app(tmp_path, check)
 
 
 def test_banners_of_unfinished_runs(tmp_path):

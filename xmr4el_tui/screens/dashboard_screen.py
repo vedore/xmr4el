@@ -120,6 +120,7 @@ class DashboardScreen(Screen):
         keep = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value if table.row_count else None
         active = self.active_runs()
         table.clear()
+        table.forget_lines()
         for r in active:
             activity = self.app.snapshot.active.get(r.id, Activity())
             stage, device = activity.stage, activity.device

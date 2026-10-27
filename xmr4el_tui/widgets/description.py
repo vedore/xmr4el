@@ -38,6 +38,7 @@ class Description(Selectable, FullRow, OptionList):
             return
         old = self.keys[self.highlighted] if subject == self.subject and self.highlighted is not None else None
         self.clear_options()
+        self.forget_lines()
         self.add_options([Option(line, disabled=not selectable(line)) for line in lines])
         self.subject, self.shown, self.keys = subject, shown, [line.plain[:14].strip() for line in lines]
         rows = [i for i, line in enumerate(lines) if selectable(line)]

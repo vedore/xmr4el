@@ -38,6 +38,10 @@ class Selectable:
                     list(strip.crop(start, end)), post_style=style), end - start), strip.crop(end)])
         return strip.apply_offsets(x, y)
 
+    def forget_lines(self):
+        """Call when the content is replaced: lines of the old content must not reach a selection."""
+        self.plain.clear()
+
     def get_selection(self, selection):
         text = "\n".join(" " * self.plain[i][0] + self.plain[i][1] if i in self.plain else ""
                          for i in range(max(self.plain, default=-1) + 1))
