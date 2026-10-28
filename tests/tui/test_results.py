@@ -436,3 +436,16 @@ def test_specs_marks_values_that_differ(tmp_path):
     cells = dict(body)
     assert cells["features"][1].plain == "tfidf" and cells["features"][1].style == theme.style("spec-differs", "bold")
     assert cells["topk"][1].style == theme.style("spec-differs", "bold") and cells["knn_beta"][1].style == ""
+
+
+def test_inspection_values_share_one_column(tmp_path):
+    from xmr4el_tui.screens.results_details import LABEL_WIDTH, inspection
+    f = facts(results_root(tmp_path))
+    strings = {g: {c: 0.5 for c in ("n", "tree", "dict", "either", "routed")} for g in cmp.STRING_GROUPS}
+    full = cmp.Facts(**{**f[A].__dict__, "metrics": {**f[A].metrics, "strings": strings}})
+    labels = {row[0] for group in cmp.GROUPS.values() for row in group}
+    lines = [line for line in inspection(full, cmp.BASELINE, "alpha · dev", True).plain.split("\n")
+             if line.startswith("  ") and line[2:2 + LABEL_WIDTH].strip() in labels]
+    assert any("seen, >1 label · dictionary" in line for line in lines), "longest label shown"
+    col = 2 + LABEL_WIDTH
+    assert all(line[col - 2:col] == "  " and line[col] != " " for line in lines), "one value column, gap kept"

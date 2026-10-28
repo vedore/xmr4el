@@ -17,6 +17,7 @@ LEVEL_STYLE = {VERIFIED: style("success"), CAUTION: style("warning", "bold"), IN
 LEGEND = f"Δ: points vs Base (MRR: own scale) · {NO_DELTA}: not verifiably comparable"
 HEADER_WIDTH = 24
 NAME_WIDTH = 30  # Summary evaluation column at most; longer names end in …
+LABEL_WIDTH = max(len(row[0]) for group in GROUPS.values() for row in group) + 3  # inspection: values in one column
 
 
 def role(i):
@@ -153,7 +154,7 @@ def inspection(f, compat, name, is_base):
     for group in GROUPS:
         t.append(f"\n{group}\n", style="bold")
         for label, cells in rows(group, [f], [BASELINE]):
-            t.append(f"  {label:<26}", style="dim")
+            t.append(f"  {label:<{LABEL_WIDTH}}", style="dim")
             t.append_text(cell(cells[0][0], None))
             t.append("\n")
         if group in GROUP_NOTES:

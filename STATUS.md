@@ -77,7 +77,7 @@ Specs = 5th group (search keys + features, out of Efficiency); esc: right panels
 Show incompatible filter (off per session; VERIFIED/CAUTION shown, INCOMPATIBLE/unknown sha hidden, per evaluation).
 Tokens `delta-unavailable`, `spec-differs`, `divider`. Docs tui.md §5.12, §7; tui_architecture.md. tests/tui 99
 (new `test_explorer.py`), full suite 229, ruff clean; renders 140x40 / 80x24 on real outputs/runs checked.
-Δ legend shortened, one blank row above and below it. NEXT: push `tui` only on the user's OK.
+Δ legend shortened, one blank row above and below it. Then (committed): Inspection label column = longest group label + 3 (`LABEL_WIDTH`, was 26: "seen, >1 label · dictionary" pushed its value right); test `test_inspection_values_share_one_column`. NEXT: push `tui` only on the user's OK.
 
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
