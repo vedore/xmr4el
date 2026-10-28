@@ -31,6 +31,20 @@ NVML queried by device index (a bare `cuda` device initialised CUDA); `vram_peak
 NEXT: push `tui` only on the user's OK; user tries View Logs (`python -m xmr4el_tui`) and a tiny run to see
 resources.json on the server (`gpu_util` stays null without nvidia-ml-py).
 
+**2026-10-28 Run monitor (user's pasted prompt; committed on `tui`, not pushed):** `screens/monitor_screen.py`
+(RunMonitorScreen, by run id from Dashboard Active runs `enter` / Description `right`), `monitor_details.py`
+(pure texts), `stop_dialog.py`; widgets `pipeline.py`, `monitor_panels.py` (RunOverview + Cancel Run,
+ResourcePanel), `log_panel.py` (LogScreen's reader/search moved here; LogScreen and Live logs both use it),
+`resize.py` (column clamp + border drag, Explorer too). `progress.EventTail` (one incremental events reader: the
+repository's Activity and the monitor), hierarchy layers as stage parts. Fullscreen log = the Live logs panel
+maximized (`f`), not a second reader. Cancel Run = `process.stop(run)` (graceful only) after StopDialog. Footer
+scrollbar fix (`Footer { scrollbar-size: 0 0 }`). Docs: tui.md §5.11, §7; tui_architecture.md. Full suite 201,
+ruff clean, headless read-only smoke on real outputs/runs OK. NEXT: user tries it (`python -m xmr4el_tui`, then a
+run from a second terminal: tiny spec on stdin, or `-spec configs/experiments/ncbi_disease.json -resource_interval 1`);
+push `tui` only on the user's OK. Cancel Run is offered only for runs leading their own group/session (TUI launches,
+or shell launches via `setsid`; macOS: `python -c "import os,sys; os.setsid(); os.execvp(...)"` wrapper). Offered,
+not decided: a pid-only SIGTERM fallback for shell runs (its workers would not get the signal); ask before building.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

@@ -1,8 +1,8 @@
 # XMR4EL TUI code architecture
 
-Status: implemented, Dashboard only (2026-10-27). Implements [tui.md](tui.md); section numbers `§n` refer
-to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment, Results and Run monitor
-are planned: their keys only say what they would open.
+Status: implemented, Dashboard and Run monitor (2026-10-28). Implements [tui.md](tui.md); section numbers `§n`
+refer to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment and Results are
+planned: their keys only say what they would open.
 
 ## 1. Rules
 
@@ -12,8 +12,8 @@ are planned: their keys only say what they would open.
   Runs/Run/Trees/Compare/Setup/Review screens were removed 2026-10-27; old code in git at `58cdffd`).
   Everything else is stdlib-only (`tests/tui/test_runs.py` imports it under `python -S`), pure where
   possible, and tested without a terminal.
-- Every file read goes through `runs` / `progress` / `services/experiment_repository.py`; renderers in
-  `screens/dashboard_details.py` read no file. The UI thread reads no file either: scans and the selected
+- Every file read goes through `runs` / `progress` / `logs` / `services/experiment_repository.py`; renderers in
+  `screens/dashboard_details.py` and `screens/monitor_details.py` read no file. The UI thread reads no file either: scans and the selected
   item's Details run in thread workers.
 - Run directories are the only durable state. The app holds the last Snapshot and the Launches
   (Popen handles of children it started); nothing else.
@@ -42,20 +42,29 @@ xmr4el_tui/
     experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
                    and incremental events tails; Details of the selected item
   screens/
-    dashboard_screen.py   DashboardScreen (only screen) + ActiveRuns; Details loaded in a worker
+    dashboard_screen.py   DashboardScreen + ActiveRuns; Details loaded in a worker; open_run -> Run monitor
     dashboard_details.py  pure Rich texts: banner, metrics, tree / evaluation / run / group descriptions
-    log_screen.py  LogScreen: fullscreen read-only log (View Logs); polls while active; / n N search, l level
+    log_screen.py  LogScreen: fullscreen read-only log (View Logs): a LogPanel
+    monitor_screen.py     RunMonitorScreen (§5.11): telemetry worker (EventTail + resources.json when changed),
+                   stage selection -> resources, Cancel Run -> process.stop in a worker, layout / panel keys
+    monitor_details.py    pure Rich texts: overview, stage rows, resource summaries (resources.json scopes)
+    stop_dialog.py StopDialog: Cancel Run confirmation (names the run id)
   widgets/
     explorer.py    Explorer tree (resizable) + node labels
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
     top_bar.py     TopBar (shared header)
-    log_view.py    LogView: virtual-rendered log lines, level filter, search highlight (Run monitor reuses it)
+    log_view.py    LogView: virtual-rendered log lines, level filter, search highlight
+    log_panel.py   LogPanel: one LogTail polled in a worker while active, header, search box (LogScreen and the
+                   Run monitor's Live logs)
+    pipeline.py    Pipeline: stages / parts / layers as a Tree updated in place; follows the current stage
+    monitor_panels.py  RunOverview (+ Cancel Run button), ResourcePanel
+    resize.py      column_width clamp + DragRightBorder (Explorer, Run monitor left column)
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
   test_runs.py  test_progress.py  test_logs.py  test_compare.py  test_procinfo.py  test_process.py
-  test_dashboard.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_dashboard.py  test_monitor.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
 Runner side (imports xmr4el, never imported by the TUI): `xmr4el/telemetry/events.py` (EventLog: the
@@ -181,12 +190,13 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 | Class | Shows | Reads |
 | --- | --- | --- |
 | `App` | footer, help panel, theme | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
-| `DashboardScreen` | only screen: explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
+| `RunMonitorScreen` | one run by id: overview, pipeline, resources of the selected stage, live log | `App.snapshot` (state); `progress.EventTail` + resources.json (stat, reread on change) every 1 s in a worker while active, one read after it ends; provenance.json once; the log via `LogPanel` |
+| `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 
-Results and Run monitor are not rebuilt yet: `DashboardScreen.open_results(filter, select)` and
-`open_run(run_id, split)` resolve the target (tree id or run id, run, split) and only say what they would open.
-Backend kept for them and for Setup: `process.check/Launches/rejection/stop/derived_state`, `compare.verdict/rows`,
-`progress.stages`, `runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
+Results is not rebuilt yet: `DashboardScreen.open_results(filter, select)` resolves the target (tree id or
+run id, run) and only says what it would open. `open_run(run_id, split)` pushes the Run monitor. Backend kept for
+Results and Setup: `process.check/Launches/rejection`, `compare.verdict/rows`,
+`runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
 scroll and marks by run `id` (§7).

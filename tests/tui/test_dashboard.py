@@ -598,12 +598,12 @@ def test_log_viewer_opens_searches_filters_and_returns(tmp_path):
         await pilot.press("enter")
         await settle(app, pilot)
         screen = app.screen
-        assert isinstance(screen, LogScreen) and screen.run.id == "2026-10-20_13-36-20_alpha"
+        assert isinstance(screen, LogScreen) and screen.panel.run.id == "2026-10-20_13-36-20_alpha"
         view = screen.query_one(LogView)
         assert len(view.all) == 3002 and view.scroll_offset.y == view.max_scroll_y, "opens at the end"
         header = str(screen.query_one("#log-header").render())
         assert "alpha" in header and "COMPLETED" in header and "following" not in header
-        assert screen.timer is None, "a finished run is read once, not polled"
+        assert screen.panel.timer is None, "a finished run is read once, not polled"
         await pilot.press("home")
         assert view.scroll_offset.y == 0
         await pilot.press("pagedown")
@@ -646,23 +646,23 @@ def test_log_viewer_missing_log_and_live_follow(tmp_path):
         screen = app.screen
         assert screen.query_one("#log-missing").display and not screen.query_one(LogView).display
         assert "not created yet" in str(screen.query_one("#log-missing").render())
-        assert screen.timer is not None, "an active run is polled"
+        assert screen.panel.timer is not None, "an active run is polled"
         (live / "run.log").write_text("2026-10-23 14:10:01,000 [INFO] x: Run started\n")
-        screen.tick()
+        screen.panel.tick()
         await settle(app, pilot)
         view = screen.query_one(LogView)
         assert view.display and [x.text[-11:] for x in view.all] == ["Run started"]
         with open(live / "run.log", "a") as f:
             f.write("2026-10-23 14:10:02,000 [INFO] x: Encoding started\n")
-        screen.tick()
+        screen.panel.tick()
         await settle(app, pilot)
         assert len(view.all) == 2 and view.scroll_offset.y == view.max_scroll_y
         patch_json(live / "status.json", status="completed", finished="2026-10-23T14:20:00")
         app.apply_scan(app.repo.snapshot(fresh=True))
         await pilot.pause()
-        screen.tick()  # the final read, then polling stops
+        screen.panel.tick()  # the final read, then polling stops
         await settle(app, pilot)
-        assert screen.timer is None and "COMPLETED" in str(screen.query_one("#log-header").render())
+        assert screen.panel.timer is None and "COMPLETED" in str(screen.query_one("#log-header").render())
     run_app(root, check)
 
 

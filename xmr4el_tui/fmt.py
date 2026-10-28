@@ -55,6 +55,16 @@ def pct(a, b):
     return f"{a / b:.1%}" if number(a) and number(b) and b else DASH
 
 
+def size(n):
+    """Bytes in binary units: 9.0 GiB."""
+    if not number(n):
+        return DASH
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if abs(n) < 1024 or unit == "GiB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
 def ms(x):
     return f"{x:.2f} ms/query" if number(x) else DASH
 

@@ -36,6 +36,11 @@ TopBar > .topbar--current {
     scrollbar-background-active: $surface;
 }
 
+/* the rule above would give a too-narrow footer a scrollbar row that hides its keys */
+Footer {
+    scrollbar-size: 0 0;
+}
+
 HelpPanel {
     width: 40;
     min-width: 40;
@@ -46,7 +51,7 @@ HelpPanel {
     height: 1fr;
 }
 
-/* width is set by DashboardScreen.set_explorer_width (resizable, clamped) */
+/* width is set by DashboardScreen.set_left_width (resizable, clamped) */
 #explorer {
     height: 1fr;
 }
@@ -81,7 +86,11 @@ Description > .option-list--option-disabled {
     color: $foreground;
 }
 
-/* Log viewer (screens/log_screen.py) */
+/* Log panel (widgets/log_panel.py): the fullscreen viewer and the Run monitor's Live logs */
+LogPanel {
+    height: 1fr;
+}
+
 #log-header {
     height: 1;
     background: $surface;
@@ -90,8 +99,6 @@ Description > .option-list--option-disabled {
 #log-view, #log-missing {
     height: 1fr;
     background: $surface;
-    border: round $border;
-    border-title-color: $accent;
 }
 
 #log-missing {
@@ -100,5 +107,76 @@ Description > .option-list--option-disabled {
 
 #log-search {
     dock: bottom;
-    margin-bottom: 1;
+}
+
+/* Run monitor (screens/monitor_screen.py): the left column's width is set by RunMonitorScreen.layout_columns */
+#mon, #mon-left {
+    height: 1fr;
+}
+
+#mon-right {
+    width: 1fr;
+}
+
+#overview {
+    height: auto;
+    padding: 0 1;
+}
+
+#overview-text {
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#overview-banner, #cancel {
+    margin-top: 1;
+}
+
+#pipeline {
+    height: 1fr;
+    overflow-x: hidden;
+}
+
+#resources {
+    height: 35%;
+    min-height: 9;
+    padding: 0 1;
+}
+
+#overview, #pipeline, #resources, LogPanel {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+}
+
+#overview:focus-within, #pipeline:focus, #resources:focus, LogPanel:focus-within {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+/* Cancel Run confirmation (screens/stop_dialog.py) */
+StopDialog {
+    align: center middle;
+}
+
+#stop-box {
+    width: 64;
+    max-width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border: round $error;
+}
+
+#stop-text {
+    margin: 1 0;
+}
+
+#stop-buttons {
+    height: 1;
+}
+
+#stop-buttons Button {
+    margin: 0 4 0 0;
 }

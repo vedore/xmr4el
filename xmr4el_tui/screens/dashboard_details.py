@@ -31,7 +31,7 @@ def banner_text(run, activity=Activity(), details=Details()):
     word = state_word(run)
     if word == "FAILED":
         return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", "red"),
-                             f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}    2 full log")
+                             f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}")
     if word == "STOPPED":
         how = "Force-stopped (SIGKILL, requested in the TUI)" if run.error == "SIGKILL" else \
             f"Stopped by {run.error or 'a signal'}"

@@ -231,7 +231,7 @@ def test_events_are_read_incrementally(tmp_path, monkeypatch):
     start = [{"t": t.format(0), "stage": "load", "phase": "start"}]
     run = make_run(tmp_path, "r", status="running", tree_id=None, metrics={"dev": None}, events=start)
     events, reads, real = run / "events.jsonl", [], progress.read_events
-    monkeypatch.setattr("xmr4el_tui.services.experiment_repository.read_events",
+    monkeypatch.setattr("xmr4el_tui.progress.read_events",
                         lambda path, offset=0: reads.append(offset) or real(path, offset))
     repo = ExperimentRepository(tmp_path)
 
@@ -247,7 +247,7 @@ def test_events_are_read_incrementally(tmp_path, monkeypatch):
     with events.open("a") as f:
         f.write('se": "start"}\n')
     a = activity()
-    assert a.stage == "encode" and a.last[0] == "encode" and len(repo.tails[run.name].events) == 3, "no duplicates"
+    assert a.stage == "encode" and a.last[0] == "encode" and len(repo.tails[run.name][0].events) == 3, "no duplicates"
     events.write_text(json.dumps(start[0]) + "\n")  # truncated (rewritten from scratch)
     assert activity().stage == "load" and reads[-1] == 0
     replacement = run / "events.new"

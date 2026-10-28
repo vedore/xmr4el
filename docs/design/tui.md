@@ -514,6 +514,54 @@ s stop  esc runs  ? help
 Runs at 60 columns: Run, Tree, Split, acc@1, State. Below 60 x 16: one line with the
 current run's state and `s stop`, plus `resize to 60x16 for more`.
 
+### 5.11 Run monitor (built 2026-10-28)
+
+```text
+                                   XMR4EL          Dashboard  New Experiment  Run Monitor  Results
+╭ Run overview ─────────────────╮╭ Resources — Encode features ─────────────────────────────────╮
+│ bc5cdr_chemical               ││ Completed  4:00                                              │
+│ Type     Training + Evaluation││ 49 samples, every 5 s plus stage start and end               │
+│ Dataset  datasets/bc5cdr      ││ CPU avg     412.5 %   this process (all threads) + exited …  │
+│ State    RUNNING              ││ RAM avg     9.0 GiB   this process                           │
+│ Elapsed  14:38                ││ RAM peak    11.0 GiB                                         │
+│ Device   cuda                 ││ GPU util    81.5 %    whole CUDA device, sampled (NVML)      │
+│ [ Cancel Run ]                ││ GPU memory  8.0 GiB   peak, this process, PyTorch tensors: … │
+╰───────────────────────────────╯╰──────────────────────────────────────────────────────────────╯
+╭ Pipeline ─────────────────────╮╭ Live logs ───────────────────────────────────────────────────╮
+│   Whole run       14:38  RUN  ││ level all · following                                        │
+│   ✓ Load data      0:06       ││ 2026-10-23 14:19:00,000 [INFO] xmr4el.hierarchy: …           │
+│ ▶ ✓ Encode features 4:00 …    ││ …                                                            │
+│ ▼ ▸ Hierarchy training  layer…││                                                              │
+│ ├── ✓ layer 1   2:00  1 nodes ││                                                              │
+│ └── ▸ layer 2   node 3/6 · …  ││                                                              │
+│   · Save tree                 ││                                                              │
+╰───────────────────────────────╯╰──────────────────────────────────────────────────────────────╯
+esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
+```
+
+- One run, by run id (`DashboardScreen.open_run`); `esc` returns to the Dashboard as it was left. A run that
+  ends stays on screen (final state, durations, log); the screen never moves to another run.
+- Left column 35 %, right 65 % (resizable, §7). Run overview is content-sized; Pipeline fills the rest; Resources
+  is 35 % of the right column, Live logs the rest. Below 74 columns or 20 rows: one panel at a time (the focused
+  one, maximized; `]` / `[` switch, `esc` goes back).
+- Pipeline rows: Whole run, then `progress.stages` (the runner's events only): encode parts, eval parts per
+  split, hierarchy layers (a layer has only a start event: it ended when the next one started or with the
+  hierarchy). Durations of ended stages only; no percentages; the transformer tick shows done / total as
+  emitted. Opens on, and follows, the current stage (else the failed / stopped one) and expands its parts once;
+  a cursor move stops following, `c` resumes. Rows are relabelled in place, so cursor and expansion survive.
+- Resources: the resources.json summary of the selected top-level stage, matched by (stage, split), the last one
+  recorded. A part shows its parent's figures, labelled so. A running stage: `Collecting resource statistics…`;
+  pending: `Not started.`; a run without resources.json says so. Missing values are `N/A`, never 0. Scopes are
+  resources.json's own `scope` strings (GPU utilisation is device-wide NVML; GPU memory is PyTorch tensors of
+  this process). Whole run: only what stage summaries give exactly: CPU time / wall time over the ended stages,
+  the highest RSS and GPU-memory peaks; RAM and GPU-utilisation averages are left to the stages.
+- Live logs: `LogPanel`, the fullscreen viewer's reader (one LogTail, 1 s while active, one final read).
+- Cancel Run: `process.stop(run)` (SIGTERM, graceful only; no force button) in a worker after `StopDialog`.
+  Disabled once requested until the outcome; a refused stop (`not signalled: …`) re-enables it. A run that ends
+  while the dialog is open closes it and sends nothing; `process.stop` also re-reads status.json first.
+- Polling: events.jsonl from its last offset (`progress.EventTail`, shared with the scan's Activity) and
+  resources.json only when its (inode, mtime, size) changed, every 1 s while active; state from the app's 5 s scan.
+
 ## 6. View states
 
 | View | Empty | Loading | Error |
@@ -536,8 +584,15 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 | Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
 | Explorer | `enter` | Describe the item and focus Description. |
-| Description | `left` / `right` / `esc` | Results on the item's tree (cursor on its run) / Run monitor of its run (tree: training run) / back to Explorer. Both screens not rebuilt yet: a notice names the target. |
-| Active runs | `up` `down`, `enter` | Move, open the run. |
+| Description | `left` / `right` / `esc` | Results on the item's tree (cursor on its run) / Run monitor of its run (tree: training run; evaluation: its split's stage selected) / back to Explorer. Results not rebuilt yet: a notice names the target. |
+| Active runs | `up` `down`, `enter` | Move, open the run in the Run monitor. |
+| Run monitor | `ctrl+tab` / `ctrl+shift+tab` (or `]` / `[`) | Next / previous panel: Run overview (its Cancel Run button when usable), Pipeline, Resources, Live logs. |
+| Run monitor | `up` `down`, `tab` `shift+tab`, `left` / `right`, `enter` (Pipeline) | Move between stages / collapse or parent, expand / toggle a stage's parts. The selected row's resources show in Resources. |
+| Run monitor | `c` | Follow the current stage again (moving the cursor stops following). |
+| Run monitor | `s`, `Cancel Run` | Cancel Run confirmation (§5.9), only while the run is RUNNING with a verified isolated group and no cancel is pending. |
+| Run monitor | `f`, `esc` | The focused panel fills the screen (Live logs: the fullscreen log, same reader, search and filter); `esc` restores, then goes back to the Dashboard with its selection kept. |
+| Run monitor | `<` / `>`, drag the left column's right border | Narrower / wider left column by 2 cells: default 35 %, at least 30 cells, at most 60 %, the right side never under 44; kept for the session. |
+| Run monitor | Live logs: `/` `n` `N` `l`, scroll keys | As the log viewer. |
 | Dashboard | `ctrl+r` | Rescan. |
 | Dashboard | `ctrl+b`, `<` / `>`, drag the explorer's right border | Hide / show the explorer; narrower / wider by 2 cells. Default 22 % of the width, at least 18 cells, at most half the screen and never leaving the right panels under 40 (the minimum wins on tiny screens); kept for the session, re-clamped on terminal resize. |
 | Description | `up` `down`, click | Select a row (read-only; headings and blank lines are skipped, the list wraps). A rescan of the same item keeps the row with the same field label. |

@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from xmr4el_tui import procinfo, process, runs
-from xmr4el_tui.progress import current_stage, last_stage_event, read_events
+from xmr4el_tui.progress import EventTail, current_stage, last_stage_event
 
 
 @dataclass(frozen=True)
@@ -18,17 +18,6 @@ class Activity:
     stage: str | None = None    # `hierarchy  layer 1/2 · …` of its current stage
     device: str | None = None
     last: tuple | None = None   # (stage, time) of its last event
-
-
-@dataclass(frozen=True)
-class Tail:
-    """How far a recorded-running run's events.jsonl was read, and what that gave."""
-    file: tuple | None        # (device, inode): another file at the path = start over
-    size: int                 # file size at the last read: unchanged with the same state word = nothing to do
-    offset: int               # bytes consumed (a torn last line stays unread)
-    events: list              # ponytail: every parsed event of the run kept; a streaming reducer if files get huge
-    word: str                 # state word the activity was derived with (LOST fails the current stage)
-    activity: Activity
 
 
 @dataclass(frozen=True)
@@ -58,7 +47,9 @@ class ExperimentRepository:
     def __init__(self, root):
         self.root = Path(root)
         self.cache = {}  # runs.scan cache
-        self.tails = {}  # recorded-running run id -> Tail
+        # recorded-running run id -> (EventTail, state word and Activity derived from it: LOST fails the current
+        # stage). ponytail: every parsed event of the run kept; a streaming reducer if files get huge
+        self.tails = {}
         self.last = Snapshot()  # last successful scan
 
     def snapshot(self, fresh=False):
@@ -84,22 +75,13 @@ class ExperimentRepository:
     def activity(self, run):
         """Activity of a recorded-running run. Reads only the events appended since the last scan; a replaced or
         truncated events.jsonl is read again from the start; an unchanged one is not touched."""
-        path, word = run.path / "events.jsonl", runs.state_word(run)
-        try:
-            st = path.stat()
-            file, size = (st.st_dev, st.st_ino), st.st_size
-        except OSError:
-            file, size = None, 0
-        old = self.tails.get(run.id)
-        if old and (old.file, old.size, old.word) == (file, size, word):
-            return old.activity
-        events, offset = (old.events, old.offset) if old and old.file == file and size >= old.offset else ([], 0)
-        if size > offset:
-            new, offset = read_events(path, offset)
-            events = events + new
-        activity = Activity(current_stage(run, events), runs.text(runs.read_dict(run.path / "provenance.json"),
-                                                                  "torch_device"), last_stage_event(events))
-        self.tails[run.id] = Tail(file, size, offset, events, word, activity)
+        word = runs.state_word(run)
+        tail, old_word, activity = self.tails.get(run.id) or (EventTail(run.path / "events.jsonl"), None, None)
+        if not tail.read() and old_word == word:
+            return activity
+        activity = Activity(current_stage(run, tail.events), runs.text(runs.read_dict(run.path / "provenance.json"),
+                                                                       "torch_device"), last_stage_event(tail.events))
+        self.tails[run.id] = (tail, word, activity)
         return activity
 
     def details(self, node):

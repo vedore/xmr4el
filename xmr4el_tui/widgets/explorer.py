@@ -5,6 +5,7 @@ from textual.widgets import Tree
 
 from xmr4el_tui import explorer
 from xmr4el_tui.fmt import STATE_SHORT, STATE_STYLE
+from xmr4el_tui.widgets.resize import DragRightBorder, column_width
 from xmr4el_tui.widgets.row_rendering import FullRow, Selectable
 
 EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN, EXPLORER_STEP = 0.22, 18, 0.5, 40, 2
@@ -13,8 +14,7 @@ EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN, EXPLORER_STEP = 0.2
 def explorer_width(want, total):
     """Explorer cells on a `total`-cell screen: `want` (None: EXPLORER_SHARE of it), at least EXPLORER_MIN, at most
     half the screen and never leaving the right panels under RIGHT_MIN (the minimum wins on tiny screens)."""
-    want = round(total * EXPLORER_SHARE) if want is None else want
-    return max(EXPLORER_MIN, min(want, int(total * EXPLORER_MAX_SHARE), total - RIGHT_MIN))
+    return column_width(want, total, EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN)
 
 
 def node_label(node):
@@ -29,12 +29,12 @@ def node_label(node):
     return t
 
 
-class Explorer(Selectable, FullRow, Tree):
+class Explorer(DragRightBorder, Selectable, FullRow, Tree):
     """Keyboard tree of explorer.build() nodes; node data = node key. Expanded keys and the cursor survive
     rebuilds; a cursor whose item vanished lands on its nearest surviving ancestor. Dragging its right border
     resizes it."""
     CURSOR = "tree--cursor"
-    dragging, lit = False, None  # class defaults: Tree.__init__ already runs the cursor watcher
+    lit = None  # class default: Tree.__init__ already runs the cursor watcher
     BINDINGS = [Binding("tab", "cursor_down", "next", show=False),
                 Binding("shift+tab", "cursor_up", "previous", show=False),
                 Binding("left", "collapse_or_parent", "collapse", show=False),
@@ -65,22 +65,6 @@ class Explorer(Selectable, FullRow, Tree):
             self.lit._selected = True
         self._line_cache.clear()
         self.refresh()
-
-    def on_mouse_down(self, event):
-        if event.x >= self.outer_size.width - 1:
-            self.dragging = True
-            self.capture_mouse()
-            self.screen.clear_selection()  # a resize is not a text selection
-            event.stop()
-
-    def on_mouse_move(self, event):
-        if self.dragging:
-            self.screen.set_explorer_width(event.screen_x - self.region.x + 1)
-
-    def on_mouse_up(self, _):
-        if self.dragging:
-            self.dragging = False
-            self.release_mouse()
 
     def selected_key(self):
         return self.cursor_node.data if self.cursor_node else None

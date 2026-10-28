@@ -20,6 +20,7 @@ from xmr4el_tui.runs import elapsed, state_word
 from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, VIEW_LOGS, eval_text, group_text,
                                                    run_text, state_text, tree_text)
 from xmr4el_tui.screens.log_screen import LogScreen
+from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import Description
 from xmr4el_tui.widgets.explorer import EXPLORER_STEP, Explorer, explorer_width
@@ -75,23 +76,23 @@ class DashboardScreen(Screen):
             table.add_column(label, key=key)
         self.active_ids, self.explorer_want = [], None  # None: EXPLORER_SHARE of the width
         self.loaded, self.detail_seq = (None, Details()), 0  # (explorer key, its Details), latest request
-        self.set_explorer_width(None)
+        self.set_left_width(None)
         self.refresh_all()
         self.query_one(Explorer).focus()
         self.set_interval(1, self.tick)
 
     # --- explorer size ----------------------------------------------------------------------------------------
-    def set_explorer_width(self, want):
+    def set_left_width(self, want):
         """Keep `want` cells (clamped) for this session; terminal resizes re-clamp it."""
         self.explorer_want = None if want is None else explorer_width(want, self.size.width)
         self.query_one(Explorer).styles.width = explorer_width(self.explorer_want, self.size.width)
 
     def on_resize(self, _):
-        self.set_explorer_width(self.explorer_want)
+        self.set_left_width(self.explorer_want)
 
     def action_resize_explorer(self, step):
         self.query_one(Explorer).display = True
-        self.set_explorer_width(explorer_width(self.explorer_want, self.size.width) + step)
+        self.set_left_width(explorer_width(self.explorer_want, self.size.width) + step)
 
     def action_toggle_explorer(self):
         tree = self.query_one(Explorer)
@@ -221,9 +222,9 @@ class DashboardScreen(Screen):
         return any(r.id == run_id for r in self.app.snapshot.runs)
 
     def open_run(self, run_id, split=None):
-        """Run monitor of `run_id` (on `split`). The screen is not rebuilt yet: says what it would open."""
+        """Run monitor of `run_id` (its `split` stage selected); esc comes back here with the selection kept."""
         if run_id and self.run_here(run_id):
-            self.notify(f"Run monitor: {run_id}" + (f" · {split}" if split else "") + " (screen not built yet)")
+            self.app.push_screen(RunMonitorScreen(run_id, split))
         else:
             self.notify("That run directory is no longer found.", severity="warning")
 

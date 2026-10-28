@@ -6,6 +6,7 @@ failed / stopped phases (before schema v1) still read.
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 from xmr4el_tui.fmt import count, metric
 from xmr4el_tui.runs import parse_time, state_word
@@ -22,7 +23,8 @@ class Stage:
     seconds: float | None     # ended: its duration_seconds (monotonic), else start -> end; current: None
     start: datetime | None
     detail: str = ""          # "layer 1/2 · node 1/1 · 474,854 rows", "cache hit", ...
-    parts: tuple["Stage", ...] = ()     # encode parts in fit order (§5.2), eval parts data/predict/metrics/write
+    parts: tuple["Stage", ...] = ()     # encode parts in fit order (§5.2), eval parts data/predict/metrics/write,
+                                        # hierarchy layers ("layer 1": ended when the next layer or hierarchy ends)
     bar: tuple[int, int] | None = None  # (done, total) distinct mentions
     error: str | None = None  # a failed stage's recorded error
 
@@ -46,6 +48,31 @@ def read_events(path, offset=0):
         if isinstance(event, dict):
             events.append(event)
     return events, offset + end
+
+
+class EventTail:
+    """events.jsonl read incrementally (the scan's and the Run monitor's reader): only bytes appended since the last
+    `read`; a replaced or truncated file is read again from the start; an unchanged one is not read."""
+
+    def __init__(self, path):
+        self.path, self.file, self.size, self.offset, self.events = Path(path), None, 0, 0, []
+
+    def read(self):
+        """-> True when `events` changed. `events` is replaced, never mutated (a reader may hold the old list)."""
+        try:
+            st = self.path.stat()
+            file, size = (st.st_dev, st.st_ino), st.st_size
+        except OSError:
+            file, size = None, 0
+        if (file, size) == (self.file, self.size):
+            return False
+        if file != self.file or size < self.offset:
+            self.events, self.offset = [], 0
+        self.file, self.size = file, size
+        if size > self.offset:
+            new, self.offset = read_events(self.path, self.offset)
+            self.events = self.events + new
+        return True
 
 
 def event_time(event):
@@ -73,11 +100,16 @@ def stages(events, kind, splits, recorded):
     keys = [*(TRAIN_STAGES if kind == "train" else EVAL_STAGES), *(f"eval:{s}" for s in splits)]
     start, end, detail, parts = {}, {}, {}, {}  # key -> ...; parts: key -> {part: same dicts}
     layer = node = None
+    layers = []  # [layer start event, its last node start event, start time]
     for ev in events:
         stage, phase, t = ev.get("stage"), ev.get("phase"), event_time(ev)
         if stage in ("layer", "node"):  # hierarchy detail only
             if phase == "start":
                 layer, node = (ev, None) if stage == "layer" else (layer, ev)
+                if stage == "layer":
+                    layers.append([ev, None, t])
+                elif layers:
+                    layers[-1][1] = ev
             continue
         key = f"eval:{ev.get('split')}" if stage == "eval" else stage
         if key not in keys:
@@ -118,7 +150,19 @@ def stages(events, kind, splits, recorded):
                          bar, ev.get("error") if isinstance(ev.get("error"), str) else None)
         return Stage(k, unfinished if begun else "pending", None, begun, text, sub, bar)
 
+    def layer_parts():
+        """A layer has only a start event: it ended when the next one started, or with the hierarchy."""
+        out = []
+        for i, (ev, last, t) in enumerate(layers):
+            ended = ({"phase": "complete"}, layers[i + 1][2]) if i + 1 < len(layers) else end.get("hierarchy")
+            text = f"{count(ev.get('nodes'))} nodes" if ended or not last else \
+                f"node {last.get('i')}/{last.get('n')} · {count(last.get('rows'))} rows"
+            out.append(stage(f"layer {ev.get('layer')}", t, ended and ({"phase": ended[0].get("phase")}, ended[1]),
+                             text))
+        return tuple(out)
+
     return [stage(k, start.get(k), end.get(k), detail.get(k, ""),
+                  layer_parts() if k == "hierarchy" else
                   tuple(stage(name, p.get("start"), p.get("end"), p["detail"], bar=p.get("bar"))
                         for name, p in parts.get(k, {}).items()))
             for k in keys]
