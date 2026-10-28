@@ -32,10 +32,15 @@ Footer {
     scrollbar-size: 0 0;
 }
 
+/* docked, not split: the navbar and the footer keep the full width (title and Notifications do not move); the panel
+   sits under the navbar's two rows and above the footer (height: XMR4ELApp.fit_help), and narrows only the panels */
 HelpPanel {
+    split: none;
+    dock: right;
     width: 40;
     min-width: 40;
     max-width: 40;
+    margin: 2 0 1 0;
 }
 
 #dash {
@@ -318,6 +323,7 @@ ToastRack {
 Toast {
     width: 46;
     max-width: 50%;
+    max-height: 6;
     margin-top: 0;
     padding: 0 1;
     background: $xmr-overlay;
@@ -373,7 +379,6 @@ NotificationCenter {
 
 #nc-list {
     height: auto;
-    max-height: 19;
     margin-top: 1;
     border: none;
     padding: 0;

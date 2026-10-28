@@ -93,7 +93,7 @@ tests/tui/test_notifications.py (16); full suite 245 pass, ruff clean. Follow-up
 notified too. Then symbols to plain text: Caution `!`, inspect `i`, incompatible `x`, stage markers `+` `>` `x`.
 NEXT: push `tui` only on the user's OK.
 
-**2026-10-28 Results V1 audit (R01-R11 + P2; audit file deleted by the user after the fixes) fixed (not committed):** producer
+**2026-10-28 Results V1 audit (R01-R11 + P2; audit file deleted by the user after the fixes) fixed (committed):** producer
 `xmr4el/eval.py`: `eval_protocol` (EVAL_PROTOCOL = 1), `strings_sha256` (per kept row: position, train labels of
 its string, dictionary answer), acc@1_all = 0 with no row in vocabulary, empty string groups null rates; runner
 re-hashes inputs after loading / each eval (`check_inputs`: changed = run fails, no metrics). TUI: deltas need equal
@@ -108,8 +108,21 @@ Every existing metrics file lacks `eval_protocol` / `strings_sha256`: Results sh
 re-evaluated (no compatibility code). Docs tui.md §5.12, §11; evidence reference tui_architecture.md §3a; rules in
 AGENTS.md (bump EVAL_PROTOCOL) and CLAUDE.md. Full suite 251 pass, `uvx --offline ruff check xmr4el xmr4el_tui scripts
 tests` clean. Left on purpose: caching repeated metadata reads in read_facts (0.1 s / 1,000 evals). All of this is
-uncommitted on `tui` (`git status`: 22 modified, compare.py + test_compare.py staged deleted). NEXT: commit on the
-user's OK (one commit, "TUI: Results V1 audit fixes ..."); user re-evaluates the trees they compare.
+committed on `tui`. NEXT: user re-evaluates the trees they compare.
+
+**2026-10-28 TUI application UX audit (`docs/audits/tui_application_ux_integration_audit_2026-10-28.md`,
+F01-F11 + R01) fixed (committed on `tui`, not pushed):** notices keyed by run
+incarnation (`notifications.incarnation`: id + recorded start + pid/start token), targets carry it and `open_notice`
+rejects a replaced run; LOST provisional (repository re-reads a run found gone: a final status written meanwhile
+wins; the manager keeps watching LOST/UNKNOWN and a recorded outcome replaces the interruption notice); STOPPED =
+"Run cancelled" only for this TUI's Cancel Run (`notices.requested`), else "Run stopped · Stopped by <signal>";
+first-scan cutoff = scan start (`Snapshot.at`) to the second; `sent`/`watched` pruned to existing run dirs;
+center rows keyed by notice identity (selection and scroll kept on arrivals), list height fits the terminal;
+notification destinations pushed over the current screen (comparison kept); one toast at a time, lines ≤ 88 chars,
+max 6 rows, opening the center clears it; HelpPanel docked (not split) under the navbar (`App.fit_help`), bell
+falls back to `Notif`; `n` hidden from the footer and the empty Dashboard says New Experiment is planned. Docs tui.md
+§4 + key table, tui_architecture.md. Full suite 269 pass, ruff clean. NEXT: push `tui` only on the user's OK; user may
+delete the audit file.
 
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).

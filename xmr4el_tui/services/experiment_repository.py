@@ -28,6 +28,7 @@ class Snapshot:
     active: dict = field(default_factory=dict)  # recorded-running run id -> Activity
     scanned: bool = False     # False: the first scan has not landed yet
     problem: str | None = None  # why this scan failed (the other fields are then the last successful scan's)
+    at: datetime | None = None  # when this scan started (before anything was read)
 
 
 @dataclass(frozen=True)
@@ -54,23 +55,34 @@ class ExperimentRepository:
 
     def snapshot(self, fresh=False):
         """Read everything the Dashboard lists. Only reads files; `fresh` rereads every one (no cache)."""
+        at = datetime.now()
         if fresh:
             self.cache.clear()
             self.tails.clear()
         try:
             found = runs.scan(self.root, self.cache)
         except FileNotFoundError:
-            self.last = Snapshot(trees=tuple(runs.trees(self.root, [])), scanned=True)
+            self.last = Snapshot(trees=tuple(runs.trees(self.root, [])), scanned=True, at=at)
             return self.last
         except OSError as err:  # outputs/runs cannot be listed: keep the last good scan, say why
-            return replace(self.last, scanned=True, problem=f"outputs/runs/ cannot be read ({type(err).__name__}); "
+            return replace(self.last, scanned=True, at=at, problem=f"outputs/runs/ cannot be read ({type(err).__name__}); "
                                                             "showing the last successful scan")
         here = procinfo.runtime()
-        found = [replace(r, live=process.derived_state(r, here)) if r.recorded == "running" else r for r in found]
+        found = [self.live(r, here) if r.recorded == "running" else r for r in found]
         active = {r.id: self.activity(r) for r in found if r.recorded == "running"}
         self.tails = {k: v for k, v in self.tails.items() if k in active}
-        self.last = Snapshot(tuple(found), True, tuple(runs.trees(self.root, found)), active, scanned=True)
+        self.last = Snapshot(tuple(found), True, tuple(runs.trees(self.root, found)), active, scanned=True, at=at)
         return self.last
+
+    def live(self, run, here):
+        """`run` (recorded running) with its live state. A process found gone may have written its final status
+        after status.json was read: then the run is read again and shows that outcome, not LOST."""
+        live = process.derived_state(run, here)
+        if live.state == "LOST":
+            fresh = runs.read_run(run.path, self.root)
+            if fresh.recorded in process.FINAL:  # its files changed: the cache rereads it next scan
+                return fresh
+        return replace(run, live=live)
 
     def activity(self, run):
         """Activity of a recorded-running run. Reads only the events appended since the last scan; a replaced or

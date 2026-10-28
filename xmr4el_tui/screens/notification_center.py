@@ -15,6 +15,10 @@ from textual.widgets.option_list import Option
 
 from xmr4el_tui import fmt, theme
 
+LIST_ROWS = 19  # most rows of notices shown at once
+CHROME = 9      # rows of the box that are not the list: margin 2, border 2, head 1, list margin 1, foot 1 + 2
+ROW = 4         # rows per notice: three lines and the separator
+
 
 def age(at, now=None):
     seconds = ((now or datetime.now()) - at).total_seconds()
@@ -51,21 +55,31 @@ class NotificationCenter(ModalScreen):
         self.fill()
         self.query_one(OptionList).focus()
 
+    def on_resize(self, event):
+        """The whole box fits the terminal: the list gets the rows the rest of the box leaves."""
+        self.query_one(OptionList).styles.max_height = max(ROW - 1, min(LIST_ROWS, event.size.height - CHROME))
+
     def fill(self):
-        """(Re)draw from the app's history; shown = seen. The highlighted row stays on the same notice."""
+        """(Re)draw from the app's history; shown = seen. The highlighted row stays on the same notice, at the same
+        place in the list, when newer ones arrive above it."""
         notices, box = self.app.notices, self.query_one(OptionList)
         self.app.notices.seen()
         self.app.refresh_bars()
         keep = box.highlighted_option.id if box.highlighted_option is not None else None
+        was, y = box.highlighted, box.scroll_y
         width = (box.scrollable_content_region.width or 48) - 2
-        self.ids = {str(i): n for i, n in enumerate(notices.items)}
+        # row id = the notice object's identity (alive while listed): unchanged when newer notices are prepended
+        self.ids = {str(id(n)): n for n in notices.items}
         options = []
         for i, n in self.ids.items():
             options += [None] if options else []
             options.append(Option(row(n, width), id=i))
         box.set_options(options)
-        if self.ids:
-            box.highlighted = box.get_option_index(keep) if keep in self.ids else 0
+        if self.ids and keep in self.ids:
+            box.highlighted = box.get_option_index(keep)
+            box.scroll_to(y=y + (box.highlighted - was) * ROW, animate=False, immediate=True)
+        elif self.ids:
+            box.highlighted = 0
         box.display = bool(self.ids)
         self.query_one("#nc-clear").display = bool(self.ids)
         self.query_one("#nc-empty", Static).update("All caught up\nNo notifications in this session.")

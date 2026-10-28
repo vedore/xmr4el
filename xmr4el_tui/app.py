@@ -18,13 +18,14 @@ from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.screens.notification_center import NotificationCenter
 from xmr4el_tui.screens.results_screen import ResultsScreen
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
-from xmr4el_tui.services.notifications import Notice, Notifications, subject
+from xmr4el_tui.services.notifications import Notice, Notifications, incarnation, subject
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.top_bar import TopBar
 
 RESCAN_SECONDS = 5
 FEEDBACK_SECONDS = 3.5  # footer feedback, then the shortcuts again
 TOAST_SECONDS = 4       # below RESCAN_SECONDS: one scan's toast is gone before the next scan's
+TOAST_LINE = 88         # characters per toast line: two wrapped rows of the 46-column toast
 WORST_FIRST = ("error", "warning", "success", "information")
 
 # The one style (no theme picker). Every colour comes from theme.TOKENS; screens use only theme variables in app.tcss,
@@ -56,7 +57,7 @@ class XMR4ELApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "XMR4EL"
     BINDINGS = [Binding("question_mark", "help", "keys"), Binding("f1", "help", "keys", show=False),
-                Binding("n", "new_experiment", "new"), Binding("ctrl+n", "notifications", "notifications"),
+                Binding("n", "new_experiment", "new", show=False), Binding("ctrl+n", "notifications", "notifications"),
                 Binding("ctrl+c", "quit", "quit", show=False, priority=True),
                 Binding("escape", "escape", "cancel", show=False, priority=True)]
 
@@ -108,19 +109,17 @@ class XMR4ELApp(App):
 
     def apply_scan(self, snapshot, announce=False, reaped=()):
         """New snapshot to every screen; ended runs, failed launches and a new scan problem become notifications."""
-        new = []
-        if snapshot.problem and snapshot.problem != self.snapshot.problem:
-            new.append(Notice(("scan", snapshot.problem), "warning", "Scan failed", "outputs/runs/", snapshot.problem,
-                              datetime.now(), None))
+        new, at = [], snapshot.at or datetime.now()
         by_id = {r.id: r for r in snapshot.runs}
         for run_id, what in reaped:  # same key as the LOST transition the scan may also see: reported once
             run = by_id.get(run_id)
-            new.append(Notice((run_id, "LOST"), "error" if what.startswith("not started") else "warning",
+            inc = incarnation(run) if run else run_id
+            new.append(Notice((inc, "LOST"), "error" if what.startswith("not started") else "warning",
                               "Launch failed" if what.startswith("not started") else "Run interrupted",
-                              subject(run, snapshot.runs) if run else run_id, what, datetime.now(),
-                              ("monitor", run_id) if run else None))
+                              subject(run, snapshot.runs) if run else run_id, what, at,
+                              ("monitor", run_id, inc) if run else None))
         self.snapshot = snapshot
-        self.toast(self.notices.add(new) + self.notices.observe(snapshot.runs))
+        self.toast(self.notices.add(new) + self.notices.observe(snapshot.runs, at, snapshot.problem))
         if announce:
             self.say(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found
                      else "Rescanned: outputs/runs/ not found")
@@ -129,8 +128,9 @@ class XMR4ELApp(App):
 
     # --- notifications ------------------------------------------------------------------------------------------
     def toast(self, new):
-        """One toast per scan (several events: one summary), gone before the next scan's; none over the open
-        notification center, which shows them in its list instead. A toast never takes focus."""
+        """One toast at a time (several events: one summary; a newer delivery replaces the shown one), each line cut to
+        TOAST_LINE characters; none over the open notification center, which lists them instead. The full text stays
+        in the center. A toast never takes focus."""
         if not new:
             return
         if isinstance(self.screen, NotificationCenter):
@@ -139,35 +139,40 @@ class XMR4ELApp(App):
         self.refresh_bars()
         if len(new) == 1:
             n = new[0]
-            title, text, severity = n.title, "\n".join(p for p in (n.subject, n.text) if p), n.severity
+            title, lines, severity = n.title, (n.subject, n.text), n.severity
         else:
-            title, text = "Notifications", f"{len(new)} experiment events.\nctrl+n opens notifications."
+            title, lines = "Notifications", (f"{len(new)} experiment events.", "ctrl+n opens notifications.")
             severity = next(s for s in WORST_FIRST if any(n.severity == s for n in new))
+        text = "\n".join(p if len(p) <= TOAST_LINE else p[:TOAST_LINE - 1] + "…" for p in lines if p)
+        self.call_later(self.clear_notifications)  # queued like notify: also clears toasts still in the queue
         self.notify(text, title=f" {title} ", severity=severity, timeout=TOAST_SECONDS, markup=False)
 
     def action_notifications(self):
         if isinstance(self.screen, NotificationCenter):
             self.screen.dismiss()
-        elif not isinstance(self.screen, ModalScreen):  # not over a dialog
+        elif not isinstance(self.screen, ModalScreen):  # not over a dialog; the toast would cover the list
+            self.call_later(self.clear_notifications)
             self.push_screen(NotificationCenter())
 
     def open_notice(self, notice):
-        """A notification's destination, opened from the Dashboard (the screens above it are closed). One that no
-        longer exists opens nothing and says so."""
-        kind, ref = notice.target or (None, None)
+        """A notification's destination, over the current screen (esc returns to it as it was; an open comparison is
+        never replaced). Opened only if the latest scan still has the same run behind it (not a new run reusing its
+        directory name); else nothing opens and the footer says so."""
+        kind, ref, inc = notice.target or (None, None, None)
         snap = self.snapshot
         if kind == "results":
             node = explorer.index(explorer.build(snap.runs, snap.trees)).get(ref, (None,))[0]
-            ok = node is not None and node.kind == "eval" and bool(node.ref[1].metrics)
+            ok = node is not None and node.kind == "eval" and bool(node.ref[1].metrics) \
+                and incarnation(node.ref[0]) == inc
         else:
-            ok = kind == "monitor" and any(r.id == ref for r in snap.runs)
+            ok = kind == "monitor" and any(r.id == ref and incarnation(r) == inc for r in snap.runs)
         if not ok:
             if kind:
                 self.say("That evaluation is no longer found." if kind == "results"
                          else "That run directory is no longer found.", "warning")
             return
-        dashboard = next(s for s in self.screen_stack if isinstance(s, DashboardScreen))
-        self.go_to(dashboard, 0)
+        if kind == "monitor" and isinstance(self.screen, RunMonitorScreen) and self.screen.run.id == ref:
+            return  # already open
         self.push_screen(ResultsScreen(ref) if kind == "results" else RunMonitorScreen(ref))
 
     # --- navbar and footer ----------------------------------------------------------------------------------------
@@ -243,7 +248,18 @@ class XMR4ELApp(App):
             self.action_hide_help_panel()
         else:
             self.action_show_help_panel()
+            self.call_after_refresh(self.fit_help)
         self.refresh_bindings()
+
+    def on_resize(self):
+        self.fit_help()
+
+    def fit_help(self):
+        """The docked help panel spans the rows between the navbar (2) and the footer (1): a dock's margin is not taken
+        from its height, so it is set here."""
+        for screen in self.screen_stack:
+            for panel in screen.query("HelpPanel"):
+                panel.styles.height = max(1, self.size.height - 3)
 
     def check_action(self, action, parameters):
         """esc cancels a quit confirmation, else closes help; otherwise the screen's esc runs and shows in the

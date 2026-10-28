@@ -17,6 +17,7 @@ from xmr4el_tui.progress import EventTail, stages
 from xmr4el_tui.runs import state_word
 from xmr4el_tui.screens.monitor_details import banner, overview_text, resource_text
 from xmr4el_tui.screens.stop_dialog import StopDialog
+from xmr4el_tui.services.notifications import incarnation
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.log_panel import LogPanel
 from xmr4el_tui.widgets.log_view import LogView
@@ -196,6 +197,8 @@ class RunMonitorScreen(Screen):
             self.app.say(f"{self.run.name} is {state_word(self.run)}: nothing was sent.")
             return
         self.cancelling = True
+        # before the signal: the scan that sees STOPPED may land before StopSent; a cancellation, not an external stop
+        self.app.notices.requested.add(incarnation(self.run))
         self.show_overview()
         self.refresh_bindings()
         self.send_stop(self.run)
@@ -207,6 +210,7 @@ class RunMonitorScreen(Screen):
     def on_stop_sent(self, message):
         if message.result.startswith("not signalled"):
             self.cancelling = False
+            self.app.notices.requested.discard(incarnation(self.run))
             self.app.say(f"{self.run.name}: {message.result}", "warning", self)
         else:
             self.app.say(f"{self.run.name}: {message.result}; it records STOPPED when it exits.", screen=self)

@@ -253,6 +253,8 @@ def test_cancel_run(live):
         await rescan(app, pilot)
         assert "STOPPED" in text(screen.query_one("#overview-text")) and button.disabled
         assert "Stopped by SIGTERM" in text(screen.query_one("#overview-banner"))
+        assert [(n.title, n.text) for n in app.notices.items] == [("Run cancelled", "Stopped on request.")], \
+            "the stop this TUI sent"
     run_monitor(run.parent.parent.parent, check)
 
 
@@ -273,6 +275,7 @@ def test_cancel_races_and_finished_runs(live, monkeypatch):
         await pilot.press("s", "tab", "enter")
         await settle(app, pilot)
         assert not screen.cancelling and not screen.query_one("#cancel").disabled, "refused: may be retried"
+        assert not app.notices.requested, "nothing sent: a later stop is not this TUI's"
     patch_json(run / "status.json", status="running", finished=None)
     run_monitor(run.parent.parent.parent, refused)
 

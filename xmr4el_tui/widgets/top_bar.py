@@ -5,6 +5,7 @@ from textual.widgets import Static
 
 TITLE = "XMR4EL"
 BELL = "Notifications"  # text, no emoji
+BELL_SHORT = "Notif"    # when the full label and count do not fit right of the title
 SEP = " / "
 
 
@@ -32,10 +33,13 @@ class TopBar(Static):
         # centred on the app, not the bar (the help panel narrows the bar)
         start = max(0, min(width - len(TITLE), (self.app.size.width - len(TITLE)) // 2 - self.region.x))
         unseen = self.app.notices.unseen
-        bell = Text.assemble((BELL, style("topbar--bell")),
-                             *((" ", (str(unseen), style("topbar--unseen"))) if unseen else ()), " ")
-        bell_x = width - bell.cell_len
-        self.spans = [(bell_x, width, "bell")] if bell_x >= start + len(TITLE) + 1 else []
+        for label in (BELL, BELL_SHORT):
+            bell = Text.assemble((label, style("topbar--bell")),
+                                 *((" ", (str(unseen), style("topbar--unseen"))) if unseen else ()), " ")
+            bell_x = width - bell.cell_len
+            self.spans = [(bell_x, width, "bell")] if bell_x >= start + len(TITLE) + 1 else []
+            if self.spans:
+                break
         trail = crumbs(self.app, self.screen)
         nav, x = Text(" "), 1
         for i, crumb in enumerate(trail):

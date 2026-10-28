@@ -88,7 +88,8 @@ timer. Runs keep running after a quit (TUI launches are detached: own session, o
 says so when runs are active. `ctrl+r` says the run count in the footer.
 
 **Navbar (2026-10-28, replaces the 2026-10-27 areas).** Breadcrumbs left (`Dashboard / Results / Inspect`), `XMR4EL`
-centred on the app width (never moved by the crumbs or the bell), `Notifications` right with the unseen count (text: no emoji anywhere in the TUI); one blank row under the
+centred on the app width (never moved by the crumbs, the bell or the help panel, which docks under the navbar and
+above the footer), `Notifications` right with the unseen count (`Notif` when that does not fit; text: no emoji anywhere in the TUI); one blank row under the
 navbar separates it from the panels. Crumbs come from
 the screen stack (each screen's `crumbs`; modal screens add none): no second navigation history. Focus, panels and
 metric groups never change them. A click on an earlier crumb goes back to it (screens above close as with `esc`;
@@ -97,16 +98,25 @@ counts or other summaries (they live in the panels).
 
 **Three message layers (2026-10-28).** (1) *Notifications*: experiment lifecycle only, in memory for the session
 (`services/notifications.py`, 50 newest). The first scan records each run's state and notifies nothing; a run seen
-RUNNING / UNVERIFIED and next seen COMPLETED / FAILED / LOST / STOPPED, or a run started during the session first
-seen already ended (shorter than a scan), makes one notice per (run id, end state);
-a launch that exits without a final status uses the LOST key (reported once); a new scan problem is a notice
-without destination. Destination: one evaluation with metrics → Results with it as the baseline; otherwise (several
-evaluations, failure, interruption, cancel) → Run Monitor; opened from the Dashboard, checked against the latest
-scan (gone: footer says so). Toast: top right under the navbar, at most one per scan (several events = one summary),
-4 s (< the 5 s scan), none while the center is open; the severity tints only the title chip. Center (`ctrl+n` or
-a click on Notifications): a 52-column box under Notifications over the current screen (ModalScreen: focus, cursor, scroll, comparison
-of the screen below unchanged); opening marks all seen; `↑↓` `enter` / click opens, `c` / `Clear all` empties the
-history only, `esc` closes. (2) *Footer feedback*: replies to the user's actions (invalid Results target, maximum
+RUNNING / UNVERIFIED and later seen COMPLETED / FAILED / LOST / STOPPED, or a run started during the session (at or
+after the first scan's start, to the second) first seen already ended, makes one notice per (incarnation, end
+state). Incarnation = run id + recorded start + process identity: a new run reusing a directory name is a new run,
+and an old notice never opens it. LOST is provisional: a process found gone is re-read once (a final status written
+meanwhile wins), the run stays watched, and a final status read later replaces the interruption notice; UNKNOWN
+(status.json unreadable) is waited out. STOPPED is "Run cancelled · Stopped on request" only when this TUI sent the
+stop (Cancel Run); otherwise "Run stopped · Stopped by SIGTERM" (the recorded signal, no intent claimed). A launch
+that exits without a final status uses the LOST key (reported once); a new scan problem is a notice without
+destination. Keys of runs whose directory is gone are forgotten (memory bounded by outputs/runs/). Destination: one
+evaluation with metrics → Results with it as the baseline; otherwise (several evaluations, failure, interruption,
+stop) → Run Monitor; pushed over the current screen (`esc` returns to it as it was; an open comparison is never
+replaced; the monitor already shown is not opened twice), checked against the latest scan by incarnation (gone or
+replaced: footer says so). Toast: top right under the navbar, one at a time (a newer delivery replaces it; several
+events = one summary), lines cut to 88 characters, at most 6 rows, 4 s; none while the center is open, and opening
+the center removes the shown one; the severity tints only the title chip. Center (`ctrl+n` or a click on
+Notifications): a 52-column box under Notifications over the current screen (ModalScreen: focus, cursor, scroll,
+comparison of the screen below unchanged); its list gets the rows the terminal leaves (whole box visible at 80x24);
+the selected row stays on its notice (and on screen) when newer ones arrive; opening marks all seen; `↑↓` `enter` /
+click opens, `c` / `Clear all` empties the history only, `esc` closes. (2) *Footer feedback*: replies to the user's actions (invalid Results target, maximum
 challengers, incompatible evaluation, missing run, copy, rescan) left of the shortcuts for 3.5 s; a newer one
 replaces it; it belongs to its screen (navigation drops it); never kept as a notification. (3) *Footer confirmation*:
 quit; replaces the shortcuts until answered; feedback and notifications never replace it. Comparison Caution stays
@@ -718,7 +728,7 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Description | `enter` / click on `View Logs  [Open]` | Fullscreen read-only log of the item's run (evaluation: its run, between Run and State; run: between Type and State; tree: its training run, between Training run and Run state). `esc` returns with the row still selected. |
 | Log viewer | `↑` `↓` `pgup` `pgdn` `home` `end`, `/` search (enter finds, `esc` closes the box), `n` / `N` next / previous match, `l` level all → INFO+ → WARNING+ → ERROR+, `esc` back | Header: run name, id, state, file, level, match i/n. An active run is polled every second and follows the end while the view is at the end; a finished run is read once. A missing log shows why, nothing is generated. At most 100 000 lines kept, first read ≤ 8 MiB from the end. |
 | Explorer, Description, Active runs | mouse drag | Select text (blue); on release it is copied to the clipboard by OSC 52 (`App.copy_to_clipboard`), so it reaches the terminal the TUI runs in, also through `ssh` / `docker exec`; a toast says how many characters. A click without a drag copies nothing; dragging the explorer border resizes, never selects. The terminal must allow OSC 52. |
-| Everywhere | `n` | New Experiment (screen not built yet: a notice). |
+| Everywhere | `n` | New Experiment (planned, screen not built: footer says so; not shown in the footer, and the empty Dashboard says it is planned). |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |
 | Runs | `n` | New training run. |

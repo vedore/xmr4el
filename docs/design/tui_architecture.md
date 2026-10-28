@@ -42,7 +42,7 @@ xmr4el_tui/
   services/
     experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
                    and incremental events tails; Details of the selected item
-    notifications.py  session notifications: run-state transitions -> Notice (dedup, bounded, unseen)
+    notifications.py  session notifications: run-state transitions -> Notice (by incarnation; LOST provisional; dedup, bounded, unseen)
     comparison.py  Results: Facts per evaluation (hashes, preprocessing, commits), assess -> Compat
                    (VERIFIED / CAUTION / INCOMPATIBLE + reason), metric groups and allowed deltas
   screens/
@@ -204,7 +204,7 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
 | Class | Shows | Reads |
 | --- | --- | --- |
-| `App` | help panel, theme; notifications (`Notifications.observe` per scan, toasts, `open_notice`); footer state (`say`, quit confirmation); `go_to` (breadcrumb click) | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
+| `App` | help panel, theme; notifications (`Notifications.observe` per scan with the scan's start time, one toast at a time, `open_notice` pushes over the current screen after an incarnation check); footer state (`say`, quit confirmation); `go_to` (breadcrumb click) | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
 | `RunMonitorScreen` | one run by id: overview, pipeline, resources of the selected stage, live log | `App.snapshot` (state); `progress.EventTail` + resources.json (stat, reread on change) every 1 s in a worker while active, one read after it ends; provenance.json once; the log via `LogPanel` |
 | `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 
