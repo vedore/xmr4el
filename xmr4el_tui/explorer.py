@@ -5,7 +5,6 @@ split), a run is its directory name. Labels are display names, made unique among
 tree shows two lines (`tree_title`, then `detail`: training date and a short tree id that no other tree shares).
 """
 import os
-from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -47,10 +46,17 @@ def eval_state(run, e):
     return "UNKNOWN" if word == "COMPLETED" else word
 
 
-def unique(nodes, suffix):
-    """Siblings with equal labels get ` · suffix(node)`."""
-    seen = Counter(n.label for n in nodes)
-    return tuple(replace(n, label=f"{n.label} · {suffix(n)}") if seen[n.label] > 1 else n for n in nodes)
+def unique(nodes, *suffixes):
+    """Siblings with equal labels get ` · suffix(node)`: the first of `suffixes` that tells them apart, else the last
+    (the run id: one minute can hold two runs of one spec)."""
+    twins = {}
+    for n in nodes:
+        twins.setdefault(n.label, []).append(n)
+
+    def suffix(n):
+        same = twins[n.label]
+        return next((f for f in suffixes if len({f(m) for m in same}) == len(same)), suffixes[-1])(n)
+    return tuple(replace(n, label=f"{n.label} · {suffix(n)}") if len(twins[n.label]) > 1 else n for n in nodes)
 
 
 def short_ids(ids):
@@ -77,7 +83,7 @@ def tree_title(node):
 def tree_node(t, key, shorts):
     evals = unique([Node(("eval", r.id, e.split), "eval", e.split if r.kind == "train" else f"{e.split} · {r.name}",
                          eval_state(r, e), ref=(r, e)) for r in t.used_by for e in r.evals],
-                   lambda n: fmt.stamp(n.ref[0].started))
+                   lambda n: fmt.stamp(n.ref[0].started), lambda n: n.ref[0].id)
     notes = (["missing"] if not t.here else []) + (["moved"] if t.recorded_path else []) + (
         ["eval running"] if any(r.kind == "eval" and state_word(r) in ACTIVE for r in t.used_by) else [])
     short = shorts[t.id] if t.id else Path(t.path).name
@@ -106,7 +112,7 @@ def build(all_runs, trees):
         if picked:
             out.append(Node(("group", gid), "group", label, children=unique(
                 [Node(("run", r.id), "run", r.name, state_word(r), ref=r) for r in picked],
-                lambda n: fmt.stamp(n.ref.started))))
+                lambda n: fmt.stamp(n.ref.started), lambda n: n.ref.id)))
     return tuple(out)
 
 

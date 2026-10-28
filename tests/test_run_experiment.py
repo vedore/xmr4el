@@ -354,3 +354,16 @@ def test_empty_eval_fails_run(tmp_path, monkeypatch):
     assert json.loads((run_dir / "resources.json").read_text())["stages"][-1]["status"] == "failed"
     assert not [h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
                 and str(run_dir) in h.baseFilename]
+
+
+def test_input_changed_after_fingerprint_fails_eval(tmp_path, monkeypatch):
+    """The test file is rewritten after provenance.json recorded its sha256: no metrics are written (R07)."""
+    mod = load_script()
+
+    def rewriting(xm, tree, test_path, events=None, **k):
+        Path(test_path).write_text("other bytes")
+        return {"rows": 1}, None
+    with pytest.raises(ValueError, match="input changed during the run"):
+        eval_only(tmp_path, monkeypatch, mod, rewriting)
+    assert not (tmp_path / "r/metrics_a.json").exists()
+    assert json.loads((tmp_path / "r/status.json").read_text())["status"] == "failed"

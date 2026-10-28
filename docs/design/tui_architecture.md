@@ -32,7 +32,6 @@ xmr4el_tui/
                    locations; state_word, elapsed; spec normalization
   progress.py      events.jsonl -> stage list; current_stage(run, events), last_stage_event(events)
   logs.py          LogTail: incremental, bounded run.log reads (levels, torn lines, truncation); log_path
-  compare.py       comparability verdict and deltas for two selected evaluations (no screen yet)
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
   theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
   process.py       -check, spawn, derived state, stop; Launches (owner of started children)
@@ -74,7 +73,7 @@ xmr4el_tui/
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
-  test_runs.py  test_progress.py  test_logs.py  test_compare.py  test_procinfo.py  test_process.py
+  test_runs.py  test_progress.py  test_logs.py  test_procinfo.py  test_process.py
   test_dashboard.py  test_monitor.py  test_results.py  test_notifications.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
@@ -113,17 +112,20 @@ class Run:
     evals: tuple[Eval, ...]   # spec order
     identity: dict | None     # pid/host/uid/start token/... (§9), None for old runs
     problems: tuple[str, ...] # "metrics_dev.json: invalid JSON", ...
+    live: object = None       # process.Live, set by the app's scan for recorded-running runs
+    train_path, features, depth  # train run: spec train_path, model_config features/depth (explorer descriptor)
+    files: tuple = ()         # scan signature; part of equality, so a rewritten provenance/git makes the Run differ
 ```
 
 `spec`, `provenance`, `git` and `model_config` are read lazily by `Run` helpers (`run.spec()`, ...; a
-JSON object or None) for Compare; the Dashboard reads them once per selection through
-`ExperimentRepository.details`.
+JSON object or None) for Results (`services/comparison.read_facts`); the Dashboard reads them once per
+selection through `ExperimentRepository.details`.
 
 Functions:
 
 | Function | Purpose |
 | --- | --- |
-| `scan(root, cache) -> list[Run]` | Read every non-dot dir under `outputs/runs/`; reuse a cached `Run` while the (name, mtime, size) of its status/spec/tree/metrics files are unchanged (`signature`); a dir vanishing mid-read is left out. Newest first. |
+| `scan(root, cache) -> list[Run]` | Read every non-dot dir under `outputs/runs/`; reuse a cached `Run` while the (name, mtime, size) of its `RUN_FILES` (status, spec, tree, model_config, provenance, git) and metrics files are unchanged (`signature`, stored in `Run.files`); a dir vanishing mid-read is left out. Newest first. |
 | `trees(root, runs) -> list[Tree]` | Group runs by `canonical(root, tree_path)`; a missing location joins the one existing location of its tree_id (several = copies: stays missing). |
 | `same_tree(runs, run) -> list[Run]` | Other runs with the same `tree_id` (details `also:`). |
 | `training_run(runs, tree_id) -> Run \| None` | The `kind == "train"` run that saved this tree (§11 derivation, eval-only defaults). |
@@ -135,6 +137,30 @@ Scan cost: about 5 small JSON reads per changed run; unchanged runs cost one dir
 Rescan every 5 s and on `ctrl+r` (rereads every file), in one Textual thread at a time: a request during a
 scan makes that scan go once more. `events.jsonl` of recorded-running runs is read from the last offset
 (again from 0 when truncated or replaced).
+
+## 3a. Comparison evidence (`services/comparison.py`)
+
+The only place that decides comparability is `assess(base, other)`; `read_facts` gathers what it needs off the UI
+thread. Each piece of evidence proves one thing and gates specific deltas; none implies another.
+
+| Evidence | Recorded in | Proves | Missing | Different |
+| --- | --- | --- | --- | --- |
+| metrics `test_path` / `train_path` / `split` vs spec eval | metrics, spec.json | the metrics belong to that eval (`Facts.conflict`) | — | INCOMPATIBLE |
+| test-file sha256 | provenance.json `inputs` (re-checked after evaluation by the runner) | same dataset bytes | INCOMPATIBLE | INCOMPATIBLE |
+| `rows_total` | metrics | same loaded rows | INCOMPATIBLE | INCOMPATIBLE |
+| `eval_protocol` | metrics (`xmr4el.eval.EVAL_PROTOCOL`) | same metric definitions | CAUTION, no deltas | note, no deltas |
+| `population_sha256` (`[row position, gold]` kept) | metrics | same in-vocabulary rows | §11 derivation: tree training-file sha256, preprocessing, one clean commit; else CAUTION | note, no acc@1 / MRR / R@k / R@cand / hybrid deltas |
+| `strings_sha256` (`[row position, #train labels of the string, dictionary answer]` per kept row) | metrics (only with an eval `train_path`) | same seen/unseen groups and dictionary (vocabulary, abbreviation expansion and reference file all included) | CAUTION, no Generalization deltas | note, no Generalization deltas |
+
+- Hashes count only as 64 lowercase hex characters, commits as 40/64 (`evidence`); anything else is "not recorded".
+- `allowed(flag, compat)` maps a row's flag (`all`, `population`, `strings`, `hybrid`, `hybrid_all`) to these
+  results; every delta also needs `compat.protocol`. A withheld delta is `Δ —`; a missing or `null` value is `N/A`
+  and gets no delta (so an empty string group never gets one).
+- Metrics files written before `eval_protocol` / `strings_sha256` existed (every run before 2026-10-28) give
+  CAUTION without deltas. Re-evaluate the tree; there is no fallback (no compatibility code).
+- Change a metric definition in `evaluate_tree` (formula, denominator, filtering, tie rule) → bump
+  `EVAL_PROTOCOL`, so old and new values are never subtracted.
+- Facts reload when the scan's `Run` tuple changes (provenance/git are in the signature) and on Results `ctrl+r`.
 
 ## 4. Other pure modules
 
@@ -157,28 +183,6 @@ def last_event_age(events, now) -> float | None
 
 Without `events.jsonl`, `stages` returns `[]` and the Overview says the stage list is
 unknown (§8).
-
-**`compare.py`**
-
-```python
-@dataclass(frozen=True)
-class Verdict:
-    level: str                # "hash" | "derived" | "unknown" | "different"
-    reasons: tuple[str, ...]  # header lines of §5.8
-    differs: tuple[str, ...]  # tree, beam_size 10 -> 5, packages, ...
-    subset_deltas: bool       # acc@1, MRR, R@k, R@cand
-    all_rows_delta: bool      # acc@1_all
-    timing_delta: bool
-
-def verdict(a: Run, a_split, b: Run, b_split, runs) -> Verdict
-def default_splits(a: Run, b: Run) -> tuple[str, str]   # first shared split in A's order
-def rows(a_metrics, b_metrics, verdict) -> list[tuple[str, str, str, str]]  # metric, A, B, delta|""
-```
-
-`verdict` implements §11 in order: eval-file sha (`provenance.json`) and
-preprocessing; population hash (`metrics.population_sha256`) or, for older runs, the
-derivation through `training_run` (train sha, preprocessing, one clean commit);
-device for timing.
 
 **`fmt.py`**: `duration(s)`, `stamp(dt, long=False)`, `metric(x)`, `count(n)`,
 `pct(a, b)`, `marker(state, ascii)`. ASCII when `NO_COLOR` is set or the locale is not
@@ -207,8 +211,7 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 | `ResultsScreen` | baseline + up to 3 challengers: summary, one metric group for all, inspection of one | `App.snapshot` (metrics); `comparison.read_facts` for every evaluation in a worker when the scan's runs change |
 
 `DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
-pushes the Run monitor. Backend kept for Setup: `process.check/Launches/rejection`, `compare.verdict/rows`
-(Results reuses compare's hash/preprocessing helpers),
+pushes the Run monitor. Backend kept for Setup: `process.check/Launches/rejection`,
 `runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
@@ -241,6 +244,8 @@ class Launches                                # start() = spawn + keep the handl
 | Increment | File | Change |
 | --- | --- | --- |
 | 1 | `xmr4el/eval.py` `evaluate_tree` | `population_sha256` (sha256 of the JSON list of `[row position, gold label]` kept by the vocabulary filter) and `preprocessing` (`context_window`, `abbrev_expansion`) in the metrics. No metric value changes. |
+| Results audit | `xmr4el/eval.py` `evaluate_tree` | `eval_protocol` (`EVAL_PROTOCOL`), `strings_sha256`; `acc@1_all = 0` when no row is in vocabulary; empty string groups store `null` rates (§3a). |
+| Results audit | `scripts/run_experiment.py` | `check_inputs`: re-hash the training file after loading and each eval's files after evaluating; a change fails the run before metrics are written. |
 | 1 | `pyproject.toml` | package discovery `xmr4el_tui*`, `[project.optional-dependencies] tui = ["textual==<pinned>"]`, `[project.scripts] xmr4el-tui`, package data `*.tcss`; `uv.lock`. |
 | 1 | `xmr4el.dockerfile` | `--extra tui` in the dependency sync. |
 | 1 | `.github/workflows/ci.yml` | `uv sync --locked --extra tui`; ruff over `xmr4el_tui`. |
@@ -259,7 +264,11 @@ no numeric change, no retrain.
 - Screens: Textual `run_test(size=(80, 24))` + Pilot for §7 keys, focus restore,
   column dropping at 60 columns, `NO_COLOR`.
 - `evaluate_tree`: population hash equal for the same file and tree, different when
-  the vocabulary drops a different row; existing metric values unchanged.
+  the vocabulary drops a different row; existing metric values unchanged; `strings_sha256` follows the
+  effective dictionary; zero-sample metrics (`tests/test_eval.py`).
+- Comparison evidence (§3a): `tests/tui/test_results.py` (protocol, strings, conflicts, malformed evidence,
+  provenance-only reload, vanished baseline / inspection, 80x24 Generalization rows); search mounting and
+  same-minute labels in `tests/tui/test_explorer.py`; input re-check in `tests/test_run_experiment.py`.
 - Runner (increment 2): extends `tests/test_run_experiment.py` (synthetic TF-IDF spec,
   subprocess, `cwd=tmp`).
 
@@ -270,7 +279,7 @@ One commit each on `tui`:
 1. `evaluate_tree` population hash + preprocessing, test.
 2. Packaging: `pyproject.toml`, `uv.lock`, empty `xmr4el_tui` with `__main__`,
    Dockerfile, CI. Check: wheel install outside the checkout imports it.
-3. `fmt.py`, `runs.py`, `progress.py` (old runs: empty), `compare.py` + tests.
+3. `fmt.py`, `runs.py`, `progress.py` (old runs: empty) + tests (the two-run `compare.py` was later replaced by `services/comparison.py`).
 4. `RunsScreen` + `RunScreen` (Overview from metrics, Log, Inputs) + screen tests.
 5. `CompareScreen` + tests.
 

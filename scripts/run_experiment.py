@@ -176,6 +176,14 @@ def provenance(spec, raw):
             "packages": {name: pkg(name) for name in PACKAGES}, "torch_device": str(torch_device())}
 
 
+def check_inputs(recorded, paths):
+    """Raise when an input file no longer has the sha256 provenance.json recorded: what was read may not be those
+    bytes, so nothing computed from it is written."""
+    changed = [p for p in paths if p and sha256(p) != recorded.get(p)]
+    if changed:
+        raise ValueError(f"input changed during the run (sha256 differs from provenance.json): {', '.join(changed)}")
+
+
 def write_json(path, obj):
     """Write-then-rename: a crash never leaves a partial JSON file."""
     with open(path + ".tmp", "w") as f:
@@ -223,7 +231,8 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
         write_json(status, {"status": "running", **record})
         write_json(os.path.join(run_dir, "spec.json"), {**spec, "xmodel_path": xmodel_path})
         write_json(os.path.join(run_dir, "git.json"), git_state(run_dir))
-        write_json(os.path.join(run_dir, "provenance.json"), provenance(spec, raw))
+        recorded = provenance(spec, raw)
+        write_json(os.path.join(run_dir, "provenance.json"), recorded)
         logger.info("Run started: dir=%s argv=%s", run_dir, " ".join(sys.argv))
         progress(stage="load", phase="start")
         if not train:
@@ -236,6 +245,7 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             xm = XModel(**json.loads(raw))
             data = Preprocessor.load_pubtator_file(spec["train_path"], window=xm.context_window,
                                                    abbrev=xm.abbrev_expansion)
+            check_inputs(recorded["inputs"], [spec["train_path"]])
             groups = Preprocessor.organize_pubtator_output(data)
             progress(stage="load", phase="complete")
             xm.train(*groups)
@@ -252,6 +262,7 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             m, _ = evaluate_tree(xm, tree, e["test_path"], train_path=e.get("train_path"),
                                  beam_size=e.get("beam_size"), topk=e.get("topk"), knn_beta=e.get("knn_beta"),
                                  leaf_candidates=e.get("leaf_candidates"), events={"split": e["split"]})
+            check_inputs(recorded["inputs"], [e["test_path"], e.get("train_path")])
             m.update(split=e["split"], eval_seconds=round(time.perf_counter() - start, 1))
             progress(stage="eval", split=e["split"], part="write", phase="start")
             write_json(os.path.join(run_dir, f"metrics_{e['split']}.json"), m)

@@ -35,12 +35,14 @@ class FactsRead(Message):
 
 
 class ResultsScreen(Screen):
-    """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, < / > resize the columns."""
+    """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, < / > resize the columns,
+    ctrl+r rescans (facts reread too)."""
     BINDINGS = [Binding("escape", "back", "back"),
                 *(Binding(str(i + 1), f"group({i})", "metric group" if i == 0 else name, show=i == 0,
                           key_display=f"1-{len(GROUP_NAMES)}") for i, name in enumerate(GROUP_NAMES)),
                 Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+                Binding("ctrl+r", "rescan", "rescan", show=False),
                 Binding("less_than_sign", f"resize({-STEP})", "narrower left", show=False),
                 Binding("greater_than_sign", f"resize({STEP})", "wider left", show=False)]
 
@@ -50,6 +52,7 @@ class ResultsScreen(Screen):
         self.base, self.members = baseline, []  # challengers in selection order
         self.group, self.inspecting, self.left_want, self.show_all, self.roots = 0, None, None, False, ()
         self.facts, self.compat, self.names, self.seq, self.facts_runs = {}, {}, {}, 0, None
+        self.loading, self.base_gone = False, False  # facts being read; baseline no longer in the scan
 
     @property
     def crumbs(self):
@@ -94,7 +97,7 @@ class ResultsScreen(Screen):
     def refresh_tree(self):
         """Explorer = the Dashboard's Models branch (datasets > trees > evaluations), cut to `visible`; cursor,
         expansion and members survive. Challengers whose run vanished are dropped (hidden ones are not); the
-        baseline keeps its last facts."""
+        baseline keeps its last facts, marked as no longer found."""
         tree, snap = self.query_one(ResultsExplorer), self.app.snapshot
         self.roots = explorer.build(snap.runs, snap.trees)[0].children
         full = explorer.index(self.roots)
@@ -102,6 +105,10 @@ class ResultsScreen(Screen):
         self.names = kept | {key: f"{tree_node.label} · {tree_node.short} · {node.label}"
                              for key, (node, path) in full.items() if node.kind == "eval"
                              for tree_node in (full[path[-1]][0],)}
+        if self.base not in full and not self.base_gone:
+            self.app.say("Baseline no longer found (run moved or deleted): its last read values stay shown.",
+                         "warning", self)
+        self.base_gone = self.base not in full
         gone = [m for m in self.members if m not in full]
         if gone:
             self.members = [m for m in self.members if m not in gone]
@@ -114,6 +121,7 @@ class ResultsScreen(Screen):
         if snap.runs != self.facts_runs:
             self.facts_runs = snap.runs
             self.seq += 1
+            self.loading = True
             self.load_facts({k: n.ref for k, (n, _) in full.items() if n.kind == "eval"}, snap.runs, self.seq)
 
     def visible(self, node, _ancestors=()):
@@ -141,6 +149,7 @@ class ResultsScreen(Screen):
     def on_facts_read(self, message):
         if message.seq != self.seq:
             return
+        self.loading = False
         facts = message.facts
         if self.base not in facts and self.base in self.facts:  # vanished: compare against what was read
             facts[self.base] = self.facts[self.base]
@@ -159,7 +168,7 @@ class ResultsScreen(Screen):
 
     def mark(self):
         tree = self.query_one(ResultsExplorer)
-        tree.marks = {self.base: "base", **dict.fromkeys(self.members, "member")}
+        tree.marks = {self.base: "base", **{m: str(i + 1) for i, m in enumerate(self.members)}}  # role numbers
         tree.restyle()
         self.show_right()
 
@@ -174,7 +183,7 @@ class ResultsScreen(Screen):
         run_eval = self.query_one(ResultsExplorer).index.get(self.base, (None,))[0]
         base_beam = beam(run_eval.ref[1]) if run_eval else (self.facts[self.base].beam if self.base in self.facts
                                                             else None)
-        self.query_one(BaselinePanel).update(baseline_text(name, base_beam))
+        self.query_one(BaselinePanel).update(baseline_text(name, base_beam, self.base_gone))
         if self.inspecting is not None:
             self.show_inspection()
             return
@@ -184,7 +193,8 @@ class ResultsScreen(Screen):
         panel.border_subtitle = "  ".join(f"[b]{i + 1} {n}[/b]" if i == self.group else f"{i + 1} {n}"
                                           for i, n in enumerate(GROUP_NAMES))
         if not entries or entries[0].key != self.base:
-            self.query_one(ComparisonSummary).show("Reading evaluation files…")
+            self.query_one(ComparisonSummary).show("Reading evaluation files…" if self.loading else
+                                                   "Baseline no longer found (run moved or deleted): esc returns.")
             panel.show([], [], [])
             return
         box = self.query_one(ComparisonSummary)
@@ -196,7 +206,8 @@ class ResultsScreen(Screen):
         f = self.facts.get(key)
         view = self.query_one(InspectionView)
         if f is None:
-            view.show("Reading evaluation files…")
+            view.show("Reading evaluation files…" if self.loading else
+                      "This evaluation is no longer found (run moved or deleted): esc closes the inspection.")
         else:
             view.show(inspection(f, self.compat.get(key, BASELINE), self.names.get(key, key[1]), key == self.base))
 
@@ -270,6 +281,11 @@ class ResultsScreen(Screen):
         self.query_one(TopBar).refresh()
         self.show_right()
         tree.focus()
+
+    def action_rescan(self):
+        """ctrl+r: reread every run file and every evaluation's facts, even when the scan finds the runs equal."""
+        self.facts_runs = None
+        self.app.rescan(announce=True)
 
     def action_group(self, i):
         self.group = i

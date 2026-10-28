@@ -23,7 +23,8 @@ SPLIT_FILE = re.compile(r"(?:.*[_-])?(train|dev|test)\.pubtator|.*pubtator[_-](t
 SPLITS = ("train", "dev", "test")
 # status.json keys that are not process identity (§9)
 STATUS_KEYS = {"status", "started", "finished", "error", "forced"}  # forced: process.record_forced
-RUN_FILES = ("status.json", "spec.json", "tree.json", "model_config.json")  # with metrics_*.json: every file read_run reads
+# with metrics_*.json: every file read_run reads, and the provenance / git evidence Results compares (services.comparison)
+RUN_FILES = ("status.json", "spec.json", "tree.json", "model_config.json", "provenance.json", "git.json")
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class Run:
     train_path: str | None = None  # spec train_path of a train run
     features: str | None = None    # model_config.json of a train run (explorer descriptor)
     depth: int | None = None
+    files: tuple = ()              # scan signature: a rewritten provenance.json / git.json makes the Run differ
 
     def spec(self):
         return read_dict(self.path / "spec.json")
@@ -253,7 +255,7 @@ def scan(root, cache=None):
         if key is not None and hit and hit[0] == key:  # trees are synced separately from runs: recheck that one file
             run = replace(hit[1], tree_here=tree_on_disk(root, hit[1].tree_path))
         else:
-            run = read_run(path, root)
+            run = replace(read_run(path, root), files=key or ())
             if not path.is_dir():  # gone while read: its files read as missing, not as a broken run
                 continue
         cache[path.name] = (key, run)

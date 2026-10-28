@@ -194,7 +194,7 @@ class Explorer(DragRightBorder, Selectable, FullRow, Tree):
                     add(nodes[node.key], c)
             else:
                 nodes[node.key] = parent.add_leaf(self.label(node), data=node.key)
-        for r in roots:
+        for r in shown:  # mounted nodes = self.index
             add(self.root, r)
         if self.last_line >= 0:  # builds the lines, so node.line is current
             self.move_cursor(next((nodes[k] for k in reversed(path) if k in nodes and nodes[k].line >= 0),
@@ -273,7 +273,7 @@ class ResultsExplorer(Explorer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.auto_expand = True  # a click (select) on a tree / dataset toggles it; enter is inspect
-        self.marks, self.compat = {}, {}  # key -> "base" | "member", key -> Compat
+        self.marks, self.compat = {}, {}  # key -> "base" | member's role number ("1"), key -> Compat
 
     def label(self, node):
         return results_label(node, self.marks.get(node.key), self.compat)
@@ -324,7 +324,8 @@ def chip(beam):
 
 
 def results_label(node, mark, compat):
-    """Row text of a Results explorer row; `mark`: "base" / "member" / None."""
+    """Row text of a Results explorer row; `mark`: "base" / a member's role number (its Summary row and Analysis
+    column, which a cut name cannot tell apart) / None."""
     fg = color("on-selected") if mark else color("text")
     t = Text(style=Style(color=fg))
     if node.kind != "eval":
@@ -340,11 +341,13 @@ def results_label(node, mark, compat):
     t.append(" ")
     t.append_text(chip(beam(node.ref[1])))
     t.append(" ")
+    if mark and mark != "base":
+        t.append(f"{mark} ", style="bold")  # before the name: a narrow explorer cuts the row's end
     incompatible = c is not None and c.level == INCOMPATIBLE
     t.append(node.label, style=Style(color=color("text-disabled")) if incompatible and not mark else "")
     if mark == "base":
         t.append("  baseline", style="bold")
-    elif c is not None and c.level == CAUTION:
+    if mark != "base" and c is not None and c.level == CAUTION:
         t.append(f"  {CAUTION_MARK}", style=Style(color=color("warning-on-accent" if mark else "warning"), bold=True))
     elif incompatible:
         t.append(f"  {INCOMPATIBLE_MARK}", style=Style(color=color("text-disabled")))

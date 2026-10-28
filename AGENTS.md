@@ -120,6 +120,10 @@ Before making claims, verify them against the implementation.
 - Avoid coupling featurization, clustering, and matcher logic unnecessarily
 - Do not add compatibility code for old saved trees or configs; they are retrained instead
 - Add or update tests when changing behavior
+- Changing a metric definition in `xmr4el/eval.py` `evaluate_tree` (formula, denominator, filtering, ties)
+  requires bumping `EVAL_PROTOCOL`; the TUI never subtracts values from different protocols
+- Comparability of saved evaluations is decided only in `xmr4el_tui/services/comparison.py` `assess`; the
+  evidence each hash provides is in `docs/design/tui_architecture.md` §3a
 
 If editing model behavior, identify whether the change belongs in:
 - preprocessing

@@ -48,6 +48,10 @@ Saved trees are under `outputs/saved_trees/`.
   count mismatch; regression in `tests/integration/test_label_mapping.py`.
 - Transformer embedding batches are kept in memory in row order (`xmr4el/features/transformers.py`).
 - Any new code that maps indices to label names must use `initial_labels`, never input order.
+- Results comparability: `xmr4el_tui/services/comparison.py` `assess` only; evidence table in
+  `docs/design/tui_architecture.md` §3a. Bump `xmr4el.eval.EVAL_PROTOCOL` when a metric definition changes.
+  Metrics written before 2026-10-28 lack `eval_protocol` / `strings_sha256`: CAUTION, no deltas, re-evaluate.
+- The runner re-hashes inputs after reading them (`check_inputs`); a changed input fails the run.
 
 ## Priorities
 

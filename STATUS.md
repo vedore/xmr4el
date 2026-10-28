@@ -93,6 +93,24 @@ tests/tui/test_notifications.py (16); full suite 245 pass, ruff clean. Follow-up
 notified too. Then symbols to plain text: Caution `!`, inspect `i`, incompatible `x`, stage markers `+` `>` `x`.
 NEXT: push `tui` only on the user's OK.
 
+**2026-10-28 Results V1 audit (R01-R11 + P2; audit file deleted by the user after the fixes) fixed (not committed):** producer
+`xmr4el/eval.py`: `eval_protocol` (EVAL_PROTOCOL = 1), `strings_sha256` (per kept row: position, train labels of
+its string, dictionary answer), acc@1_all = 0 with no row in vocabulary, empty string groups null rates; runner
+re-hashes inputs after loading / each eval (`check_inputs`: changed = run fails, no metrics). TUI: deltas need equal
+recorded protocol (missing = CAUTION), Generalization needs equal strings hash, metrics/spec path or split conflict =
+INCOMPATIBLE, non-string hashes/commits = not recorded; provenance.json/git.json in the scan signature (`Run.files`);
+search mounts only matches; vanished baseline marked, vanished inspection says so; Summary max 40 %, analysis
+table min-height 6; same-minute evaluation labels fall back to the run id; member rows show their role number.
+Follow-up: hashes must be 64 lowercase hex (commits 40/64) or count as not recorded (fixtures hash labels via
+`fake_runs.sha`); Results `ctrl+r` rereads facts too; legacy `xmr4el_tui/compare.py` + `tests/tui/test_compare.py`
+deleted (helpers moved into `services/comparison.py`); README Results line; tui_architecture.md updated.
+Every existing metrics file lacks `eval_protocol` / `strings_sha256`: Results shows CAUTION, no deltas, until
+re-evaluated (no compatibility code). Docs tui.md §5.12, §11; evidence reference tui_architecture.md §3a; rules in
+AGENTS.md (bump EVAL_PROTOCOL) and CLAUDE.md. Full suite 251 pass, `uvx --offline ruff check xmr4el xmr4el_tui scripts
+tests` clean. Left on purpose: caching repeated metadata reads in read_facts (0.1 s / 1,000 evals). All of this is
+uncommitted on `tui` (`git status`: 22 modified, compare.py + test_compare.py staged deleted). NEXT: commit on the
+user's OK (one commit, "TUI: Results V1 audit fixes ..."); user re-evaluates the trees they compare.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

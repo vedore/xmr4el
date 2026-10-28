@@ -6,7 +6,7 @@ from datetime import datetime
 from rich.text import Text
 
 from xmr4el_tui import explorer, fmt
-from xmr4el_tui.compare import RECALL
+from xmr4el_tui.services.comparison import RECALL
 from xmr4el_tui.fmt import STATE_SHORT, STATE_STYLE
 from xmr4el_tui.runs import as_dict, elapsed, state_word
 from xmr4el_tui.services.experiment_repository import Activity, Details

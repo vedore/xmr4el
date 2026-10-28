@@ -131,7 +131,10 @@ mentions whose gold label has training text (coverage is reported); `acc@1_all` 
 
 `scripts/run_experiment.py -spec configs/experiments/<name>.json` trains and evaluates one spec and records
 the run (spec, metrics, git state, input hashes, package versions) under `outputs/runs/`. Recorded results
-are in `docs/results.md`.
+are in `docs/results.md`. Each `metrics_<split>.json` also records `eval_protocol` (metric definitions),
+`population_sha256` (evaluated rows) and, with an eval `train_path`, `strings_sha256` (seen/unseen groups and
+dictionary answers); the TUI compares evaluations only through these. An input file that changes during a run
+fails it before metrics are written.
 
 Browse saved trees, their evaluations and active runs in the terminal (optional `tui` extra; reads
 `outputs/runs/` and `outputs/saved_trees/` only, never loads a tree; writes nothing except when it cancels a run):
@@ -150,7 +153,9 @@ Run Monitor (`enter` on an active run, `right` in the Description): Run overview
 hierarchy layers), Resources of the selected stage, Live logs (`/` search, `n` / `N`, `l` level, `f`
 fullscreen). `c` follows the current stage again, `esc` returns. Cancel Run (`s`) sends SIGTERM after a
 confirmation, only to a run this TUI (or an earlier one) launched; runs started from a shell are monitored only.
-New Experiment (`n`) and Results (`left` in the Description) are planned: they only say what they would open.
+Results (`r`, or `left` in the Description, on an evaluation with metrics) compares it, as the baseline, with up to
+three other evaluations of the same test file (VERIFIED / CAUTION / INCOMPATIBLE, deltas only where the
+recorded evidence allows them). New Experiment (`n`) is planned: it only says what it would open.
 
 ## Configuration
 

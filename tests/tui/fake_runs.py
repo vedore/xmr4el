@@ -1,4 +1,5 @@
 """Run directories with the file shapes scripts/run_experiment.py writes (copied from real outputs/runs)."""
+import hashlib
 import json
 from pathlib import Path
 
@@ -6,8 +7,13 @@ METRICS = {"labels": 13385, "features": "sapbert_char_context", "rows": 729, "ro
            "distinct_gold": 300, "search": {"beam_size": 10, "topk": 0, "knn_beta": 10.0, "leaf_candidates": 100},
            "predict_seconds": 2.2, "ms_per_query": 2.99, "acc@1": 0.9246, "MRR": 0.9459, "R@5": 0.9671,
            "R@10": 0.9739, "R@20": 0.9739, "R@50": 0.9822, "R@100": 0.9835, "R@cand": 0.9835, "acc@1_all": 0.8904,
-           "candidates_per_query": 100.0}
+           "candidates_per_query": 100.0, "eval_protocol": 1}
 COMMIT = "b10a922a7734f5844d8e30b9b928b740923a3299"
+
+
+def sha(label):
+    """A real-looking sha256 standing for `label` (equal labels, equal hashes); None stays None."""
+    return hashlib.sha256(label.encode()).hexdigest() if label is not None else None
 
 
 def make_run(root, name, *, stamp="2026-10-20_13-36-20", kind="train", status="completed", splits=("dev",),
@@ -28,9 +34,9 @@ def make_run(root, name, *, stamp="2026-10-20_13-36-20", kind="train", status="c
         "spec.json": {"name": name, **({"model_config": "configs/c.json", "train_path": "datasets/x/train.pubtator"}
                                        if train else {}), "evals": evals, "xmodel_path": None if train else tree_path},
         "git.json": git if git is not None else {"commit": COMMIT, "dirty": False, "untracked": []},
-        "provenance.json": {"inputs": {**{e["test_path"]: test_sha if e["split"] == "dev" else f"sha-{e['split']}"
+        "provenance.json": {"inputs": {**{e["test_path"]: sha(test_sha if e["split"] == "dev" else f"sha-{e['split']}")
                                           for e in evals},
-                                       "datasets/x/train.pubtator": eval_train_sha or train_sha},
+                                       "datasets/x/train.pubtator": sha(eval_train_sha or train_sha)},
                             "python": "3.12.15", "packages": packages or {"numpy": "2.2.6", "torch": "2.14.1"},
                             "torch_device": device},
     }

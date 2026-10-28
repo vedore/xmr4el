@@ -623,7 +623,8 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 - One layout for every state: zero to three **challengers** (`comparison.MAX_CHALLENGERS`) next to the baseline.
   Identity is the explorer key `("eval", run id, split)`, never a label. Left column 30 % (resizable as the
   Dashboard's: `<` `>`, border drag), Current Baseline (one line) over the Explorer; right: Comparison Summary
-  (content height, at most half) over Detailed Analysis.
+  (content height, at most 40 %, then it scrolls) over Detailed Analysis (its table keeps a body of at least
+  three metric rows at 80x24).
 - Explorer = the Dashboard's `Explorer` (same model, `explorer.build` Models branch: dataset > tree >
   evaluation; same two-row trees, gap rows and `/` search, §7), as `ResultsExplorer`; trees open at once. Shows
   only the baseline and evaluations assessed VERIFIED or CAUTION (per evaluation: a tree stays while one of its
@@ -631,20 +632,27 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   one-row view filter above it, focus with `ctrl+tab`, `space` / click toggles, off in every new session) also
   lists INCOMPATIBLE ones (dim, `x`): inspectable, never addable; toggling keeps members, baseline, group,
   inspection and expansion, and a hidden cursor row falls back to its nearest shown ancestor. A search or the
-  filter hiding a member never removes it. Rows: `i` (click = inspect), beam chip, label, `baseline` / `!` Caution /
+  filter hiding a member never removes it. Rows: `i` (click = inspect), beam chip, a member's role number (`1`-`3`,
+  its Summary row and Analysis column, before the label so a narrow explorer keeps it), label, `baseline` / `!` Caution /
   `x` Incompatible (dim); a tree shows `!` when one of its evaluations is Caution. Keyboard cursor = `cursor-row`
   background; comparison member (and the baseline) = accent background, kept when the cursor leaves; the cursor
   on a member keeps the accent and adds `focus-outline` bars at both row edges. `space` / click on an evaluation
   adds or removes it; a click on a tree or dataset expands it; `enter` / `i` inspects. A fourth challenger, the
   baseline and Incompatible evaluations are refused with a toast.
-- **Compatibility** (`services/comparison.assess`, one place): INCOMPATIBLE = no metrics, test-file sha256
-  missing or different (provenance.json, never file names), or different / missing `rows_total`. Otherwise
+- **Compatibility** (`services/comparison.assess`, one place): INCOMPATIBLE = no metrics, a metrics file whose
+  `test_path` / `train_path` / `split` disagrees with its spec, test-file sha256 missing or different
+  (provenance.json, never file names), or different / missing `rows_total`. A hash or commit that is not a
+  non-empty string counts as not recorded. Otherwise
   VERIFIED, unless something needed for a delta cannot be checked: CAUTION, with `reason` (what is missing),
-  `matches` (sha256, loaded rows) and `affects` (which deltas are withheld). In-vocabulary deltas (acc@1, MRR,
+  `matches` (sha256, loaded rows) and `affects` (which deltas are withheld). Every delta needs one recorded
+  `eval_protocol` (metric definitions, `xmr4el.eval.EVAL_PROTOCOL`): missing = CAUTION, different = a note; either
+  withholds all deltas. In-vocabulary deltas (acc@1, MRR,
   R@k, R@cand, hybrid) need equal `population_sha256`, or §11's derivation (same tree training-file sha256,
   preprocessing, one clean commit); a known difference (hashes or training files differ) withholds them as a note,
-  not a Caution. Vocabulary, beam and search settings never block. Generalization deltas also need equal
-  seen/unseen reference files (eval `train_path` sha256). No timing deltas at all (hardware not recorded).
+  not a Caution. Vocabulary, beam and search settings never block. Generalization deltas need equal
+  `strings_sha256` (per evaluated row: loaded position, train labels of its mention string, dictionary answer, so
+  vocabulary and abbreviation expansion count); missing = CAUTION. An empty string group records null rates
+  (`N/A`, no delta). No timing deltas at all (hardware not recorded).
 - Summary: baseline row on the accent, challengers in selection order (`2 !` marks Caution by the role);
   Acc@1_all (the comparison metric, fixed), Acc@1, Coverage (rows / rows_total) beside the name (name cut to the
   panel, at most 30 cells; values and deltas padded into aligned columns; narrow: the delta wraps under its value).
@@ -662,8 +670,10 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 - `esc`: inspection → closes it (focus on the explorer); Summary, Analysis or the filter → the explorer; an
   explorer search → cleared; the explorer → the Dashboard as it was left. Focus moves only: nothing reloads.
 - Data: metrics from the scan; `comparison.read_facts` (provenance / git / spec / model_config of the run and its
-  tree's training run) for every evaluation in a worker, rerun only when the scan's runs change. A FAILED run's
-  written metrics stay usable.
+  tree's training run) for every evaluation in a worker, rerun only when the scan's runs change (provenance.json
+  and git.json are in the scan signature). A FAILED run's written metrics stay usable. A baseline whose run
+  vanished keeps its last read values, marked `no longer found` in Current Baseline; an inspected evaluation that
+  vanished says so (not "Reading").
 - Beam colour: `theme.beam_color(beam) = palette[beam mod 6]`, the same everywhere, never discovery order; the
   number is always written (`B10`).
 
@@ -1014,8 +1024,12 @@ start time from the run ID and show UNVERIFIED when recorded running.
 - Same file and preprocessing but different populations: suppress subset deltas and
   show `in-vocabulary populations differ`. `acc@1_all` may still have a delta because
   it counts every loaded row, with uncovered labels as misses. Label that denominator
-  explicitly. Compare optional hybrid metrics only with matching breakdown-input
-  hashes and their appropriate population as well.
+  explicitly. Compare optional hybrid and seen/unseen metrics only with matching
+  `strings_sha256` (the effective dictionary per evaluated row: equal reference files
+  are not enough, the tree's vocabulary and abbreviation expansion change it) and
+  their appropriate population as well.
+- Every delta also needs equal recorded `eval_protocol` (the evaluator's metric
+  definitions); population hashes say nothing about how a metric was computed.
 - Runs recorded before the population hash existed (all current runs) are compared
   by derivation instead, from files the browser already reads. Their in-vocabulary
   populations count as equal when all of these hold:

@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("textual")
 
 from rich.console import Console  # noqa: E402
-from fake_runs import make_run  # noqa: E402
+from fake_runs import COMMIT, make_run, patch_json, sha  # noqa: E402
 from xmr4el_tui import runs, theme  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen  # noqa: E402
@@ -75,9 +75,9 @@ def test_incompatible_and_hash_cases(tmp_path):
     rows = cmp.assess(base, with_metrics(other, rows_total=758))
     assert rows.level == cmp.INCOMPATIBLE and "757 vs 758" in rows.reason
     assert cmp.assess(base, cmp.Facts(**{**other.__dict__, "metrics": None})).level == cmp.INCOMPATIBLE
-    same = cmp.assess(with_metrics(base, population_sha256="p1"), with_metrics(other, population_sha256="p1"))
+    same = cmp.assess(with_metrics(base, population_sha256=sha("p1")), with_metrics(other, population_sha256=sha("p1")))
     assert same.level == cmp.VERIFIED and same.population
-    differ = cmp.assess(with_metrics(base, population_sha256="p1"), with_metrics(other, population_sha256="p2"))
+    differ = cmp.assess(with_metrics(base, population_sha256=sha("p1")), with_metrics(other, population_sha256=sha("p2")))
     assert differ.level == cmp.VERIFIED and not differ.population and "populations differ" in differ.notes[0]
 
 
@@ -106,6 +106,56 @@ def test_deltas(tmp_path):
     rank = dict(cmp.rows("Ranking", [f[A], missing], [cmp.BASELINE, compats[1]]))
     assert rank["R@50"][1] == ("N/A", None)
 
+
+
+def test_protocol_and_strings_evidence(tmp_path):
+    """No delta without one recorded protocol (R02); Generalization deltas need equal strings hashes, a population
+    hash match alone is not enough (R01)."""
+    f = facts(results_root(tmp_path))
+    base, other = f[A], f[B]
+
+    def with_metrics(x, **over):
+        return cmp.Facts(**{**x.__dict__, "metrics": {**x.metrics, **over}})
+    unknown = cmp.assess(base, with_metrics(other, eval_protocol=None))
+    assert unknown.level == cmp.CAUTION and "protocol" in unknown.reason and unknown.affects == "no deltas"
+    other_protocol = cmp.assess(base, with_metrics(other, eval_protocol=2))
+    assert other_protocol.level == cmp.VERIFIED and "protocols differ" in other_protocol.notes[0]
+    for c in (unknown, other_protocol):
+        perf = dict(cmp.rows("Performance", [base, other], [cmp.BASELINE, c]))
+        assert perf["Acc@1_all"][1][1] == perf["Coverage"][1][1] == cmp.NO_DELTA
+    strings = {g: {c: 0.5 for c in ("n", "tree", "dict", "either", "routed")} for g in cmp.STRING_GROUPS}
+    b = with_metrics(base, strings=strings, strings_sha256=sha("s1"), population_sha256=sha("p"))
+    same = cmp.assess(b, with_metrics(other, strings=strings, strings_sha256=sha("s1"), population_sha256=sha("p")))
+    assert same.level == cmp.VERIFIED and same.strings
+    other_dict = with_metrics(other, strings=strings, strings_sha256=sha("s2"), population_sha256=sha("p"))
+    differ = cmp.assess(b, other_dict)
+    assert differ.level == cmp.VERIFIED and differ.population and not differ.strings
+    gen = dict(cmp.rows("Generalization", [b, other_dict], [cmp.BASELINE, differ]))
+    assert gen["all · model"][1][1] == cmp.NO_DELTA
+    missing = cmp.assess(b, with_metrics(other, strings=strings, population_sha256=sha("p")))
+    assert missing.level == cmp.CAUTION and "strings hash" in missing.reason and not missing.strings
+
+
+def test_conflicting_and_malformed_evidence(tmp_path):
+    """A metrics file that disagrees with its spec is incompatible (R03); malformed hashes and commits are no
+    evidence and never crash (R05)."""
+    root = results_root(tmp_path)
+    run_b = Path(root, "outputs/runs", B[1])
+    patch_json(run_b / "metrics_dev.json", test_path="datasets/x/test.pubtator", split="test")
+    c = cmp.assess(facts(root)[A], facts(root)[B])
+    assert c.level == cmp.INCOMPATIBLE and "test_path, split" in c.reason
+    patch_json(run_b / "metrics_dev.json", test_path="datasets/x/dev.pubtator", split="dev")
+    for run_id in (A[1], B[1]):
+        patch_json(Path(root, "outputs/runs", run_id, "provenance.json"),
+                   inputs={"datasets/x/dev.pubtator": ["x"], "datasets/x/train.pubtator": sha("sha-train")})
+        patch_json(Path(root, "outputs/runs", run_id, "git.json"), commit=["c"], dirty=[])
+    f = facts(root)
+    assert f[A].test_sha is None and f[A].commits == ((None, None),)
+    assert cmp.assess(f[A], f[B]).level == cmp.INCOMPATIBLE, "list-valued hashes never match"
+    f = cmp.Facts(**{**f[A].__dict__, "test_sha": sha("h")}), cmp.Facts(**{**f[B].__dict__, "test_sha": sha("h")})
+    assert cmp.assess(*f).level == cmp.CAUTION, "unknown commits: population unverified, no crash"
+    assert [cmp.evidence(x) for x in ("", "sha-dev", sha("x")[:63], sha("x").upper(), ["x"], {"a": 1})] == [None] * 6
+    assert cmp.evidence(sha("x")) == sha("x") and cmp.evidence(COMMIT, (40, 64)) == COMMIT
 
 # --- theme ------------------------------------------------------------------------------------------------------
 def test_beam_colours_and_theme_tokens():
@@ -449,3 +499,74 @@ def test_inspection_values_share_one_column(tmp_path):
     assert any("seen, >1 label · dictionary" in line for line in lines), "longest label shown"
     col = 2 + LABEL_WIDTH
     assert all(line[col - 2:col] == "  " and line[col] != " " for line in lines), "one value column, gap kept"
+
+
+def test_provenance_only_change_reloads_comparison(tmp_path):
+    """A rewritten provenance.json alone (other test-file sha256) drops the challenger and its deltas (R04)."""
+    root = results_root(tmp_path)
+
+    async def check(app, pilot):
+        screen, tree = await open_results(app, pilot)
+        await cursor_to(pilot, tree, B)
+        await pilot.press("space")
+        assert screen.members == [B] and screen.compat[B].level == cmp.VERIFIED
+        assert "1 " in str(tree.nodes[B].label), "member row shows its role number (R10)"
+        patch_json(Path(root, "outputs/runs", B[1], "provenance.json"),
+                   inputs={"datasets/x/dev.pubtator": sha("sha-changed"), "datasets/x/train.pubtator": sha("sha-train")})
+        app.apply_scan(app.repo.snapshot())
+        await settle(app, pilot)
+        await settle(app, pilot)
+        assert screen.compat[B].level == cmp.INCOMPATIBLE and screen.members == []
+        seq = screen.seq
+        await pilot.press("ctrl+r")
+        await settle(app, pilot)
+        await settle(app, pilot)
+        assert screen.seq == seq + 1, "ctrl+r rereads the facts although the runs are unchanged"
+    run_app(root, check)
+
+
+def test_vanished_baseline_and_inspection_say_so(tmp_path):
+    """A vanished baseline keeps its values, marked; a vanished inspected evaluation is not 'Reading' forever (R08)."""
+    root = results_root(tmp_path)
+
+    async def check(app, pilot):
+        screen, tree = await open_results(app, pilot)
+        await cursor_to(pilot, tree, B)
+        await pilot.press("enter")
+        runs_dir = Path(root, "outputs/runs")
+        (runs_dir / B[1]).rename(runs_dir / ".gone-b")
+        app.apply_scan(app.repo.snapshot())
+        await settle(app, pilot)
+        await settle(app, pilot)
+        assert "no longer found" in str(screen.query_one("#inspect-text").content)
+        await pilot.press("escape")
+        assert screen.inspecting is None and not tree.disabled
+        (runs_dir / A[1]).rename(runs_dir / ".gone-a")
+        app.apply_scan(app.repo.snapshot())
+        await settle(app, pilot)
+        await settle(app, pilot)
+        assert screen.base_gone and screen.base in screen.facts
+        baseline = screen.query_one("#baseline").content
+        assert "no longer found" in "".join(str(c) for col in baseline.columns for c in col._cells)
+    run_app(root, check)
+
+
+def test_generalization_rows_visible_at_80x24(tmp_path):
+    """Baseline, three challengers (one Caution): the Generalization table keeps metric rows on screen (R09)."""
+    strings = {g: {c: 0.5 for c in ("n", "tree", "dict", "either", "routed")} for g in cmp.STRING_GROUPS}
+    over = {"strings": strings, "hybrid": 0.5, "hybrid_all": 0.4, "strings_sha256": sha("s")}
+    root = results_root(tmp_path)
+    for run_id in (A[1], B[1], C[1], F[1]):
+        patch_json(Path(root, "outputs/runs", run_id, "metrics_dev.json"), **over)
+
+    async def check(app, pilot):
+        screen, tree = await open_results(app, pilot)
+        for key in (B, C, F):
+            await cursor_to(pilot, tree, key)
+            await pilot.press("space")
+        await pilot.press("3")
+        await settle(app, pilot)
+        table = screen.query_one("#analysis-table")
+        assert len(table.columns) == 5 and table.row_count > 3
+        assert table.size.height - table.header_height - 1 >= 3, "three metric rows besides header and scrollbar"
+    run_app(root, check, size=(80, 24))

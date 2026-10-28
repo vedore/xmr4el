@@ -5,20 +5,43 @@ deltas the evidence allows. Stdlib only, no UI.
 Reads only small run files (provenance, git, spec, model_config) of the evaluation's run and of its tree's training
 run; never a corpus, never a pickle, never re-evaluates. Identity is the explorer key ("eval", run id, split).
 """
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from xmr4el_tui.compare import RECALL, _preprocessing, _sha, _train_sha
 from xmr4el_tui.fmt import count, number
-from xmr4el_tui.runs import dig, training_run
+from xmr4el_tui.runs import dig, text, training_run
 
 VERIFIED, CAUTION, INCOMPATIBLE = "VERIFIED", "CAUTION", "INCOMPATIBLE"
 MAX_CHALLENGERS = 3
 NA = "N/A"
+HEX = re.compile(r"[0-9a-f]+")
 NO_DELTA = "Δ —"  # a delta the row has, withheld because the populations cannot be shown equal
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
 STRING_COLS = (("tree", "model"), ("dict", "dictionary"), ("either", "either"), ("routed", "routed"))
 SUBSET = "acc@1, MRR, R@k, R@cand, hybrid"  # in-vocabulary metrics: deltas need equal populations
+RECALL = ("R@5", "R@10", "R@20", "R@50", "R@100")
+PREPROCESSING = ("context_window", "abbrev_expansion")
+
+
+def _sha(run, path):
+    return dig(run.provenance(), "inputs", path) if isinstance(path, str) and path else None
+
+
+def _preprocessing(run, metrics, runs):
+    """Resolved preprocessing of the evaluated tree: from the metrics, else from its training run's config."""
+    if isinstance(metrics.get("preprocessing"), dict):
+        return metrics["preprocessing"]
+    train = training_run(runs, run.tree_id)
+    cfg = train.model_config() if train else None
+    return {k: cfg.get(k) for k in PREPROCESSING} if isinstance(cfg, dict) else None
+
+
+def _train_sha(run, runs):
+    """sha256 of the training file of the run's tree, None if its training run is not here."""
+    train = training_run(runs, run.tree_id)
+    spec = train.spec() if train else None
+    return _sha(train, spec.get("train_path")) if isinstance(spec, dict) else None
 
 
 @dataclass(frozen=True)
@@ -29,11 +52,26 @@ class Facts:
     split: str
     metrics: dict | None      # metrics_<split>.json, None = not written
     test_sha: str | None      # sha256 of the evaluated file (provenance.json)
-    strings_sha: str | None   # sha256 of the seen/unseen reference file (the evaluation's train_path)
     tree_train_sha: str | None  # sha256 of the tree's training file (its training run's provenance)
     preprocessing: dict | None
     commits: tuple            # (commit, dirty) of this run and its tree's training run; None = no git.json
     beam: int | None = None
+    conflict: str | None = None  # what the metrics file records against the spec (test_path, split, ...)
+
+
+def evidence(x, lengths=(64,)):
+    """A recorded sha256 (or, lengths (40, 64), a git commit) when it is lowercase hex of that length, else None:
+    corrupt evidence is no evidence."""
+    return x if isinstance(x, str) and len(x) in lengths and HEX.fullmatch(x) else None
+
+
+def conflict(e, metrics):
+    """Fields where the metrics file disagrees with the spec's evaluation `e`, None when they agree."""
+    if not metrics:
+        return None
+    bad = [k for k in ("test_path", "train_path") if k in metrics and text(metrics, k) != getattr(e, k)]
+    bad += ["split"] if "split" in metrics and text(metrics, "split") != e.split else []
+    return ", ".join(bad) or None
 
 
 def read_facts(run, e, all_runs):
@@ -41,9 +79,11 @@ def read_facts(run, e, all_runs):
     metrics = e.metrics if isinstance(e.metrics, dict) else None
     train = training_run(all_runs, run.tree_id)
     gits = [r.git() for r in {r.id: r for r in (run, train) if r}.values()]
-    return Facts(("eval", run.id, e.split), run, e.split, metrics, _sha(run, e.test_path), _sha(run, e.train_path),
-                 _train_sha(run, all_runs), _preprocessing(run, metrics, all_runs) if metrics else None,
-                 tuple((g.get("commit"), g.get("dirty")) if isinstance(g, dict) else None for g in gits), beam(e))
+    commits = tuple((evidence(g.get("commit"), (40, 64)), g.get("dirty") if isinstance(g.get("dirty"), bool) else None)
+                    if isinstance(g, dict) else None for g in gits)
+    return Facts(("eval", run.id, e.split), run, e.split, metrics, evidence(_sha(run, e.test_path)),
+                 evidence(_train_sha(run, all_runs)), _preprocessing(run, metrics, all_runs) if metrics else None,
+                 commits, beam(e), conflict(e, metrics))
 
 
 @dataclass(frozen=True)
@@ -55,11 +95,12 @@ class Compat:
     matches: str = ""
     affects: str = ""
     population: bool = False  # in-vocabulary populations equal: subset deltas allowed
-    strings: bool = False     # seen/unseen breakdown inputs equal: Generalization deltas allowed
+    strings: bool = False     # seen/unseen groups and dictionary answers equal: Generalization deltas allowed
     notes: tuple = ()         # known differences that withhold deltas (no uncertainty, so not CAUTION)
+    protocol: bool = False    # same evaluation protocol (metric definitions): any delta allowed at all
 
 
-BASELINE = Compat(VERIFIED, population=True, strings=True)
+BASELINE = Compat(VERIFIED, population=True, strings=True, protocol=True)
 
 
 def _incompatible(reason):
@@ -67,20 +108,24 @@ def _incompatible(reason):
 
 
 def assess(base, other):
-    """How `other` compares with `base` (both Facts). Only the evaluated file (sha256) and its loaded row count decide
-    eligibility; vocabularies, beams and search settings never do. Deltas of in-vocabulary metrics need a population
-    hash match or its derivation (tui.md §11)."""
+    """How `other` compares with `base` (both Facts). The evaluated file (sha256), its loaded row count and metrics
+    files that agree with their specs decide eligibility; vocabularies, beams and search settings never do. Every
+    delta needs one recorded evaluation protocol; deltas of in-vocabulary metrics need a population hash match or its
+    derivation (tui.md §11); Generalization deltas need equal strings hashes (groups and dictionary answers)."""
     if other.key == base.key:
         return BASELINE
     if not other.metrics:
         return _incompatible(f"no metrics recorded (metrics_{other.split}.json not written)")
     if not base.metrics:
         return _incompatible("the baseline has no metrics recorded")
+    for name, f in (("the baseline's", base), ("its", other)):
+        if f.conflict:
+            return _incompatible(f"{name} metrics file disagrees with its spec ({f.conflict})")
     unknown = [name for name, f in (("baseline", base), ("this evaluation", other)) if f.test_sha is None]
     if unknown:
         return _incompatible(f"test-file sha256 not recorded for {' and '.join(unknown)}: dataset identity unknown")
     if base.test_sha != other.test_sha:
-        pa, pb = (dig(f.metrics, "test_path") or "" for f in (base, other))
+        pa, pb = (text(f.metrics, "test_path") or "" for f in (base, other))
         na, nb = (Path(p).name for p in (pa, pb))
         if pa == pb:
             return _incompatible(f"test file {pa} has different contents (sha256 differs)")
@@ -93,14 +138,21 @@ def assess(base, other):
     matches = f"test file sha256, {count(rows[0])} loaded rows"
 
     missing, notes = [], []  # uncertain -> CAUTION; known differences -> notes
-    hb, ho = base.metrics.get("population_sha256"), other.metrics.get("population_sha256")
+    vb, vo = base.metrics.get("eval_protocol"), other.metrics.get("eval_protocol")
+    protocol = number(vb) and number(vo) and vb == vo
+    if not (number(vb) and number(vo)):
+        missing.append("evaluation protocol not recorded: metric definitions unverified")
+    elif not protocol:
+        notes.append(f"evaluation protocols differ ({vb} vs {vo}): no deltas")
+    hb, ho = (evidence(f.metrics.get("population_sha256")) for f in (base, other))
+    population_unknown = False
     if hb and ho:
         population = hb == ho
         if not population:
             notes.append(f"in-vocabulary populations differ (population hash): no deltas for {SUBSET}")
     elif base.tree_train_sha and other.tree_train_sha and base.tree_train_sha != other.tree_train_sha:
         population = False
-        notes.append(f"trees trained on different files, so in-vocabulary populations differ: no deltas for {SUBSET}")
+        notes.append(f"trees trained on different files: in-vocabulary populations not shown equal, no deltas for {SUBSET}")
     else:
         why = []
         if not (base.tree_train_sha and other.tree_train_sha):
@@ -115,24 +167,26 @@ def assess(base, other):
         commit = next(iter(commits)) if len(commits) == 1 else None
         if not (commit and commit[0] and commit[1] is False):
             why.append("runs not all at one clean git commit")
-        population = not why
+        population, population_unknown = not why, bool(why)
         if why:
             missing.append("in-vocabulary population not verified: no population hash, and " + "; ".join(why))
-    population_unknown = bool(missing)
     strings = False
     if "strings" in base.metrics and "strings" in other.metrics:
-        if base.strings_sha and other.strings_sha:
-            strings = population and base.strings_sha == other.strings_sha
-            if base.strings_sha != other.strings_sha:
-                notes.append("seen/unseen reference files differ: no Generalization deltas")
+        sb, so = (evidence(f.metrics.get("strings_sha256")) for f in (base, other))
+        if sb and so:
+            strings = sb == so
+            if not strings:
+                notes.append("seen/unseen groups or dictionary answers differ (strings hash): no Generalization deltas")
         else:
-            missing.append("seen/unseen reference file sha256 not recorded")
+            missing.append("effective dictionary (strings hash) not recorded")
     if not missing:
-        return Compat(VERIFIED, matches=matches, population=population, strings=strings, notes=tuple(notes))
-    affects = [f"no deltas for {SUBSET}" if population_unknown else "",
-               "no Generalization deltas" if not strings else "", "acc@1_all and coverage compared"]
+        return Compat(VERIFIED, matches=matches, population=population, strings=strings, notes=tuple(notes),
+                      protocol=protocol)
+    affects = ["no deltas"] if not protocol else [
+        f"no deltas for {SUBSET}" if population_unknown else "", "no Generalization deltas" if not strings else "",
+        "acc@1_all and coverage compared"]
     return Compat(CAUTION, reason="; ".join(missing), matches=matches, affects="; ".join(a for a in affects if a),
-                  population=population, strings=strings, notes=tuple(notes))
+                  population=population, strings=strings, notes=tuple(notes), protocol=protocol)
 
 
 # --- analysis rows ----------------------------------------------------------------------------------------------
@@ -179,7 +233,7 @@ GROUP_NOTES = {"Efficiency": "No timing deltas: equal hardware and load are not 
 
 def allowed(flag, c):
     """Whether Compat `c` allows a delta for a row with `flag`."""
-    if c.level == INCOMPATIBLE or flag is None:
+    if c.level == INCOMPATIBLE or flag is None or not c.protocol:
         return False
     return {"all": True, "population": c.population, "strings": c.strings,
             "hybrid": c.population and c.strings, "hybrid_all": c.strings}[flag]

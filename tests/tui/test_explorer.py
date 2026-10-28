@@ -147,3 +147,33 @@ def test_model_config_is_part_of_the_cache_key(tmp_path):
     path.write_text(json.dumps({"features": "tfidf", "depth": 1}))
     gamma = next(r for r in runs.scan(root, cache) if r.name == "gamma")
     assert (gamma.features, gamma.depth) == ("tfidf", 1)
+
+
+def test_search_mounts_only_matches_and_survives_restyle(tmp_path):
+    """No match: nothing mounted, nothing drawn; restyle, the filter and a rescan still work (R06)."""
+    async def check(app, pilot):
+        app.push_screen(ResultsScreen(A))
+        await settle(app, pilot)
+        await settle(app, pilot)
+        screen, res = app.screen, app.screen.query_one(ResultsExplorer)
+        await pilot.press("slash", "z", "z", "z")
+        assert res.index == {} and res.nodes == {} and not res.root.children
+        res.restyle()
+        screen.query_one("#show-all").value = True
+        await settle(app, pilot)
+        app.apply_scan(app.repo.snapshot(fresh=True))
+        await settle(app, pilot)
+        assert res.nodes == {} and isinstance(app.screen, ResultsScreen)
+        await pilot.press("backspace", "backspace", "backspace", "a", "l")
+        assert set(res.nodes) == set(res.index) and A in res.nodes
+    run_app(root_with_twins(tmp_path), check)
+
+
+def test_same_minute_evaluations_get_distinct_labels(tmp_path):
+    """Two evaluations of one tree by one spec, a second apart: still told apart (R10)."""
+    make_run(tmp_path, "alpha", stamp="2026-10-20_10-00-00", tree_id=T1, tree_here=True)
+    for stamp in ("2026-10-21_10-00-00", "2026-10-21_10-00-01"):
+        make_run(tmp_path, "ev", stamp=stamp, kind="eval", tree_id=T1)
+    labels = [n.label for n, _ in build(tmp_path).values() if n.kind == "eval"]
+    assert len(labels) == len(set(labels)) == 3
+    assert "dev · ev · 2026-10-21_10-00-01_ev" in labels

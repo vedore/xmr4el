@@ -39,3 +39,28 @@ def test_population_hash(tmp_path):
     assert len({m["population_sha256"], only_l1["population_sha256"], only_l2["population_sha256"]}) == 3
     assert m["preprocessing"] == {"context_window": 5, "abbrev_expansion": None}
     assert (m["rows"], m["acc@1"], m["R@cand"]) == (3, 0.0, 0.0)
+
+
+def test_strings_hash_follows_the_effective_dictionary(tmp_path):
+    """Same test rows and reference file, other vocabulary: the dictionary changes, so does strings_sha256 (R01)."""
+    test, train = tmp_path / "test.txt", tmp_path / "train.txt"
+    test.write_text("1|t|alpha\n1|a|x\n1\t0\t5\talpha\tType\tA\n\n", encoding="utf-8")
+    train.write_text("2|t|alpha alpha\n2|a|x\n2\t0\t5\talpha\tType\tA\n2\t6\t11\talpha\tType\tB\n\n", encoding="utf-8")
+    both, _ = evaluate_tree(StubTree(["A", "B"]), "t", str(test), train_path=str(train))
+    only_a, _ = evaluate_tree(StubTree(["A", "C"]), "t", str(test), train_path=str(train))
+    assert both["population_sha256"] == only_a["population_sha256"]
+    assert both["strings"]["seen, >1 label"]["n"] == 1 and only_a["strings"]["seen, 1 label"]["n"] == 1
+    assert both["strings_sha256"] != only_a["strings_sha256"]
+    assert both["eval_protocol"] == only_a["eval_protocol"]
+
+
+def test_zero_sample_metrics(tmp_path):
+    """No row in vocabulary: acc@1_all is a defined 0; an empty string group has null rates, never 0 (R11)."""
+    test, train = tmp_path / "test.txt", tmp_path / "train.txt"
+    test.write_text("1|t|alpha\n1|a|x\n1\t0\t5\talpha\tType\tA\n\n", encoding="utf-8")
+    train.write_text("2|t|alpha\n2|a|x\n2\t0\t5\talpha\tType\tA\n\n", encoding="utf-8")
+    none, state = evaluate_tree(StubTree(["Z"]), "t", str(test))
+    assert state is None and none["rows"] == 0 and none["acc@1_all"] == 0.0 and "acc@1" not in none
+    m, _ = evaluate_tree(StubTree(["A"]), "t", str(test), train_path=str(train))
+    assert m["strings"]["seen, >1 label"] == {"n": 0, "tree": None, "dict": None, "either": None, "routed": None}
+    assert m["strings"]["seen, 1 label"]["dict"] == 1.0

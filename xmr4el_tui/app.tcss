@@ -209,7 +209,7 @@ StopDialog {
 
 #summary {
     height: auto;
-    max-height: 50%;
+    max-height: 40%;  /* scrolls past it: the analysis table keeps a body (80x24) */
     padding: 0 1;
 }
 
@@ -219,6 +219,7 @@ StopDialog {
 
 #analysis-table {
     height: 1fr;
+    min-height: 6;  /* two-row header, scrollbar and at least three metric rows */
     background: $surface;
 }
 
@@ -230,7 +231,7 @@ StopDialog {
 
 #analysis-notes {
     height: auto;
-    margin: 1 0 1 0;
+    margin: 1 0 0 0;
     padding: 0 1;
     color: $foreground-muted;
 }

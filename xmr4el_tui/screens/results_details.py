@@ -24,12 +24,14 @@ def role(i):
     return "Base" if i == 0 else str(i)
 
 
-def baseline_text(name, beam):
-    """`Tree · split` on the left, the beam chip on the right."""
+def baseline_text(name, beam, gone=False):
+    """`Tree · split` on the left, the beam chip on the right; `gone`: a line saying its run is no longer found."""
     grid = Table.grid(expand=True)
     grid.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
     grid.add_column(justify="right", no_wrap=True)
     grid.add_row(Text(name or fmt.DASH, style="bold"), chip(beam))
+    if gone:
+        grid.add_row(Text("no longer found: last read values", style=style("warning")), "")
     return grid
 
 
