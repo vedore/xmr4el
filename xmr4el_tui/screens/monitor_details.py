@@ -10,6 +10,7 @@ from xmr4el_tui.fmt import STATE_STYLE
 from xmr4el_tui.runs import as_dict, elapsed, state_word
 from xmr4el_tui.screens.dashboard_details import banner_text
 from xmr4el_tui.services.experiment_repository import Activity
+from xmr4el_tui.theme import style
 
 NA = "N/A"
 RUN_ROW = ("run",)  # the Pipeline row of the whole run
@@ -18,8 +19,8 @@ STAGE_NAMES = {"load": "Load data", "encode": "Encode features", "labels": "Labe
 PART_NAMES = {"mention_tfidf": "mention TF-IDF → SVD", "context_tfidf": "context TF-IDF → SVD",
               "transformer": "transformer", "assemble": "assemble features", "data": "load data",
               "predict": "prediction", "metrics": "metrics", "write": "write results"}
-STAGE_STYLE = {"done": "#7BD88F", "current": "bold #5CC8FF", "pending": "dim", "failed": "#FF6B6B",
-               "stopped": "#F5C451"}
+STAGE_STYLE = {"done": style("success"), "current": style("info", "bold"), "pending": "dim",
+               "failed": style("error"), "stopped": style("warning")}
 STAGE_WORD = {"done": "completed", "current": "running", "pending": "pending", "failed": "failed",
               "stopped": "stopped"}
 
@@ -39,7 +40,7 @@ def overview_text(run, device, cancelling):
     word = state_word(run)
     state = Text(word, style=STATE_STYLE[word])
     if cancelling and word == "RUNNING":
-        state.append("  cancellation requested", style="#F5C451")
+        state.append("  cancellation requested", style=style("warning"))
     t = Text()  # one line per field: the panel cuts long ones (app.tcss #overview-text)
     t.append(f"{run.name}\n", style="bold")
     for k, v in (("Type", kind_text(run) + (f" · {', '.join(e.split for e in run.evals)}" if run.evals else "")),
@@ -146,7 +147,7 @@ def resource_text(key, run, stages, doc):
         return "Resources — whole run", overall_text(run, doc, scope)
     stage = next((s for s in stages if s.key == key[0]), None)
     if stage is None:
-        return "Resources", Text("This stage is no longer in the run's events.", style="yellow")
+        return "Resources", Text("This stage is no longer in the run's events.", style=style("warning"))
     part = next((p for p in stage.parts if p.key == key[1]), None) if len(key) > 1 else None
     shown = part or stage
     name = stage_name(stage.key, run.kind)
@@ -155,7 +156,7 @@ def resource_text(key, run, stages, doc):
     if shown.seconds is not None:
         t.append(f"  {fmt.duration(shown.seconds)}")
     if shown.error:
-        t.append(f"\n{shown.error}", style="#FF6B6B")
+        t.append(f"\n{shown.error}", style=style("error"))
     t.append("\n\n")
     summary = summary_of(doc, stage.key)
     if part and summary:

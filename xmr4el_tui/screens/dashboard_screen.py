@@ -21,6 +21,7 @@ from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, VIEW_
                                                    run_text, state_text, tree_text)
 from xmr4el_tui.screens.log_screen import LogScreen
 from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
+from xmr4el_tui.screens.results_screen import ResultsScreen
 from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import Description
 from xmr4el_tui.widgets.explorer import EXPLORER_STEP, Explorer, explorer_width
@@ -56,7 +57,8 @@ class DashboardScreen(Screen):
                 Binding("ctrl+b", "toggle_explorer", "hide / show explorer", show=False),
                 Binding("less_than_sign", f"resize_explorer({-EXPLORER_STEP})", "narrower explorer", show=False),
                 Binding("greater_than_sign", f"resize_explorer({EXPLORER_STEP})", "wider explorer", show=False),
-                Binding("ctrl+r", "rescan", "rescan", show=False)]
+                Binding("ctrl+r", "rescan", "rescan", show=False),
+                Binding("r", "results", "results")]
 
     def compose(self) -> ComposeResult:
         yield TopBar("Dashboard", id="top")
@@ -228,25 +230,29 @@ class DashboardScreen(Screen):
         else:
             self.notify("That run directory is no longer found.", severity="warning")
 
-    def open_results(self, filter, select):
-        """Results scoped by `filter` (tree or run id), cursor on run `select`. Not rebuilt yet: says what it would
-        open."""
-        self.notify(f"Results: {filter} · run {select} (screen not built yet)")
+    def open_results(self, key):
+        """Results with evaluation `key` as the baseline; esc comes back here with the selection kept."""
+        self.app.push_screen(ResultsScreen(key))
 
     def action_results(self):
-        """Results scoped to the selected tree (its evaluations), cursor on the selected run."""
-        node, parent = self.selected()
-        if node is None or node.kind in ("group", "dataset"):
-            self.notify("Select a tree, an evaluation or a run.")
-        elif node.kind == "run":
-            self.open_results(node.ref.id, node.ref.id)
+        """Results with the selected evaluation as the baseline (a tree with exactly one evaluation with metrics:
+        that one). Never picks among several: the tree opens so one can be chosen."""
+        node, _ = self.selected()
+        if node is None or node.kind not in ("tree", "eval"):
+            self.notify("Select an evaluation to use as the Results baseline.")
+            return
+        done = [node] if node.kind == "eval" else [c for c in node.children if c.ref[1].metrics]
+        if node.kind == "eval" and not node.ref[1].metrics:
+            self.notify("This evaluation has no metrics yet: it cannot be a baseline.")
+        elif len(done) == 1:
+            self.open_results(done[0].key)
+        elif not done:
+            self.notify("No evaluation of this tree has metrics yet.")
         else:
-            tree = node.ref if node.kind == "tree" else parent.ref
-            run = node.ref[0] if node.kind == "eval" else tree.trained_by or (tree.used_by or (None,))[0]
-            if run:
-                self.open_results(tree.id or run.id, run.id)
-            else:
-                self.notify("No recorded evaluations for this tree.")
+            tree = self.query_one(Explorer)
+            tree.nodes[node.key].expand()
+            tree.focus()
+            self.notify(f"This tree has {len(done)} evaluations: select one as the baseline, then r.")
 
     def action_monitor(self):
         """Run screen of the selected run: the evaluation's run (on its split), a tree's training run."""

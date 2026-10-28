@@ -1,8 +1,8 @@
 # XMR4EL TUI code architecture
 
-Status: implemented, Dashboard and Run monitor (2026-10-28). Implements [tui.md](tui.md); section numbers `§n`
-refer to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment and Results are
-planned: their keys only say what they would open.
+Status: implemented, Dashboard, Run monitor and Results (2026-10-28). Implements [tui.md](tui.md); section
+numbers `§n` refer to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment is
+planned: its key only says what it would open.
 
 ## 1. Rules
 
@@ -34,6 +34,7 @@ xmr4el_tui/
   logs.py          LogTail: incremental, bounded run.log reads (levels, torn lines, truncation); log_path
   compare.py       comparability verdict and deltas for two selected evaluations (no screen yet)
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
+  theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
   process.py       -check, spawn, derived state, stop; Launches (owner of started children)
   explorer.py      Dashboard explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels
   messages.py      RunsChanged (the app rescanned)
@@ -41,6 +42,8 @@ xmr4el_tui/
   services/
     experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
                    and incremental events tails; Details of the selected item
+    comparison.py  Results: Facts per evaluation (hashes, preprocessing, commits), assess -> Compat
+                   (VERIFIED / CAUTION / INCOMPATIBLE + reason), metric groups and allowed deltas
   screens/
     dashboard_screen.py   DashboardScreen + ActiveRuns; Details loaded in a worker; open_run -> Run monitor
     dashboard_details.py  pure Rich texts: banner, metrics, tree / evaluation / run / group descriptions
@@ -49,8 +52,11 @@ xmr4el_tui/
                    stage selection -> resources, Cancel Run -> process.stop in a worker, layout / panel keys
     monitor_details.py    pure Rich texts: overview, stage rows, resource summaries (resources.json scopes)
     stop_dialog.py StopDialog: Cancel Run confirmation (names the run id)
+    results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
+    results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
   widgets/
-    explorer.py    Explorer tree (resizable) + node labels
+    explorer.py    Explorer tree (resizable) + node labels; ResultsExplorer (row states, beam chip, ⓘ click)
+    results_panels.py  BaselinePanel, ComparisonSummary, DetailedAnalysis (DataTable + notes), InspectionView
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
     top_bar.py     TopBar (shared header)
@@ -64,7 +70,7 @@ xmr4el_tui/
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
   test_runs.py  test_progress.py  test_logs.py  test_compare.py  test_procinfo.py  test_process.py
-  test_dashboard.py  test_monitor.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_dashboard.py  test_monitor.py  test_results.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
 Runner side (imports xmr4el, never imported by the TUI): `xmr4el/telemetry/events.py` (EventLog: the
@@ -193,9 +199,11 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 | `RunMonitorScreen` | one run by id: overview, pipeline, resources of the selected stage, live log | `App.snapshot` (state); `progress.EventTail` + resources.json (stat, reread on change) every 1 s in a worker while active, one read after it ends; provenance.json once; the log via `LogPanel` |
 | `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 
-Results is not rebuilt yet: `DashboardScreen.open_results(filter, select)` resolves the target (tree id or
-run id, run) and only says what it would open. `open_run(run_id, split)` pushes the Run monitor. Backend kept for
-Results and Setup: `process.check/Launches/rejection`, `compare.verdict/rows`,
+| `ResultsScreen` | baseline + up to 3 challengers: summary, one metric group for all, inspection of one | `App.snapshot` (metrics); `comparison.read_facts` for every evaluation in a worker when the scan's runs change |
+
+`DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
+pushes the Run monitor. Backend kept for Setup: `process.check/Launches/rejection`, `compare.verdict/rows`
+(Results reuses compare's hash/preprocessing helpers),
 `runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,

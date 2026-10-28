@@ -181,3 +181,71 @@ StopDialog {
 #stop-buttons Button {
     margin: 0 4 0 0;
 }
+
+/* Results (screens/results_screen.py): the left column's width is set by ResultsScreen.set_left_width. Row states
+   of the explorer (cursor, member, baseline) are painted by ResultsExplorer from the same theme tokens. */
+#res, #res-left, #res-right, #res-compare {
+    height: 1fr;
+}
+
+#res-right {
+    width: 1fr;
+}
+
+#baseline {
+    height: auto;
+    padding: 0 1;
+}
+
+#res-explorer {
+    height: 1fr;
+}
+
+#summary {
+    height: auto;
+    max-height: 50%;
+    padding: 0 1;
+}
+
+#analysis {
+    height: 1fr;
+}
+
+#analysis-table {
+    height: 1fr;
+    background: $surface;
+}
+
+#analysis-table > .datatable--cursor {
+    background: $xmr-cursor-row;
+    color: $foreground;
+    text-style: none;
+}
+
+#analysis-notes {
+    height: auto;
+    padding: 0 1;
+    color: $foreground-muted;
+}
+
+#inspect {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#baseline, #res-explorer, #summary, #analysis, #inspect {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+    border-subtitle-color: $foreground-muted;
+}
+
+#res-explorer:focus, #summary:focus, #analysis:focus-within, #inspect:focus {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+#res-explorer:disabled {
+    opacity: 60%;
+}

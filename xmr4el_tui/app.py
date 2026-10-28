@@ -9,7 +9,7 @@ from textual.message import Message
 from textual.theme import Theme
 from textual.worker import get_current_worker
 
-from xmr4el_tui import process
+from xmr4el_tui import process, theme
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
@@ -17,18 +17,21 @@ from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snap
 RESCAN_SECONDS = 5
 QUIT_SECONDS = 3  # second ctrl+q within this window quits
 
-# The one style (no theme picker). Screens use only theme variables in app.tcss, so another Theme can be registered
-# later without touching them. Status colours stay semantic (dashboard.STATE_STYLE).
+# The one style (no theme picker). Every colour comes from theme.TOKENS; screens use only theme variables in app.tcss,
+# so another theme needs no CSS change.
+C = theme.TOKENS
 THEME = Theme(
-    name="xmr4el", dark=True, primary="#2CF5C5", accent="#2CF5C5", foreground="#F0F4F8", background="#101418",
-    surface="#1B2229", panel="#1B2229",
-    variables={"foreground-muted": "#A5B4C3", "border": "#2CF5C5", "border-blurred": "#3A4754",
-               "block-cursor-background": "#2CF5C5", "block-cursor-foreground": "#101418",
-               "block-cursor-text-style": "bold", "block-cursor-blurred-background": "#2B5C55",
-               "block-cursor-blurred-foreground": "#F0F4F8", "block-cursor-blurred-text-style": "none",
-               "block-hover-background": "#F0F4F8 8%", "footer-key-foreground": "#2CF5C5",
-               "footer-description-foreground": "#A5B4C3",
-               "screen-selection-background": "#3B6E99", "screen-selection-foreground": "#F0F4F8"})
+    name="xmr4el", dark=True, primary=C["accent"], accent=C["accent"], foreground=C["text"],
+    background=C["background"], surface=C["surface"], panel=C["panel"], success=C["success"],
+    warning=C["warning"], error=C["error"],
+    variables={"foreground-muted": C["text-muted"], "border": C["accent"], "border-blurred": C["panel-border"],
+               "block-cursor-background": C["accent"], "block-cursor-foreground": C["on-accent"],
+               "block-cursor-text-style": "bold", "block-cursor-blurred-background": C["cursor-blurred"],
+               "block-cursor-blurred-foreground": C["text"], "block-cursor-blurred-text-style": "none",
+               "block-hover-background": f"{C['text']} 8%", "footer-key-foreground": C["accent"],
+               "footer-description-foreground": C["text-muted"],
+               "screen-selection-background": C["text-selection"], "screen-selection-foreground": C["text"],
+               **theme.css_variables()})
 
 
 class Scanned(Message):
@@ -56,6 +59,10 @@ class XMR4ELApp(App):
         self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
         self.scan_wanted = self.scan_announce = False  # requests the running scan picks up
         self.launches = process.Launches(root)
+
+    def get_theme_variable_defaults(self):
+        """The theme tokens ($xmr-...) exist before THEME is applied (app.tcss is parsed first)."""
+        return theme.css_variables()
 
     def on_mount(self):
         self.register_theme(THEME)

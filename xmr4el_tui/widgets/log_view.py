@@ -12,12 +12,13 @@ from textual.scroll_view import ScrollView
 from textual.strip import Strip
 
 from xmr4el_tui.logs import LEVELS
+from xmr4el_tui.theme import color
 
 MAX_LINES = 100_000
 FILTERS = (None, "INFO", "WARNING", "ERROR")  # minimum level shown; None = every line
-LEVEL_STYLE = {"DEBUG": Style(dim=True), "WARNING": Style(color="yellow"), "ERROR": Style(color="red"),
-               "CRITICAL": Style(color="red", bold=True)}
-MATCH, CURRENT = Style(bgcolor="#3B6E99"), Style(bgcolor="#2CF5C5", color="#101418", bold=True)
+LEVEL_STYLE = {"DEBUG": Style(dim=True), "WARNING": Style(color=color("warning")), "ERROR": Style(color=color("error")),
+               "CRITICAL": Style(color=color("error"), bold=True)}
+MATCH, CURRENT = Style(bgcolor=color("match")), Style(bgcolor=color("accent"), color=color("on-accent"), bold=True)
 
 
 class LogView(ScrollView, can_focus=True):

@@ -8,11 +8,16 @@ class FullRow:
     CURSOR = ""
 
     def render_line(self, y):
-        strip = super().render_line(y)
-        if not self.cursor_at(y):
-            return strip
-        return Strip(Segment.apply_style(list(strip), post_style=self.get_component_rich_style(self.CURSOR)),
-                     strip.cell_length)
+        return self.paint_row(super().render_line(y), y)
+
+    def paint_row(self, strip, y):
+        """Row `y` (on screen) as drawn; override to paint other row states."""
+        return paint(strip, self.get_component_rich_style(self.CURSOR)) if self.cursor_at(y) else strip
+
+
+def paint(strip, style):
+    """`style` over every cell of `strip`."""
+    return Strip(Segment.apply_style(list(strip), post_style=style), strip.cell_length)
 
 
 class Selectable:

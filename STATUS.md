@@ -57,6 +57,16 @@ rows; RM-11 README; R-01 reap in the scan thread, log path chosen in the log wor
 tui_architecture.md. Committed on `tui`, not pushed. NEXT: push only on the user's OK; try a TUI launch once New Experiment exists (Cancel Run is never
 offered before that).
 
+**2026-10-28 Results V1 + theme tokens (user's pasted prompt; committed on `tui`, not pushed):** `theme.py` = the
+only hex values (semantic tokens, beam palette, `$xmr-*` CSS variables via `App.get_theme_variable_defaults`;
+fmt/monitor/log/dashboard colours migrated; test forbids hex elsewhere). Results: `screens/results_screen.py`,
+`results_details.py`, `widgets/results_panels.py`, `ResultsExplorer` in `widgets/explorer.py` (FullRow got a
+`paint_row` hook, Explorer a `label` hook), `services/comparison.py` (VERIFIED / CAUTION / INCOMPATIBLE from test
+sha256 + rows_total; population hash or §11 derivation for subset deltas; reuses compare.py helpers). Dashboard `r`
+/ Description `left` open it (tree with several evaluations: no baseline chosen, tree expands). Docs tui.md §4,
+§5.12, §7; tui_architecture.md. Full suite 220 pass, ruff clean; renders checked at 140x40 and 80x24 on real
+outputs/runs. NEXT: user reviews (`python -m xmr4el_tui`, `r` on an evaluation); the user has changes to Results planned for the next session.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

@@ -10,6 +10,7 @@ from xmr4el_tui.compare import RECALL
 from xmr4el_tui.fmt import STATE_SHORT, STATE_STYLE
 from xmr4el_tui.runs import as_dict, elapsed, state_word
 from xmr4el_tui.services.experiment_repository import Activity, Details
+from xmr4el_tui.theme import style
 from xmr4el_tui.widgets.description import HEAD
 
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
@@ -30,30 +31,30 @@ def banner_text(run, activity=Activity(), details=Details()):
     """§5.4 banner for runs that did not complete, or None."""
     word = state_word(run)
     if word == "FAILED":
-        return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", "red"),
+        return Text.assemble((f"{fmt.marker('failed', fmt.use_ascii())} {run.error or 'no error recorded'}", style("error")),
                              f"\n  recorded in status.json at {fmt.stamp(run.finished, long=True)}")
     if word == "STOPPED":
         how = "Force-stopped (SIGKILL, requested in the TUI)" if run.error == "SIGKILL" else \
             f"Stopped by {run.error or 'a signal'}"
         return Text(f"{how} at {fmt.stamp(run.finished, long=True)}. "
-                    "Completed stages and saved files are kept.", style="yellow")
+                    "Completed stages and saved files are kept.", style=style("warning"))
     if word == "LOST":
         last = activity.last
         where = f" Last event: {last[0]} at {fmt.stamp(last[1], long=True)}." if last else ""
         return Text(f"Process {run.identity['pid']} is gone and wrote no final status (killed, e.g. out of "
-                    f"memory).{where}", style="red")
+                    f"memory).{where}", style=style("error"))
     if word == "UNVERIFIED":
         age = details.heartbeat
         beat = f" Heartbeat {fmt.duration(age)} ago." if age is not None else ""
         if run.live and run.live.other_runtime:
             return Text(f"Recorded running on {run.identity.get('host') or 'another host'}, another machine or "
-                        f"container.{beat}", style="yellow")
+                        f"container.{beat}", style=style("warning"))
         if run.identity:
             reason = run.live.reason if run.live else "not checked"
             return Text(f"Recorded running here, but the process cannot be inspected ({reason}). "
-                        f"Stop unavailable.{beat}", style="yellow")
+                        f"Stop unavailable.{beat}", style=style("warning"))
         return Text("Recorded running, but this run records no process identity (written before the runner "
-                    "change), so liveness cannot be checked.", style="yellow")
+                    "change), so liveness cannot be checked.", style=style("warning"))
     if word == "UNKNOWN":
         reason = next((p for p in run.problems if p.startswith("status.json")), "status.json: missing")
         return Text(f"status.json is missing, unreadable or has no usable status: {reason.split(': ', 1)[1]}. "
@@ -121,7 +122,7 @@ def state_text(word):
 
 def _problems(t, problems):
     if problems:
-        t.append("\nproblems: " + "; ".join(problems) + "\n", style="yellow")
+        t.append("\nproblems: " + "; ".join(problems) + "\n", style=style("warning"))
 
 
 def _provenance(t, run, details):
@@ -140,8 +141,8 @@ def tree_text(node, details):
     trained = tr.trained_by
     t.append(f"{node.label}\n", style=HEAD)
     dataset = explorer.dataset_of(tr)
-    place = Text("on this machine", style="green") if tr.here else Text(
-        f"missing: {tr.path}/xmodel.pkl (moved, deleted or not synced)", style="yellow")
+    place = Text("on this machine", style=style("success")) if tr.here else Text(
+        f"missing: {tr.path}/xmodel.pkl (moved, deleted or not synced)", style=style("warning"))
     _rows(t, [("Tree id", tr.id or "none recorded"),
               ("Dataset", dataset or f"{explorer.UNKNOWN_DATASET} (no training run recorded)"),
               ("Saved at", tr.path), ("", place),
@@ -234,7 +235,7 @@ def group_text(node, snapshot, root):
         n = sum(len(d.children) for d in node.children)
         _rows(t, [("Trees", n), ("Datasets", len(node.children)), ("Runs", len(snapshot.runs))])
         if snapshot.problem:
-            t.append(f"\n{snapshot.problem}\n", style="yellow")
+            t.append(f"\n{snapshot.problem}\n", style=style("warning"))
         if not snapshot.scanned:
             t.append("\nScanning outputs/runs/ …\n")
         elif not snapshot.found:

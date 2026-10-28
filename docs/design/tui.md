@@ -135,9 +135,14 @@ component. Lines in other formats are shown unchanged; `run.log` itself is not r
 **Stage markers.** Unicode: `✓` done, `▸` current, `·` pending, `✗` failed.
 ASCII (`NO_COLOR` or a non-UTF-8 locale): `ok`, `>>`, `..`, `xx`.
 
-**Style (2026-10-27).** One high-contrast theme `xmr4el` (`app.THEME`: background `#101418`, surface `#1B2229`,
-text `#F0F4F8` / muted `#A5B4C3`, accent and cursor `#2CF5C5` with `#101418` text); no theme picker (the palette's
-Theme command is removed). CSS uses only theme variables, so a later theme is one more `Theme`. The cursor row is
+**Style (2026-10-27; tokens 2026-10-28).** One high-contrast theme `xmr4el`; no theme picker (the palette's
+Theme command is removed). Every colour is a semantic token in `xmr4el_tui/theme.py` (`DARK`, the only file with
+hex values; a test enforces it): application (background `#101418`, surface `#1B2229`, panel border, text
+`#F0F4F8` / muted `#A5B4C3` / disabled), selection (accent `#2CF5C5`, `on-accent`, `cursor-row` = 40 % accent over
+surface, `focus-outline`), status (success, warning, error, info, unknown, `warning-on-accent` for Caution on a
+selected row), comparison (baseline / member rows, delta) and the beam palette. `app.THEME` maps them to Textual's
+variables and exposes every token as `$xmr-<token>` in app.tcss; Python Rich styles use `theme.color` /
+`theme.style`. A later theme = another dict with the same keys assigned to `theme.TOKENS`. The cursor row is
 painted across the whole row (explorer guides, every table column, the padding after them); a blurred panel keeps
 a dim accent cursor (selected, not focused); the cursor row of Description is one colour (a green COMPLETED
 would vanish on the accent); explorer guides of the cursor's branch stay accent (on a leaf or a collapsed node,
@@ -562,6 +567,67 @@ esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
 - Polling: events.jsonl from its last offset (`progress.EventTail`, shared with the scan's Activity) and
   resources.json only when its (inode, mtime, size) changed, every 1 s while active; state from the app's 5 s scan.
 
+### 5.12 Results (built 2026-10-28)
+
+```text
+                                        XMR4EL          Dashboard  New Experiment  Run Monitor  Results
+╭ Current Baseline ────────────╮╭ Comparison Summary ────────────────────────────────────────────────╮
+│ ncbi_disease · a64127ef B10  ││          Evaluation            Acc@1_all       Acc@1     Coverage  │
+╰──────────────────────────────╯│Base B10  ncbi_disease · …dev      89.17%      92.59%       96.30%  │
+╭ Explorer ────────────────────╮│1    B20  beta · dev         90.04% +0.87 93.46% +0.87 96.30% +0.00 │
+│▼ ncbi_disease  3             ││2    B10  ncbi_disease · … ⚠ 89.04% -0.13      92.46% 96.30% +0.00  │
+│  ▼ ncbi_disease · a64127ef   ││⚠ 2 …: in-vocabulary population not verified: … Matches: … Affects: │
+│    ⓘ B10 dev  baseline       │╰────────────────────────────────────────────────────────────────────╯
+│  ▼ beta                      │╭ Detailed Analysis ─────────────────────────────────────────────────╮
+│    ⓘ B20 dev                 ││Metric          Base B10       1 B20            2 B10               │
+│  ▼ ncbi_disease · 8528b624  ⚠││                ncbi_dise…     beta · dev       ncbi_dise…          │
+│    ⓘ B10 test · …  ✗         ││Acc@1_all       89.17%         90.04% +0.87     89.04% -0.13        │
+│    ⓘ B10 dev  ⚠              ││Acc@1           92.59%         93.46% +0.87     92.46%              │
+│▶ nlm_chem  1                 ││                                                                    │
+│                              ││                                                                    │
+╰──────────────────────────────╯╰─────────── 1 Performance  2 Ranking  3 Generalization  4 Efficiency ╯
+⏎ inspect  space add / remove  esc back  1-4 metric group  ? keys
+```
+
+Baseline row (Summary) and member rows (Explorer) are on the accent; the explorer cursor row is `cursor-row`.
+
+- Opened from the Dashboard (`r`, or `left` in Description) with an evaluation as the **baseline**: the selected
+  evaluation, or a tree's only evaluation with metrics. A tree with several opens in the explorer instead, so the
+  user chooses; Results never picks the latest or best. Each opening is a new session (no challengers); `esc`
+  returns to the Dashboard as it was left. The baseline cannot be changed inside Results.
+- One layout for every state: zero to three **challengers** (`comparison.MAX_CHALLENGERS`) next to the baseline.
+  Identity is the explorer key `("eval", run id, split)`, never a label. Left column 30 % (resizable as the
+  Dashboard's: `<` `>`, border drag), Current Baseline (one line) over the Explorer; right: Comparison Summary
+  (content height, at most half) over Detailed Analysis.
+- Explorer = the Dashboard's `Explorer` (same model, `explorer.build` Models branch: dataset > tree >
+  evaluation), as `ResultsExplorer`. Rows: `ⓘ` (click = inspect), beam chip, label, `baseline` / `⚠` Caution /
+  `✗` Incompatible (dim); a tree shows `⚠` when one of its evaluations is Caution. Keyboard cursor = `cursor-row`
+  background; comparison member (and the baseline) = accent background, kept when the cursor leaves; the cursor
+  on a member keeps the accent and adds `focus-outline` bars at both row edges. `space` / click on an evaluation
+  adds or removes it; a click on a tree or dataset expands it; `enter` / `ⓘ` inspects. A fourth challenger, the
+  baseline and Incompatible evaluations are refused with a toast.
+- **Compatibility** (`services/comparison.assess`, one place): INCOMPATIBLE = no metrics, test-file sha256
+  missing or different (provenance.json, never file names), or different / missing `rows_total`. Otherwise
+  VERIFIED, unless something needed for a delta cannot be checked: CAUTION, with `reason` (what is missing),
+  `matches` (sha256, loaded rows) and `affects` (which deltas are withheld). In-vocabulary deltas (acc@1, MRR,
+  R@k, R@cand, hybrid) need equal `population_sha256`, or §11's derivation (same tree training-file sha256,
+  preprocessing, one clean commit); a known difference (hashes or training files differ) withholds them as a note,
+  not a Caution. Vocabulary, beam and search settings never block. Generalization deltas also need equal
+  seen/unseen reference files (eval `train_path` sha256). No timing deltas at all (hardware not recorded).
+- Summary: baseline row on the accent, challengers in selection order; Acc@1_all (the comparison metric, fixed),
+  Acc@1, Coverage (rows / rows_total), each challenger with its delta; one line per Caution challenger with its
+  reason. No ranking or winner. Detailed Analysis: one group (`1`-`4`: Performance, Ranking, Generalization,
+  Efficiency) for every evaluation at once, one column each (scrolls horizontally when narrow); value and delta
+  (percentage points; MRR on its own scale); a missing metric is `N/A`, never 0; known-difference notes below.
+- Inspection (`enter`): the explorer's evaluation (member or not) replaces the right column, read-only: identity,
+  beam, standing against the baseline (level, reason, matches, affects), every group. The explorer is disabled;
+  `esc` restores members, group, cursor and expansion. Not a screen.
+- Data: metrics from the scan; `comparison.read_facts` (provenance / git / spec / model_config of the run and its
+  tree's training run) for every evaluation in a worker, rerun only when the scan's runs change. A FAILED run's
+  written metrics stay usable.
+- Beam colour: `theme.beam_color(beam) = palette[beam mod 6]`, the same everywhere, never discovery order; the
+  number is always written (`B10`).
+
 ## 6. View states
 
 | View | Empty | Loading | Error |
@@ -584,7 +650,9 @@ esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
 | Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
 | Explorer | `enter` | Describe the item and focus Description. |
-| Description | `left` / `right` / `esc` | Results on the item's tree (cursor on its run) / Run monitor of its run (tree: training run; evaluation: its split's stage selected) / back to Explorer. Results not rebuilt yet: a notice names the target. |
+| Dashboard, Description | `r`, `left` / `right` / `esc` | Results with the evaluation as the baseline (a tree: its only evaluation with metrics; several: the tree opens to choose) / Run monitor of its run (tree: training run; evaluation: its split's stage selected) / back to Explorer. |
+| Results | `up` `down`, `left` / `right`, `space`, `enter` | Explorer: move, collapse / expand, add or remove the evaluation (a tree: expand), inspect. Mouse: click an evaluation adds / removes, its `ⓘ` inspects, a tree row expands. |
+| Results | `1`-`4`, `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`), `<` / `>`, `esc` | Metric group; next / previous panel (Explorer, Summary, Analysis); narrower / wider left column; close inspection, then back to the Dashboard. |
 | Active runs | `up` `down`, `enter` | Move, open the run in the Run monitor. |
 | Run monitor | `ctrl+tab` / `ctrl+shift+tab` (or `]` / `[`) | Next / previous panel: Run overview (its Cancel Run button when usable), Pipeline, Resources, Live logs. |
 | Run monitor | `up` `down`, `tab` `shift+tab`, `left` / `right`, `enter` (Pipeline) | Move between stages / collapse or parent, expand / toggle a stage's parts. The selected row's resources show in Resources. |

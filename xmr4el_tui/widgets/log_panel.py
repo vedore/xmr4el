@@ -12,6 +12,7 @@ from textual.widgets import Input, Static
 from xmr4el_tui import explorer, fmt
 from xmr4el_tui.fmt import STATE_STYLE
 from xmr4el_tui.logs import LogTail, log_path
+from xmr4el_tui.theme import style
 from xmr4el_tui.runs import state_word
 from xmr4el_tui.widgets.log_view import LogView
 
@@ -92,7 +93,7 @@ class LogPanel(Vertical):
         view.display, missing.display = not empty, empty
         if empty:
             missing.update(Text(f"No log to show: {self.path} ({message.error}). Nothing is generated here; the "
-                                "runner writes run.log from the start of a run.", style="yellow"))
+                                "runner writes run.log from the start of a run.", style=style("warning")))
         if self.again:
             self.again = False
             self.tick()
@@ -112,11 +113,11 @@ class LogPanel(Vertical):
         if self.tail and self.tail.skipped:
             t.append(f"(first {fmt.count(self.tail.skipped)} bytes not loaded)  ", style="dim")
         if error and view.all:
-            t.append(f"log {error}  ", style="yellow")
+            t.append(f"log {error}  ", style=style("warning"))
         t.append(f"level {view.min_level or 'all'}" + (" · following" if self.timer else ""), style="dim")
         if view.query:
             at = f"{view.current + 1}/{len(view.matches)}" if view.current is not None else f"0/{len(view.matches)}"
-            t.append(f"  “{view.query}” {at}", style="bold" if view.matches else "yellow")
+            t.append(f"  “{view.query}” {at}", style="bold" if view.matches else style("warning"))
         self.query_one("#log-header", Static).update(t)
 
     def action_close_search(self):

@@ -35,14 +35,14 @@ def text(widget):
 
 
 def run_app(root, test, size=(120, 36), opened=None):
-    """`opened`: list collecting what Results / Run monitor would open (their screens are not built yet)."""
+    """`opened`: list collecting what Results / Run monitor would open (instead of opening them)."""
     async def go():
         app = XMR4ELApp(root)
         async with app.run_test(size=size) as pilot:
             await app.workers.wait_for_complete()  # the first scan starts on mount
             await pilot.pause()
             if opened is not None:
-                app.screen.open_results = lambda f, sel: opened.append(("results", f, sel))
+                app.screen.open_results = lambda key: opened.append(("results", key))
                 app.screen.open_run = lambda rid, split=None: opened.append(("monitor", rid, split))
             await test(app, pilot)
     asyncio.run(go())
@@ -269,13 +269,14 @@ def test_keyboard(tmp_path):
         await pilot.press("left_square_bracket", "escape")
         assert isinstance(app.focused, Explorer), "] / [ fall back for terminals without ctrl+tab; esc: explorer"
 
-        await pilot.press("enter", "left", "right")  # Results on the tree / Run monitor on the evaluation's split
-        assert opened == [("results", TREE, "2026-10-20_13-36-20_alpha"),
+        await pilot.press("enter", "left", "right")  # Results with this baseline / Run monitor on its split
+        assert opened == [("results", ("eval", "2026-10-20_13-36-20_alpha", "dev")),
                           ("monitor", "2026-10-20_13-36-20_alpha", "dev")]
-        await pilot.press("escape", "up", "up", "up", "enter", "left", "right")  # the tree: its training run
-        assert explorer_key(app) == ("tree", TREE)
-        assert opened[2:] == [("results", TREE, "2026-10-20_13-36-20_alpha"),
-                              ("monitor", "2026-10-20_13-36-20_alpha", None)]
+        await pilot.press("escape", "up", "up", "up", "enter", "left")  # the tree: several evaluations, no baseline
+        assert explorer_key(app) == ("tree", TREE) and opened[2:] == []
+        assert isinstance(app.focused, Explorer) and app.focused.cursor_node.is_expanded, "opened to choose one"
+        await pilot.press("enter", "right")  # the tree: its training run
+        assert opened[2:] == [("monitor", "2026-10-20_13-36-20_alpha", None)]
         await pilot.press("ctrl+tab")  # Active runs: enter opens the run
         assert app.focused.id == "active-runs" and app.focused.row_count == 1
         await pilot.press("enter")
@@ -334,9 +335,9 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
         await rescan()
         assert tree.index[("tree", TREE)][0].note == "missing"
         assert "missing: outputs/saved_trees" in screen.query_one(Description).text()
-        await pilot.press("enter", "left", "right", "escape")  # still navigable after refresh
+        await pilot.press("enter", "left", "enter", "right", "escape")  # still navigable after refresh
         assert app.screen is screen and isinstance(app.focused, Explorer)
-        assert [o[0] for o in opened] == ["results", "monitor"]
+        assert [o[0] for o in opened] == ["monitor"], "a tree with several evaluations picks no baseline"
 
     opened = []
     run_app(root, check, opened=opened)
