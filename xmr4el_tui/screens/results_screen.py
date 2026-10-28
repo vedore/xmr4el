@@ -13,11 +13,12 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Checkbox, ContentSwitcher, Footer
+from textual.widgets import Checkbox, ContentSwitcher
 
 from xmr4el_tui import explorer
 from xmr4el_tui.screens.results_details import analysis, baseline_text, inspection, summary
 from xmr4el_tui.services.comparison import BASELINE, GROUPS, INCOMPATIBLE, MAX_CHALLENGERS, assess, beam, read_facts
+from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.explorer import ResultsExplorer
 from xmr4el_tui.widgets.resize import column_width
 from xmr4el_tui.widgets.results_panels import BaselinePanel, ComparisonSummary, DetailedAnalysis, InspectionView
@@ -50,8 +51,17 @@ class ResultsScreen(Screen):
         self.group, self.inspecting, self.left_want, self.show_all, self.roots = 0, None, None, False, ()
         self.facts, self.compat, self.names, self.seq, self.facts_runs = {}, {}, {}, 0, None
 
+    @property
+    def crumbs(self):
+        return ("Results", "Inspect") if self.inspecting is not None else ("Results",)
+
+    def back_to_crumb(self, level):
+        """Navbar click on Results while inspecting: as esc from the inspection."""
+        if self.inspecting is not None:
+            self.action_back()
+
     def compose(self) -> ComposeResult:
-        yield TopBar("Results", id="top")
+        yield TopBar(id="top")
         with Horizontal(id="res"):
             with Vertical(id="res-left"):
                 yield BaselinePanel(id="baseline")
@@ -62,7 +72,7 @@ class ResultsScreen(Screen):
                     yield ComparisonSummary(id="summary")
                     yield DetailedAnalysis(id="analysis")
                 yield InspectionView(id="inspect")
-        yield Footer(show_command_palette=False)
+        yield ContextFooter()
 
     def on_mount(self):
         for wid, title in (("baseline", "Current Baseline"), ("res-explorer", "Explorer"),
@@ -95,8 +105,8 @@ class ResultsScreen(Screen):
         gone = [m for m in self.members if m not in full]
         if gone:
             self.members = [m for m in self.members if m not in gone]
-            self.notify(f"{len(gone)} challenger(s) no longer found (run moved or deleted): removed.",
-                        severity="warning")
+            self.app.say(f"{len(gone)} challenger(s) no longer found (run moved or deleted): removed.",
+                         "warning", self)
         sig = tree.sig
         self.refill()
         if gone or tree.sig is not sig:  # an unchanged rescan redraws nothing
@@ -140,8 +150,8 @@ class ResultsScreen(Screen):
         dropped = [m for m in self.members if self.compat.get(m, BASELINE).level == INCOMPATIBLE]
         if dropped:
             self.members = [m for m in self.members if m not in dropped]
-            self.notify(f"{len(dropped)} challenger(s) became incompatible after a rescan: removed.",
-                        severity="warning")
+            self.app.say(f"{len(dropped)} challenger(s) became incompatible after a rescan: removed.",
+                         "warning", self)
         tree = self.query_one(ResultsExplorer)
         tree.compat = self.compat
         self.refill()
@@ -213,17 +223,16 @@ class ResultsScreen(Screen):
     def toggle(self, key):
         c = self.compat.get(key)
         if key == self.base:
-            self.notify("This is the baseline: choose another one on the Dashboard.")
+            self.app.say("This is the baseline: choose another one on the Dashboard.")
         elif key in self.members:
             self.members.remove(key)
             self.mark()
         elif c is None:
-            self.notify("Checking compatibility with the baseline…")
+            self.app.say("Checking compatibility with the baseline…")
         elif c.level == INCOMPATIBLE:
-            self.notify(f"Cannot compare: {c.reason}.", severity="warning")
+            self.app.say(f"Incompatible with the baseline: {c.reason}.", "warning")
         elif len(self.members) >= MAX_CHALLENGERS:
-            self.notify(f"{MAX_CHALLENGERS} challengers already compared: remove one (space) to add another.",
-                        severity="warning")
+            self.app.say(f"Maximum of {MAX_CHALLENGERS} challengers: remove one (space) to add another.", "warning")
         else:
             self.members.append(key)
             self.mark()
@@ -234,11 +243,12 @@ class ResultsScreen(Screen):
         if self.inspecting is not None:
             return
         if node is None:
-            self.notify("Move to an evaluation to inspect it.")
+            self.app.say("Move to an evaluation to inspect it.")
             return
         self.inspecting = node.key
         self.query_one(ResultsExplorer).disabled = True
         self.query_one(ContentSwitcher).current = "inspect"
+        self.query_one(TopBar).refresh()
         self.show_inspection()
         view = self.query_one(InspectionView)
         view.scroll_home(animate=False)
@@ -257,6 +267,7 @@ class ResultsScreen(Screen):
         self.inspecting = None
         tree.disabled = False
         self.query_one(ContentSwitcher).current = "res-compare"
+        self.query_one(TopBar).refresh()
         self.show_right()
         tree.focus()
 

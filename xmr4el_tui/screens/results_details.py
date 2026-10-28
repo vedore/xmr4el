@@ -47,7 +47,7 @@ def cell(value, delta, on_selected=False, widths=(0, 0)):
 
 
 def role_cell(i, compat, on_selected=False):
-    """`Base`, `1`, `2 ⚠`: the Caution mark sits by the role, so a cut name never hides it."""
+    """`Base`, `1`, `2 !`: the Caution mark sits by the role, so a cut name never hides it."""
     t = Text(role(i))
     if compat.level == CAUTION:
         t.append(f" {CAUTION_MARK}", style=Style(color=color("warning-on-accent" if on_selected else "warning"),

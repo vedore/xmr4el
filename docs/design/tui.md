@@ -83,11 +83,34 @@ and a valid input specification so a run can be repeated outside the TUI (§10).
 groups. The Runs and Trees details block is a 40-column panel on the right (under the table below
 100 columns); header and footer span the full width. Help (`?`) replaces the panel and `esc`
 closes it. No boxes around sections. Scrollbars are one cell wide and muted.
-`ctrl+c` / `ctrl+q` quit only when pressed twice within 3 s; `ctrl+r` shows a toast with the run count.
+`ctrl+c` / `ctrl+q` asks in the footer (`Confirm  Quit XMR4EL?`), a second `ctrl+c` quits, `esc` cancels; no
+timer. Runs keep running after a quit (TUI launches are detached: own session, output to files), and the question
+says so when runs are active. `ctrl+r` says the run count in the footer.
 
-**Header (2026-10-27).** `XMR4EL` centred on the app width; the areas Dashboard · New Experiment · Run Monitor ·
-Results on the right with the current one highlighted, dropped when they would reach the title. No host, counts or
-other summaries (they live in the panels).
+**Navbar (2026-10-28, replaces the 2026-10-27 areas).** Breadcrumbs left (`Dashboard / Results / Inspect`), `XMR4EL`
+centred on the app width (never moved by the crumbs or the bell), `Notifications` right with the unseen count (text: no emoji anywhere in the TUI); one blank row under the
+navbar separates it from the panels. Crumbs come from
+the screen stack (each screen's `crumbs`; modal screens add none): no second navigation history. Focus, panels and
+metric groups never change them. A click on an earlier crumb goes back to it (screens above close as with `esc`;
+`Results` while inspecting closes the inspection); too long, they are cut on the left (`… / Inspect`). No host,
+counts or other summaries (they live in the panels).
+
+**Three message layers (2026-10-28).** (1) *Notifications*: experiment lifecycle only, in memory for the session
+(`services/notifications.py`, 50 newest). The first scan records each run's state and notifies nothing; a run seen
+RUNNING / UNVERIFIED and next seen COMPLETED / FAILED / LOST / STOPPED, or a run started during the session first
+seen already ended (shorter than a scan), makes one notice per (run id, end state);
+a launch that exits without a final status uses the LOST key (reported once); a new scan problem is a notice
+without destination. Destination: one evaluation with metrics → Results with it as the baseline; otherwise (several
+evaluations, failure, interruption, cancel) → Run Monitor; opened from the Dashboard, checked against the latest
+scan (gone: footer says so). Toast: top right under the navbar, at most one per scan (several events = one summary),
+4 s (< the 5 s scan), none while the center is open; the severity tints only the title chip. Center (`ctrl+n` or
+a click on Notifications): a 52-column box under Notifications over the current screen (ModalScreen: focus, cursor, scroll, comparison
+of the screen below unchanged); opening marks all seen; `↑↓` `enter` / click opens, `c` / `Clear all` empties the
+history only, `esc` closes. (2) *Footer feedback*: replies to the user's actions (invalid Results target, maximum
+challengers, incompatible evaluation, missing run, copy, rescan) left of the shortcuts for 3.5 s; a newer one
+replaces it; it belongs to its screen (navigation drops it); never kept as a notification. (3) *Footer confirmation*:
+quit; replaces the shortcuts until answered; feedback and notifications never replace it. Comparison Caution stays
+in Results.
 The right side is the same on every screen, so state is always in one place.
 
 **Footer.** The main context keys only, then `? help` always last; it must fit 80 columns.
@@ -132,7 +155,7 @@ component. Lines in other formats are shown unchanged; `run.log` itself is not r
 - Counts: thousands separators. Latency: `2.99 ms/query`.
 - Tree IDs: first 8 hex characters; full ID in Inputs.
 
-**Stage markers.** Unicode: `✓` done, `▸` current, `·` pending, `✗` failed.
+**Stage markers.** Plain text (no symbol glyphs): `+` done, `>` current, `·` pending, `x` failed.
 ASCII (`NO_COLOR` or a non-UTF-8 locale): `ok`, `>>`, `..`, `xx`.
 
 **Style (2026-10-27; tokens 2026-10-28).** One high-contrast theme `xmr4el`; no theme picker (the palette's
@@ -205,10 +228,10 @@ then Kind. Run, Tree, Split, acc@1 and State always stay.
 XMR4EL  bc5cdr_chemical                     RUNNING 14:38 · gpu01-xmr4el
  Overview   Log   Inputs
  ========
- ✓ Load corpus                                   0:06
- ✓ Encode  474,854 rows                          7:55
- ✓ Label embeddings  179,709 labels              0:04
- ▸ Hierarchy  layer 1/2 · node 1/1 · 474,854 rows        6:33
+ + Load corpus                                   0:06
+ + Encode  474,854 rows                          7:55
+ + Label embeddings  179,709 labels              0:04
+ > Hierarchy  layer 1/2 · node 1/1 · 474,854 rows        6:33
  · Save tree
  · Evaluate dev
 
@@ -226,10 +249,10 @@ the transformer bar counts **distinct mention strings**, not corpus rows, and on
 appears when the transformer actually runs. This example is *illustrative*:
 
 ```text
- ▸ Encode  474,854 corpus rows                            5:12
-   ✓ mention TF-IDF -> SVD                                3:58
-   ✓ context TF-IDF -> SVD                                0:57
-   ▸ transformer  50,000 / 100,000 distinct mentions  ████████░░░░░░░░  50%
+ > Encode  474,854 corpus rows                            5:12
+   + mention TF-IDF -> SVD                                3:58
+   + context TF-IDF -> SVD                                0:57
+   > transformer  50,000 / 100,000 distinct mentions  ████████░░░░░░░░  50%
    · assemble features
 ```
 
@@ -237,7 +260,7 @@ appears when the transformer actually runs. This example is *illustrative*:
   transformer batches advance this substep only; OOM retries do not advance it.
 - Each block line has its own duration. A TF-IDF -> SVD block is a single fit with
   no inner progress; its line shows elapsed time only.
-- A cache hit shows `✓ transformer  cache hit`, without a batch percentage.
+- A cache hit shows `+ transformer  cache hit`, without a batch percentage.
   `"features": "tfidf"` runs show one `TF-IDF -> SVD` block and no transformer line.
 - `assemble features` (normalise and concatenate the blocks) ends with the existing
   Encoding completed event, which completes the parent Encode stage.
@@ -248,7 +271,7 @@ appears when the transformer actually runs. This example is *illustrative*:
   appears when the current stage is a single large node, where silence is normal.
 - Warnings stay listed until the run ends; `w` opens the log filtered to warnings.
 - An evaluation that finished shows its acc@1 on its stage line immediately:
-  `✓ Evaluate dev   acc@1 0.9463   0:32`.
+  `+ Evaluate dev   acc@1 0.9463   0:32`.
 
 ### 5.3 Run: completed
 
@@ -292,12 +315,12 @@ visible below it.
 XMR4EL  biored_chemical                                   FAILED 19:15
  Overview   Log   Inputs
  ========
- ✗ ValueError: eval dev: no row has a gold label in the tree's vocabulary
+ x ValueError: eval dev: no row has a gold label in the tree's vocabulary
    recorded in status.json at 2026-10-20 14:34              2 full log
 
  Kept   tree e1348683 (saved, on this machine) · no metrics
- ✓ Load corpus 0:01 · ✓ Encode 7:40 · ✓ Label embeddings 0:04
- ✓ Hierarchy 11:12 · ✓ Save tree 0:16 · ✗ Evaluate dev 0:02
+ + Load corpus 0:01 · + Encode 7:40 · + Label embeddings 0:04
+ + Hierarchy 11:12 · + Save tree 0:16 · x Evaluate dev 0:02
 d duplicate and edit  e evaluate tree  2 log  esc runs  ? help
 ```
 *illustrative*
@@ -402,7 +425,7 @@ XMR4EL  Review  nlm_chem_beam5                            gpu01-xmr4el
  dev               datasets/nlm_chem/dev.pubtator · breakdown
                    beam_size 5 · leaf_candidates 100 · topk 0 · knn_beta 10
 
- ✓ runner checks passed (keys, names, search, files, model config)
+ + runner checks passed (keys, names, search, files, model config)
    Corpus contents are checked when the run reads them.
  ! bc5cdr_chemical is running on this host and shares the GPU.
 
@@ -507,8 +530,8 @@ shares its shell's process group is viewable but has no TUI stop action.
 XMR4EL  bc5cdr_chemical               RUNNING 14:38
  Overview   Log   Inputs
  ========
- ✓ Load · ✓ Encode · ✓ Labels
- ▸ Hierarchy 1/2 · node 1/1                  6:33
+ + Load · + Encode · + Labels
+ > Hierarchy 1/2 · node 1/1                  6:33
  · Save · · Evaluate dev
  previous: 21:15 total
 
@@ -534,11 +557,11 @@ current run's state and `s stop`, plus `resize to 60x16 for more`.
 ╰───────────────────────────────╯╰──────────────────────────────────────────────────────────────╯
 ╭ Pipeline ─────────────────────╮╭ Live logs ───────────────────────────────────────────────────╮
 │   Whole run       14:38  RUN  ││ level all · following                                        │
-│   ✓ Load data      0:06       ││ 2026-10-23 14:19:00,000 [INFO] xmr4el.hierarchy: …           │
-│ ▶ ✓ Encode features 4:00 …    ││ …                                                            │
-│ ▼ ▸ Hierarchy training  layer…││                                                              │
-│ ├── ✓ layer 1   2:00  1 nodes ││                                                              │
-│ └── ▸ layer 2   node 3/6 · …  ││                                                              │
+│   + Load data      0:06       ││ 2026-10-23 14:19:00,000 [INFO] xmr4el.hierarchy: …           │
+│ ▶ + Encode features 4:00 …    ││ …                                                            │
+│ ▼ > Hierarchy training  layer…││                                                              │
+│ ├── + layer 1   2:00  1 nodes ││                                                              │
+│ └── > layer 2   node 3/6 · …  ││                                                              │
 │   · Save tree                 ││                                                              │
 ╰───────────────────────────────╯╰──────────────────────────────────────────────────────────────╯
 esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
@@ -575,17 +598,17 @@ esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
 │ ncbi_disease · a64127ef · dev  B10││      Evaluation                   Acc@1_all     Acc@1        Cov… │
 ╰───────────────────────────────────╯│Base B10 ncbi_disease · a64127ef…  89.17%        92.59%       96.… │
  X Show incompatible                 │1    B10 ncbi_disease · 878b59c2…  89.17% +0.00  92.59% +0.00 96.… │
-╭ Explorer ─────────────────────────╮│2 ⚠  B10 ncbi_disease · 8528b624…  89.04% -0.13  92.46%  Δ —  96.… │
+╭ Explorer ─────────────────────────╮│2 !  B10 ncbi_disease · 8528b624…  89.04% -0.13  92.46%  Δ —  96.… │
 │▼ ncbi_disease  3                  ││──────────────────────────────────────────────────────────────────│
-│├── ▼ ncbi_disease · SapBERT D2    ││⚠ 2 ncbi_disease · 8528b624 · dev: in-vocabulary population not   │
+│├── ▼ ncbi_disease · SapBERT D2    ││! 2 ncbi_disease · 8528b624 · dev: in-vocabulary population not   │
 ││      Oct 28 · a64127ef           ││    verified: no population hash, and runs not all at one clean …  │
-││     └── ⓘ B10 dev  baseline      ││    Matches test file sha256, 757 loaded rows; no deltas for …     │
+││     └── i B10 dev  baseline      ││    Matches test file sha256, 757 loaded rows; no deltas for …     │
 ││                                  │╰──────────────────────────────────────────────────────────────────╯
 │├── ▼ ncbi_disease · SapBERT D2    │╭ Detailed Analysis ───────────────────────────────────────────────╮
 ││      Oct 28 · 878b59c2           ││Metric      Base B10         1 B10             2 B10               │
-││     └── ⓘ B10 dev                ││Acc@1_all   89.17%           89.17% +0.00      89.04% -0.13        │
+││     └── i B10 dev                ││Acc@1_all   89.17%           89.17% +0.00      89.04% -0.13        │
 ││                                  ││R@5         96.71%           96.71% +0.00      96.71% Δ —          │
-│└── ▼ ncbi_disease · SapBERT D2  ⚠ ││Δ vs baseline in percentage points … · Δ — not verifiably compar… │
+│└── ▼ ncbi_disease · SapBERT D2  ! ││Δ vs baseline in percentage points … · Δ — not verifiably compar… │
 │       Oct 20 · 8528b624           │╰─── 1 Performance  2 Ranking  3 Generalization  4 Efficiency  5 Specs╯
 ╰───────────────────────────────────╯
 ⏎ inspect  space add / remove  / search  esc back  1-5 metric group  ? keys
@@ -606,13 +629,13 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   only the baseline and evaluations assessed VERIFIED or CAUTION (per evaluation: a tree stays while one of its
   evaluations does, a dataset while one of its trees does; not yet assessed = hidden). **Show incompatible** (a
   one-row view filter above it, focus with `ctrl+tab`, `space` / click toggles, off in every new session) also
-  lists INCOMPATIBLE ones (dim, `✗`): inspectable, never addable; toggling keeps members, baseline, group,
+  lists INCOMPATIBLE ones (dim, `x`): inspectable, never addable; toggling keeps members, baseline, group,
   inspection and expansion, and a hidden cursor row falls back to its nearest shown ancestor. A search or the
-  filter hiding a member never removes it. Rows: `ⓘ` (click = inspect), beam chip, label, `baseline` / `⚠` Caution /
-  `✗` Incompatible (dim); a tree shows `⚠` when one of its evaluations is Caution. Keyboard cursor = `cursor-row`
+  filter hiding a member never removes it. Rows: `i` (click = inspect), beam chip, label, `baseline` / `!` Caution /
+  `x` Incompatible (dim); a tree shows `!` when one of its evaluations is Caution. Keyboard cursor = `cursor-row`
   background; comparison member (and the baseline) = accent background, kept when the cursor leaves; the cursor
   on a member keeps the accent and adds `focus-outline` bars at both row edges. `space` / click on an evaluation
-  adds or removes it; a click on a tree or dataset expands it; `enter` / `ⓘ` inspects. A fourth challenger, the
+  adds or removes it; a click on a tree or dataset expands it; `enter` / `i` inspects. A fourth challenger, the
   baseline and Incompatible evaluations are refused with a toast.
 - **Compatibility** (`services/comparison.assess`, one place): INCOMPATIBLE = no metrics, test-file sha256
   missing or different (provenance.json, never file names), or different / missing `rows_total`. Otherwise
@@ -622,7 +645,7 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   preprocessing, one clean commit); a known difference (hashes or training files differ) withholds them as a note,
   not a Caution. Vocabulary, beam and search settings never block. Generalization deltas also need equal
   seen/unseen reference files (eval `train_path` sha256). No timing deltas at all (hardware not recorded).
-- Summary: baseline row on the accent, challengers in selection order (`2 ⚠` marks Caution by the role);
+- Summary: baseline row on the accent, challengers in selection order (`2 !` marks Caution by the role);
   Acc@1_all (the comparison metric, fixed), Acc@1, Coverage (rows / rows_total) beside the name (name cut to the
   panel, at most 30 cells; values and deltas padded into aligned columns; narrow: the delta wraps under its value).
   Below a rule, per Caution challenger: its reason, then (muted) what matches and which deltas it affects. No
@@ -661,14 +684,15 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Everywhere | `?` (`F1` inside text fields) | Help for this screen and the focused field. |
 | Everywhere | `ctrl+p` | Command palette (every action below is also a command). |
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
-| Everywhere | `ctrl+c` (also `ctrl+q`) twice within 3 s | Quit; the first press only warns. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
+| Everywhere | `ctrl+c` (also `ctrl+q`), then `ctrl+c` again / `esc` | Quit after the footer confirmation (no timer) / cancel. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
+| Everywhere | `ctrl+n` | Notification center (§4): `↑↓`, `enter` opens, `c` clears all, `esc` / `ctrl+n` closes. |
 | Dashboard | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[` where the terminal sends ctrl+tab as tab) | Next / previous panel: Explorer, Description, Active runs. |
 | Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. Shared widget (Dashboard, Results): a tree is two rows, `name · descriptor` (features and depth of its training run's model_config, nothing invented) then `Oct 28 · a64127ef` (training date, short tree id: 8 characters, more where two ids share them; `explorer.short_ids`); a gap row above every later tree / dataset / group, none between evaluations; a click anywhere on an item's rows selects it. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
 | Explorer | `enter` | Describe the item and focus Description. |
 | Explorer (Dashboard, Results) | `/`, then text, `backspace`, `enter`, `esc` | Search: every word in a node's name, descriptor, date, id (short or full), dataset, run id, split or features, or in an ancestor's; matches keep their subtree, their ancestors open while the search lasts (the user's expansion returns after). `enter` keeps the query (shown in the border), `esc` clears it. |
 | Dashboard, Description | `r`, `left` / `right` / `esc` | Results with the evaluation as the baseline (a tree: its only evaluation with metrics; several: the tree opens to choose) / Run monitor of its run (tree: training run; evaluation: its split's stage selected) / back to Explorer. |
-| Results | `up` `down`, `left` / `right`, `space`, `enter` | Explorer: move, collapse / expand, add or remove the evaluation (a tree: expand), inspect. Mouse: click an evaluation adds / removes, its `ⓘ` inspects, a tree row expands. |
+| Results | `up` `down`, `left` / `right`, `space`, `enter` | Explorer: move, collapse / expand, add or remove the evaluation (a tree: expand), inspect. Mouse: click an evaluation adds / removes, its `i` inspects, a tree row expands. |
 | Results | `1`-`5`, `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`), `<` / `>`, `esc` | Metric group; next / previous panel (Show incompatible, Explorer, Summary, Analysis); narrower / wider left column; close inspection, else to the Explorer, else back to the Dashboard. |
 | Active runs | `up` `down`, `enter` | Move, open the run in the Run monitor. |
 | Run monitor | `ctrl+tab` / `ctrl+shift+tab` (or `]` / `[`) | Next / previous panel: Run overview (its Cancel Run button when usable), Pipeline, Resources, Live logs. |
@@ -736,12 +760,12 @@ Stages, matching the existing `logger.info` calls:
 
 | Stage | Existing log line | Training | Eval-only |
 | --- | --- | --- | --- |
-| `load` | `Run started` -> `Preparing data` | ✓ | tree load |
-| `encode` | `Encoding started/completed`; parts `mention_tfidf`, `context_tfidf`, `transformer`, `assemble` | ✓ | |
-| `labels` | `Label embeddings started/completed` | ✓ | |
-| `hierarchy`, `layer`, `node` | `Hierarchy`, `Layer`, `Node started/completed` | ✓ | |
-| `save` | `Model saved` | ✓ | |
-| `eval` (per split) | `Prediction encoding` ... `Eval <split>` | ✓ | ✓ |
+| `load` | `Run started` -> `Preparing data` | + | tree load |
+| `encode` | `Encoding started/completed`; parts `mention_tfidf`, `context_tfidf`, `transformer`, `assemble` | + | |
+| `labels` | `Label embeddings started/completed` | + | |
+| `hierarchy`, `layer`, `node` | `Hierarchy`, `Layer`, `Node started/completed` | + | |
+| `save` | `Model saved` | + | |
+| `eval` (per split) | `Prediction encoding` ... `Eval <split>` | + | + |
 
 - The events are `extra=` fields on those existing log calls, written by one handler
   in the runner. Log wording is never parsed and can change freely.

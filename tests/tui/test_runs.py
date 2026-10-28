@@ -93,7 +93,7 @@ def test_fmt(monkeypatch):
     assert (fmt.metric(0.92461), fmt.count(179696), fmt.pct(729, 757), fmt.ms(2.994)) == (
         "0.9246", "179,696", "96.3%", "2.99 ms/query")
     assert (fmt.tree("f15e98b4ad2b"), fmt.marker("current"), fmt.marker("current", ascii=True)) == (
-        "f15e98b4", "▸", ">>")
+        "f15e98b4", ">", ">>")
     monkeypatch.setenv("NO_COLOR", "1")
     assert fmt.use_ascii()
 

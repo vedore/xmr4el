@@ -43,6 +43,7 @@ xmr4el_tui/
   services/
     experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
                    and incremental events tails; Details of the selected item
+    notifications.py  session notifications: run-state transitions -> Notice (dedup, bounded, unseen)
     comparison.py  Results: Facts per evaluation (hashes, preprocessing, commits), assess -> Compat
                    (VERIFIED / CAUTION / INCOMPATIBLE + reason), metric groups and allowed deltas
   screens/
@@ -53,15 +54,17 @@ xmr4el_tui/
                    stage selection -> resources, Cancel Run -> process.stop in a worker, layout / panel keys
     monitor_details.py    pure Rich texts: overview, stage rows, resource summaries (resources.json scopes)
     stop_dialog.py StopDialog: Cancel Run confirmation (names the run id)
+    notification_center.py  NotificationCenter: ModalScreen box under the bell (history, open, clear all)
     results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
     results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
   widgets/
     explorer.py    Explorer tree (resizable; items of 1-2 rows + gap rows over Tree lines; `/` search) + node
-                   labels; ResultsExplorer (row states, beam chip, ⓘ click); one widget for both screens
+                   labels; ResultsExplorer (row states, beam chip, `i` click); one widget for both screens
     results_panels.py  BaselinePanel, ComparisonSummary, DetailedAnalysis (DataTable + notes), InspectionView
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
-    top_bar.py     TopBar (shared header)
+    top_bar.py     TopBar: navbar (breadcrumbs from the screen stack, centred title, bell)
+    context_footer.py  ContextFooter: Textual Footer + feedback / confirmation note (state on the App)
     log_view.py    LogView: virtual-rendered log lines, level filter, search highlight
     log_panel.py   LogPanel: one LogTail polled in a worker while active, header, search box (LogScreen and the
                    Run monitor's Live logs)
@@ -72,7 +75,7 @@ xmr4el_tui/
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
   test_runs.py  test_progress.py  test_logs.py  test_compare.py  test_procinfo.py  test_process.py
-  test_dashboard.py  test_monitor.py  test_results.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_dashboard.py  test_monitor.py  test_results.py  test_notifications.py  (Textual run_test + Pilot; importorskip("textual"))
 ```
 
 Runner side (imports xmr4el, never imported by the TUI): `xmr4el/telemetry/events.py` (EventLog: the
@@ -197,7 +200,7 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
 | Class | Shows | Reads |
 | --- | --- | --- |
-| `App` | footer, help panel, theme | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
+| `App` | help panel, theme; notifications (`Notifications.observe` per scan, toasts, `open_notice`); footer state (`say`, quit confirmation); `go_to` (breadcrumb click) | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
 | `RunMonitorScreen` | one run by id: overview, pipeline, resources of the selected stage, live log | `App.snapshot` (state); `progress.EventTail` + resources.json (stat, reread on change) every 1 s in a worker while active, one read after it ends; provenance.json once; the log via `LogPanel` |
 | `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 

@@ -8,7 +8,7 @@ import sys
 from xmr4el_tui.theme import style
 
 DASH = "—"
-MARKERS = {"done": "✓", "current": "▸", "pending": "·", "failed": "✗"}
+MARKERS = {"done": "+", "current": ">", "pending": "·", "failed": "x"}  # plain text, no symbol glyphs
 STATE_STYLE = {"RUNNING": style("info", "bold"), "UNVERIFIED": style("warning"), "LOST": style("error"),
                "COMPLETED": style("success"), "FAILED": style("error"), "STOPPED": style("warning"), "UNKNOWN": ""}
 STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",

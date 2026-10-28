@@ -79,6 +79,20 @@ Tokens `delta-unavailable`, `spec-differs`, `divider`. Docs tui.md §5.12, §7; 
 (new `test_explorer.py`), full suite 229, ruff clean; renders 140x40 / 80x24 on real outputs/runs checked.
 Δ legend shortened, one blank row above and below it. Then (committed): Inspection label column = longest group label + 3 (`LABEL_WIDTH`, was 26: "seen, >1 label · dictionary" pushed its value right); test `test_inspection_values_share_one_column`. NEXT: push `tui` only on the user's OK.
 
+**2026-10-28 Navbar, notifications, contextual footer (user's pasted prompt; committed on `tui`, not
+pushed):** `widgets/top_bar.py` = navbar (crumbs from the screen stack via each screen's `crumbs`, Results adds
+Inspect; click an earlier crumb = `App.go_to`; title centred; bell + unseen); `services/notifications.py` (session
+history 50, first scan silent, ACTIVE -> COMPLETED/FAILED/LOST/STOPPED, key (run id, state), reaped launches share
+the LOST key); `screens/notification_center.py` (ModalScreen box, `ctrl+n`, `c` clear all, enter/click opens:
+one evaluation with metrics -> Results with it as baseline, else Run Monitor; opened from the Dashboard);
+`widgets/context_footer.py` (Footer + note; state on App: `say` 3.5 s per screen, quit confirmation ctrl+c / esc).
+Every screen-level `notify` moved to `say`; toasts only for lifecycle (top right, one per scan, 4 s). Theme tokens
+`overlay`, `tint-*`, `confirm-row`, `theme.chip`. Docs tui.md §4 Navbar / Three message layers, §7; tui_architecture.md.
+tests/tui/test_notifications.py (16); full suite 245 pass, ruff clean. Follow-up (user): no emoji (bell = text
+`Notifications`), blank row under the navbar, runs started this session and first seen ended (tiny run, < 5 s) are
+notified too. Then symbols to plain text: Caution `!`, inspect `i`, incompatible `x`, stage markers `+` `>` `x`.
+NEXT: push `tui` only on the user's OK.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

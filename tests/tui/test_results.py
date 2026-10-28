@@ -192,8 +192,8 @@ def test_explorer_states_and_membership(tmp_path):
             await cursor_to(pilot, tree, key)
             await pilot.press("space")
         assert screen.members == [B, C, F], "three at most, in selection order; E refused"
-        assert "⚠" in str(tree.nodes[C].label)
-        assert "⚠" in str(tree.nodes[("tree", T3)].label), "the tree carries its evaluation's Caution"
+        assert "!" in str(tree.nodes[C].label)
+        assert "!" in str(tree.nodes[("tree", T3)].label), "the tree carries its evaluation's Caution"
         await cursor_to(pilot, tree, B)
         await pilot.press("space")
         assert screen.members == [C, F]
@@ -226,9 +226,9 @@ def test_mouse_toggles_and_info_icon_inspects(tmp_path):
         assert screen.members == [B] and screen.inspecting is None
         await pilot.click(ResultsExplorer, offset=(dx + text.index(" B20"), dy + y))
         assert screen.members == [], "a second click removes"
-        await pilot.click(ResultsExplorer, offset=(dx + text.index("ⓘ"), dy + y))
+        await pilot.click(ResultsExplorer, offset=(dx + text.index("i B20"), dy + y))
         await pilot.pause()
-        assert screen.inspecting == B and screen.members == [], "ⓘ inspects, never toggles"
+        assert screen.inspecting == B and screen.members == [], "i inspects, never toggles"
         tree_key = ("tree", T3)
         await pilot.press("escape")
         expanded = tree.nodes[tree_key].is_expanded
@@ -345,7 +345,7 @@ def test_show_incompatible_filter(tmp_path):
         await pilot.press("space")
         await show_incompatible(app, pilot)
         assert {D, G_TEST, N} <= set(tree.index) and screen.members == [B, C] and screen.group == 3
-        assert "✗" in str(tree.nodes[D].label) and "✗" in str(tree.nodes[N].label)
+        assert "  x" in str(tree.nodes[D].label) and "  x" in str(tree.nodes[N].label)
         accent = theme.color("accent").lower()
         await cursor_to(pilot, tree, D)
         assert bg(tree, D)[0] == theme.color("cursor-row").lower() != accent, "cursor only, never the accent"
@@ -407,7 +407,7 @@ def test_summary_is_compact_and_specs_group(tmp_path):
         console.print(content)
         text = console.export_text()
         assert "space adds" not in text and "comparison metric" not in text and "Δ vs" not in text, "no instructions"
-        assert "⚠ 2" in text and "clean git commit" in text
+        assert "! 2" in text and "clean git commit" in text
         await pilot.press("2")
         table = screen.query_one("#analysis-table")
         r5 = table.get_row_at(0)

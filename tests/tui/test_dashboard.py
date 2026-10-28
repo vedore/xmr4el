@@ -34,6 +34,11 @@ def text(widget):
     return str(widget.render())
 
 
+def footer_note(app):
+    note = app.screen.query_one("#footer-note")
+    return str(note.render()) if note.display else ""
+
+
 def run_app(root, test, size=(120, 36), opened=None):
     """`opened`: list collecting what Results / Run monitor would open (instead of opening them)."""
     async def go():
@@ -405,10 +410,10 @@ def test_empty_workspace_help_rescan_quit_style(tmp_path):
         await pilot.press("ctrl+r")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert any("Rescanned" in str(n.message) for n in app._notifications)
-        await pilot.press("ctrl+c")  # first press warns only
+        assert "Rescanned" in footer_note(app) and not app._notifications  # feedback in the footer, no toast
+        await pilot.press("ctrl+c")  # first press asks in the footer
         await pilot.pause()
-        assert app.is_running and any("again to quit" in str(n.message) for n in app._notifications)
+        assert app.is_running and "Quit XMR4EL?" in footer_note(app)
         assert app.theme == "xmr4el" and "Theme" not in [c.title for c in app.get_system_commands(app.screen)]
     run_app(tmp_path / "empty", empty, size=(60, 20))
 
@@ -418,7 +423,7 @@ def test_header_centred_without_system_info(tmp_path):
         async def check(app, pilot, w=size[0]):
             line = app.screen.query_one(TopBar).render().plain
             assert line.index("XMR4EL") == (w - len("XMR4EL")) // 2, "centred on the whole width"
-            assert ("Results" in line) == (w >= 100), "areas only where they do not reach the title"
+            assert line.startswith(" Dashboard") and line.rstrip().endswith("Notifications"), "breadcrumbs left, notifications right"
             assert socket.gethostname() not in line and "trees" not in line and "active" not in line
             if w < 100:  # the 40-cell help panel covers the centre
                 return
@@ -560,7 +565,7 @@ def test_mouse_selection_copies(tmp_path):
         await goto(pilot, app, ("tree", TREE))
         desc, tree = app.screen.query_one(Description), app.screen.query_one(Explorer)
         await drag_over(pilot, desc, TREE)
-        assert app.clipboard == TREE and any("Copied" in str(n.message) for n in app._notifications)
+        assert app.clipboard == TREE and "Copied" in footer_note(app)
         await drag_over(pilot, app.screen.query_one(ActiveRuns), "UNVERIFIED")
         assert app.clipboard == "UNVERIFIED"
         await drag_over(pilot, tree, "My Custom")

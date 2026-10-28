@@ -10,13 +10,14 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import Footer, Input
+from textual.widgets import Input
 
 from xmr4el_tui import explorer, process, runs
 from xmr4el_tui.progress import EventTail, stages
 from xmr4el_tui.runs import state_word
 from xmr4el_tui.screens.monitor_details import banner, overview_text, resource_text
 from xmr4el_tui.screens.stop_dialog import StopDialog
+from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.log_panel import LogPanel
 from xmr4el_tui.widgets.log_view import LogView
 from xmr4el_tui.widgets.monitor_panels import ResourcePanel, RunOverview
@@ -46,7 +47,8 @@ class StopSent(Message):
 
 class RunMonitorScreen(Screen):
     """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, < / > resize the columns."""
-    ALLOW_IN_MAXIMIZED_VIEW = "TopBar, Footer"
+    ALLOW_IN_MAXIMIZED_VIEW = "TopBar, ContextFooter"
+    crumbs = ("Run Monitor",)
     BINDINGS = [Binding("escape", "back", "dashboard"),
                 Binding("s", "cancel", "cancel run"),
                 Binding("c", "follow", "follow stage"),
@@ -68,7 +70,7 @@ class RunMonitorScreen(Screen):
         self.again = False  # a tick came while reading: read once more when that read lands
 
     def compose(self) -> ComposeResult:
-        yield TopBar("Run Monitor", id="top")
+        yield TopBar(id="top")
         with Horizontal(id="mon"):
             with Vertical(id="mon-left"):
                 yield RunOverview(id="overview")
@@ -76,7 +78,7 @@ class RunMonitorScreen(Screen):
             with Vertical(id="mon-right"):
                 yield ResourcePanel(id="resources")
                 yield LogPanel(self.run, self.app.root, named=False, id="logs")
-        yield Footer(show_command_palette=False)
+        yield ContextFooter()
 
     def on_mount(self):
         for wid, title in TITLES.items():
@@ -169,7 +171,7 @@ class RunMonitorScreen(Screen):
         dialog = self.app.screen
         if ended and isinstance(dialog, StopDialog) and dialog.run.id == run.id:
             dialog.dismiss(False)
-            self.notify(f"{run.name} ended ({state_word(run)}) before it was cancelled: nothing was sent.")
+            self.app.say(f"{run.name} ended ({state_word(run)}) before it was cancelled: nothing was sent.")
         self.refresh_stages()
         self.show_overview()
         self.tick()  # ended: one more read for the final events, then polling stops
@@ -191,7 +193,7 @@ class RunMonitorScreen(Screen):
         if not ok:
             return
         if not self.stoppable():  # ended or already being cancelled while the dialog was open
-            self.notify(f"{self.run.name} is {state_word(self.run)}: nothing was sent.")
+            self.app.say(f"{self.run.name} is {state_word(self.run)}: nothing was sent.")
             return
         self.cancelling = True
         self.show_overview()
@@ -205,9 +207,9 @@ class RunMonitorScreen(Screen):
     def on_stop_sent(self, message):
         if message.result.startswith("not signalled"):
             self.cancelling = False
-            self.notify(f"{self.run.name}: {message.result}", severity="warning")
+            self.app.say(f"{self.run.name}: {message.result}", "warning", self)
         else:
-            self.notify(f"{self.run.name}: {message.result}; it records STOPPED when it exits.", title="Cancel Run")
+            self.app.say(f"{self.run.name}: {message.result}; it records STOPPED when it exits.", screen=self)
         self.show_overview()
         self.refresh_bindings()
         self.app.rescan()

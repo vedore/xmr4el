@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer
+from textual.widgets import DataTable
 
 from xmr4el_tui import explorer, fmt
 from xmr4el_tui.runs import elapsed, state_word
@@ -25,6 +25,7 @@ from xmr4el_tui.screens.results_screen import ResultsScreen
 from xmr4el_tui.services.experiment_repository import Activity, Details
 from xmr4el_tui.widgets.description import Description
 from xmr4el_tui.widgets.explorer import EXPLORER_STEP, Explorer, explorer_width
+from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.row_rendering import FullRow, Selectable
 from xmr4el_tui.widgets.top_bar import TopBar
 
@@ -52,6 +53,7 @@ class DetailsLoaded(Message):
 class DashboardScreen(Screen):
     """Explorer | Description over Active runs. Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [)
     cycle panels, ctrl+b hides / shows the explorer, < / > resize it, ctrl+r rescans."""
+    crumbs = ("Dashboard",)
     BINDINGS = [Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
                 Binding("ctrl+b", "toggle_explorer", "hide / show explorer", show=False),
@@ -61,13 +63,13 @@ class DashboardScreen(Screen):
                 Binding("r", "results", "results")]
 
     def compose(self) -> ComposeResult:
-        yield TopBar("Dashboard", id="top")
+        yield TopBar(id="top")
         with Horizontal(id="dash"):
             yield Explorer(id="explorer")
             with Vertical(id="dash-right"):
                 yield Description(id="description")
                 yield ActiveRuns(id="active-runs", cursor_type="row")
-        yield Footer(show_command_palette=False)
+        yield ContextFooter()
 
     def on_mount(self):
         for wid, title in (("explorer", "Explorer"), ("description", "Description"),
@@ -110,8 +112,8 @@ class DashboardScreen(Screen):
     def refresh_all(self):
         gone = self.query_one(Explorer).fill(explorer.build(self.app.snapshot.runs, self.app.snapshot.trees))
         if gone is not None:
-            self.notify(f"The selected {gone[0]} is no longer found (moved, renamed or deleted outside the TUI).",
-                        severity="warning")
+            self.app.say(f"The selected {gone[0]} is no longer found (moved, renamed or deleted outside the TUI).",
+                         "warning", self)
         self.fill_active()
         self.show()
 
@@ -198,7 +200,7 @@ class DashboardScreen(Screen):
         if run and self.run_here(run.id):
             self.app.push_screen(LogScreen(run, self.app.root))
         else:
-            self.notify("That run directory is no longer found.", severity="warning")
+            self.app.say("That run directory is no longer found.", "warning")
 
     def on_data_table_row_selected(self, event):
         if event.data_table.id == "active-runs":
@@ -228,7 +230,7 @@ class DashboardScreen(Screen):
         if run_id and self.run_here(run_id):
             self.app.push_screen(RunMonitorScreen(run_id, split))
         else:
-            self.notify("That run directory is no longer found.", severity="warning")
+            self.app.say("That run directory is no longer found.", "warning")
 
     def open_results(self, key):
         """Results with evaluation `key` as the baseline; esc comes back here with the selection kept."""
@@ -239,26 +241,26 @@ class DashboardScreen(Screen):
         that one). Never picks among several: the tree opens so one can be chosen."""
         node, _ = self.selected()
         if node is None or node.kind not in ("tree", "eval"):
-            self.notify("Select an evaluation to use as the Results baseline.")
+            self.app.say("Select an evaluation to open Results.")
             return
         done = [node] if node.kind == "eval" else [c for c in node.children if c.ref[1].metrics]
         if node.kind == "eval" and not node.ref[1].metrics:
-            self.notify("This evaluation has no metrics yet: it cannot be a baseline.")
+            self.app.say("This evaluation has no metrics yet: it cannot be a baseline.")
         elif len(done) == 1:
             self.open_results(done[0].key)
         elif not done:
-            self.notify("No evaluation of this tree has metrics yet.")
+            self.app.say("No evaluation of this tree has metrics yet.")
         else:
             tree = self.query_one(Explorer)
             tree.nodes[node.key].expand()
             tree.focus()
-            self.notify(f"This tree has {len(done)} evaluations: select one as the baseline, then r.")
+            self.app.say(f"This tree has {len(done)} evaluations: select one as the baseline, then r.")
 
     def action_monitor(self):
         """Run screen of the selected run: the evaluation's run (on its split), a tree's training run."""
         node, _ = self.selected()
         if node is None or node.kind in ("group", "dataset"):
-            self.notify("Select a tree, an evaluation or a run.")
+            self.app.say("Select a tree, an evaluation or a run.")
         elif node.kind == "eval":
             self.open_run(node.ref[0].id, node.ref[1].split)
         elif node.kind == "run":
@@ -266,7 +268,7 @@ class DashboardScreen(Screen):
         elif node.ref.trained_by:
             self.open_run(node.ref.trained_by.id)
         else:
-            self.notify("No recorded training run for this tree (trained outside run_experiment, or not synced).")
+            self.app.say("No recorded training run for this tree (trained outside run_experiment, or not synced).")
 
     def action_rescan(self):
         self.app.rescan(announce=True)

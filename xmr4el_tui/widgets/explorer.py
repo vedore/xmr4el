@@ -16,7 +16,7 @@ from xmr4el_tui.theme import beam_color, color, style
 from xmr4el_tui.widgets.resize import DragRightBorder, column_width
 from xmr4el_tui.widgets.row_rendering import FullRow, Selectable, paint
 
-INFO, CAUTION_MARK, INCOMPATIBLE_MARK = "ⓘ", "⚠", "✗"  # Results: inspect (mouse), Caution, Incompatible
+INFO, CAUTION_MARK, INCOMPATIBLE_MARK = "i", "!", "x"  # Results: inspect (mouse), Caution, Incompatible
 GAP_KINDS = ("group", "dataset", "tree")  # a gap row above each one that has a previous sibling
 
 EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN, EXPLORER_STEP = 0.22, 18, 0.5, 40, 2
@@ -264,7 +264,7 @@ class ResultsExplorer(Explorer):
     """The Dashboard's explorer on the Results screen: datasets > trees > evaluations, rows painted by state.
     Cursor row: `cursor-row` background. Comparison member (baseline included): `member-row` background, kept when
     the cursor leaves; the cursor on a member adds `focus-outline` bars at both edges. space adds / removes the
-    evaluation, enter inspects it; a click on an evaluation adds / removes it, a click on its ⓘ inspects it, a click
+    evaluation, enter inspects it; a click on an evaluation adds / removes it, a click on its i inspects it, a click
     on a tree or dataset expands / collapses it. The screen sets `marks` and `compat` and calls `restyle`."""
     OPEN_KINDS = ("group", "dataset", "tree")  # candidates in view at once
     BINDINGS = [Binding("space", "screen.toggle_member", "add / remove"),
@@ -303,7 +303,7 @@ class ResultsExplorer(Explorer):
         return paint(strip, Style(bgcolor=color("cursor-row"))) if cursor else strip
 
     async def _on_click(self, event):
-        """A click on ⓘ inspects (Tree's click, which would add / remove, is skipped)."""
+        """A click on i inspects (Tree's click, which would add / remove, is skipped)."""
         meta = event.style.meta
         if meta.get("inspect") and "line" in meta:
             event.prevent_default()

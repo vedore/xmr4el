@@ -7,22 +7,13 @@ Screen {
 TopBar {
     dock: top;
     height: 1;
+    margin-bottom: 1;
     background: $surface;
     color: $foreground-muted;
 }
 
 TopBar > .topbar--title {
     color: $foreground;
-    text-style: bold;
-}
-
-TopBar > .topbar--area {
-    color: $foreground-muted;
-}
-
-TopBar > .topbar--current {
-    color: $block-cursor-foreground;
-    background: $accent;
     text-style: bold;
 }
 
@@ -264,4 +255,143 @@ StopDialog {
 
 #res-explorer:disabled {
     opacity: 60%;
+}
+
+/* Navbar (widgets/top_bar.py): breadcrumbs, title, bell */
+TopBar > .topbar--crumb {
+    color: $foreground-muted;
+}
+
+TopBar > .topbar--current {
+    color: $foreground;
+    text-style: bold;
+}
+
+TopBar > .topbar--bell {
+    color: $foreground-muted;
+}
+
+TopBar > .topbar--unseen {
+    color: $accent;
+    text-style: bold;
+}
+
+/* Contextual footer (widgets/context_footer.py): a note left of the keys; a confirmation replaces the keys */
+ContextFooter {
+    dock: bottom;
+    height: 1;
+    background: $footer-background;
+}
+
+ContextFooter.-confirm {
+    background: $xmr-confirm-row;
+}
+
+ContextFooter Footer {
+    dock: none;
+    width: 1fr;
+}
+
+#footer-note {
+    width: auto;
+    max-width: 70%;
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+    background: $xmr-overlay;
+}
+
+ContextFooter.-confirm #footer-note {
+    max-width: 100%;
+    background: $xmr-confirm-row;
+}
+
+/* Toasts (lifecycle notifications only): top right under the navbar, over the screen; the severity tints only the
+   title (Textual's own -information / -warning / -error, and -success) */
+ToastRack {
+    dock: top;
+    align: right top;
+    margin: 2 1 0 0;
+}
+
+Toast {
+    width: 46;
+    max-width: 50%;
+    margin-top: 0;
+    padding: 0 1;
+    background: $xmr-overlay;
+    border-left: none;
+}
+
+Toast .toast--title {
+    color: $foreground;
+    background: $xmr-tint-information;
+}
+
+Toast.-success .toast--title {
+    background: $xmr-tint-success;
+}
+
+Toast.-warning .toast--title {
+    background: $xmr-tint-warning;
+}
+
+Toast.-error .toast--title {
+    background: $xmr-tint-error;
+}
+
+/* Notification center (screens/notification_center.py): a box under the bell, the screen below unchanged */
+NotificationCenter {
+    align: right top;
+    background: $background 0%;
+}
+
+#nc-box {
+    width: 52;
+    max-width: 100%;
+    height: auto;
+    margin: 2 0 0 0;
+    padding: 0 1;
+    background: $xmr-overlay;
+    border: round $border-blurred;
+}
+
+#nc-head, #nc-title, #nc-clear {
+    height: 1;
+}
+
+#nc-title {
+    width: 1fr;
+    text-style: bold;
+}
+
+#nc-clear {
+    width: auto;
+    color: $accent;
+}
+
+#nc-list {
+    height: auto;
+    max-height: 19;
+    margin-top: 1;
+    border: none;
+    padding: 0;
+    background: $xmr-overlay;
+}
+
+#nc-list > .option-list--option-highlighted {
+    background: $xmr-cursor-row;
+}
+
+#nc-list > .option-list--separator {
+    color: $xmr-divider;
+}
+
+#nc-empty {
+    margin: 1 0;
+    color: $foreground-muted;
+}
+
+#nc-foot {
+    margin-top: 1;
 }

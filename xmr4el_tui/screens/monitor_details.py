@@ -70,7 +70,7 @@ def stage_name(key, kind):
 
 
 def stage_row(stage, kind, width=20):
-    """`✓ Encode features    0:02  344 rows`: marker, name padded to `width`, duration when ended, emitted detail."""
+    """`+ Encode features    0:02  344 rows`: marker, name padded to `width`, duration when ended, emitted detail."""
     marker = fmt.marker("failed" if stage.state == "stopped" else stage.state, fmt.use_ascii())
     t = Text(no_wrap=True, overflow="ellipsis")
     t.append(f"{marker} ", style=STAGE_STYLE[stage.state])

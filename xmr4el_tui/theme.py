@@ -13,6 +13,7 @@ def mix(a, b, share):
 
 
 ACCENT, SURFACE = "#2CF5C5", "#1B2229"
+SUCCESS, WARNING, ERROR = "#7BD88F", "#F5C451", "#FF6B6B"
 DARK = {
     # application
     "background": "#101418", "surface": SURFACE, "panel": SURFACE,
@@ -25,7 +26,7 @@ DARK = {
     "focus-outline": "#101418",                      # edge bars of the cursor row when it is also selected
     "text-selection": "#3B6E99", "match": "#3B6E99",  # mouse selection, search matches
     # status
-    "success": "#7BD88F", "warning": "#F5C451", "error": "#FF6B6B", "info": "#5CC8FF", "unknown": "#5C6B7A",
+    "success": SUCCESS, "warning": WARNING, "error": ERROR, "info": "#5CC8FF", "unknown": "#5C6B7A",
     "warning-on-accent": "#7A4300",                  # caution symbol over a selected (accent) row
     # comparison
     "baseline-row": ACCENT, "member-row": ACCENT, "on-selected": "#101418", "delta": "#A5B4C3",
@@ -35,6 +36,11 @@ DARK = {
     # beam identity: a beam value always gets the same one (beam_color)
     "beams": ("#E6C7A1", "#B48CFF", "#FF6FB5", "#5CC8FF", "#A3E635", "#FF9F43"),
     "beam-unknown": "#5C6B7A", "on-beam": "#101418",
+    # navbar, notifications, footer: a severity tints only the title chip (text = "text"), never the whole box
+    "overlay": "#232C35",                            # toasts, notification center, footer feedback row
+    "tint-success": mix(SUCCESS, SURFACE, 0.3), "tint-error": mix(ERROR, SURFACE, 0.3),
+    "tint-warning": mix(WARNING, SURFACE, 0.3), "tint-information": "#3A4754",
+    "confirm-row": mix(WARNING, SURFACE, 0.15),    # footer while a confirmation waits
 }
 TOKENS = DARK
 
@@ -46,6 +52,11 @@ def color(token):
 def style(token, extra=""):
     """Rich style string of a colour token: `style("warning", "bold")`."""
     return f"{extra} {TOKENS[token]}".strip()
+
+
+def chip(severity):
+    """Rich style of a title chip: text on the severity's muted tint (unknown severity: neutral)."""
+    return f"{TOKENS['text']} on {TOKENS.get(f'tint-{severity}', TOKENS['tint-information'])}"
 
 
 def beam_color(beam):

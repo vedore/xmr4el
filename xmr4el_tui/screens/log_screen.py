@@ -3,8 +3,8 @@ Dashboard."""
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import Footer
 
+from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.log_panel import LogPanel
 from xmr4el_tui.widgets.log_view import LogView
 from xmr4el_tui.widgets.top_bar import TopBar
@@ -12,15 +12,16 @@ from xmr4el_tui.widgets.top_bar import TopBar
 
 class LogScreen(Screen):
     BINDINGS = [Binding("escape", "close", "back")]
+    crumbs = ("Logs",)
 
     def __init__(self, run, root):
         super().__init__()
         self.panel = LogPanel(run, root, id="log-panel")
 
     def compose(self) -> ComposeResult:
-        yield TopBar("Dashboard", id="top")
+        yield TopBar(id="top")
         yield self.panel
-        yield Footer(show_command_palette=False)
+        yield ContextFooter()
 
     def on_mount(self):
         self.query_one(LogView).focus()
