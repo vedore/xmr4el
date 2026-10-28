@@ -102,7 +102,7 @@ def test_helpers_need_only_the_standard_library():
     """The non-UI modules load under `python -S` (no site-packages: no Textual, no backend, no torch); the runner
     imports procinfo without the tui extra."""
     mods = ", ".join(f"xmr4el_tui.{m}" for m in ("runs", "progress", "explorer", "services.comparison", "fmt", "process",
-                                                  "procinfo", "logs", "services.experiment_repository"))
+                                                  "procinfo", "logs", "services.experiment_repository", "datasets", "draft"))
     subprocess.run([sys.executable, "-S", "-c", f"import {mods}"], cwd=Path(__file__).parents[2], check=True)
 
 

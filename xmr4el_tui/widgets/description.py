@@ -15,11 +15,21 @@ def selectable(line):
     return bool(line.plain.strip()) and not head
 
 
-class Description(Selectable, FullRow, OptionList):
+class Rows(Selectable, FullRow, OptionList):
+    """OptionList with the full-row cursor and mouse text selection (Description, Dataset Setup, file picker)."""
+    CURSOR = "option-list--option-highlighted"
+
+    def cursor_at(self, y):
+        try:
+            return self.highlighted is not None and self._lines[self.scroll_offset.y + y][0] == self.highlighted
+        except IndexError:
+            return False
+
+
+class Description(Rows):
     """Read-only lines of the selected item, one option each: up / down (or a click) select a row, headings and
     blank lines are skipped, nothing is editable. left / right leave for Results / Run monitor. The selected row is
     one colour (a green COMPLETED would vanish on the accent)."""
-    CURSOR = "option-list--option-highlighted"
     BINDINGS = [Binding("left", "screen.results", "results"), Binding("right", "screen.monitor", "monitor"),
                 Binding("escape", "screen.focus_explorer", "explorer")]
 
@@ -43,12 +53,6 @@ class Description(Selectable, FullRow, OptionList):
         self.subject, self.shown, self.keys = subject, shown, [line.plain[:14].strip() for line in lines]
         rows = [i for i, line in enumerate(lines) if selectable(line)]
         self.highlighted = next((i for i in rows if self.keys[i] == old), rows[0] if rows else None)
-
-    def cursor_at(self, y):
-        try:
-            return self.highlighted is not None and self._lines[self.scroll_offset.y + y][0] == self.highlighted
-        except IndexError:
-            return False
 
     def text(self):
         return "\n".join(plain for plain, _, _ in self.shown)

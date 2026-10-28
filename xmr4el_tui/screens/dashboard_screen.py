@@ -60,7 +60,7 @@ class DashboardScreen(Screen):
                 Binding("less_than_sign", f"resize_explorer({-EXPLORER_STEP})", "narrower explorer", show=False),
                 Binding("greater_than_sign", f"resize_explorer({EXPLORER_STEP})", "wider explorer", show=False),
                 Binding("ctrl+r", "rescan", "rescan", show=False),
-                Binding("r", "results", "results")]
+                Binding("r", "results", "results"), Binding("n", "app.new_experiment", "new experiment")]
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")

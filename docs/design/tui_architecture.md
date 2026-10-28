@@ -200,6 +200,15 @@ Start token: Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart= -p <pid>`.
 Runtime: Linux `/proc/sys/kernel/random/boot_id` + `readlink /proc/self/ns/pid`;
 macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
+**`datasets.py`** (stdlib; Dataset Setup, tui.md §5.13): `discover(root)` -> `Dataset` (key = directory or
+`local:<id>`, name, variant, `Candidate`s per role train / dev / test with their sources); `registered` / `register`
+(`outputs/tui/datasets.json`); `inspect(root, path)` (stat + 64 KiB PubTator sniff, cached by mtime/size);
+`validate(root, dataset, selection, taken)` -> `[(field, kind, message)]`; `status(problems)`. `Selection` (frozen):
+key, name, variant, train, evals (`EvalInput` split / path / enabled), format.
+
+**`draft.py`** (stdlib): `ExperimentDraft` on the app: `selected`, `edits` (per dataset key), `confirmed`
+(`Selection`), `trees` (next step). Later New Experiment screens read `app.draft.confirmed`.
+
 ## 5. UI modules
 
 | Class | Shows | Reads |
@@ -210,9 +219,13 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
 | `ResultsScreen` | baseline + up to 3 challengers: summary, one metric group for all, inspection of one | `App.snapshot` (metrics); `comparison.read_facts` for every evaluation in a worker when the scan's runs change |
 
+| `DatasetSetupScreen` | New Experiment step 1: Datasets (`DatasetList`) and Dataset Configuration (`ConfigRows`, a `Rows` OptionList like Description); `FilePicker` pushed per file row | `datasets.discover` + registry on mount / `ctrl+r`; list statuses in a worker; `app.draft` |
+
 `DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
-pushes the Run monitor. Backend kept for Setup: `process.check/Launches/rejection`,
-`runs.normalize_spec/command_line/datasets/split_files/training_files/model_configs`.
+pushes the Run monitor. Footer confirmations other than quit: `App.ask(question, key, verb)` / `App.asked(key)`
+(the same key again confirms, `esc` cancels, `ctrl+c` replaces it with the quit question). Used by Dataset Setup:
+`runs.datasets/split_files/training_files` (via `datasets.discover`). Backend kept for the launch steps:
+`process.check/Launches/rejection`, `runs.normalize_spec/command_line/model_configs`.
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
 scroll and marks by run `id` (§7).

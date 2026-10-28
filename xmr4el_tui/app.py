@@ -11,9 +11,11 @@ from textual.theme import Theme
 from textual.worker import get_current_worker
 
 from xmr4el_tui import explorer, process, theme
+from xmr4el_tui.draft import ExperimentDraft
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.runs import state_word
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
+from xmr4el_tui.screens.dataset_setup import DatasetSetupScreen
 from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.screens.notification_center import NotificationCenter
 from xmr4el_tui.screens.results_screen import ResultsScreen
@@ -66,7 +68,9 @@ class XMR4ELApp(App):
         self.root = root
         self.notices = Notifications()  # this session's notifications (memory only)
         self.note, self.note_timer = None, None  # footer feedback (severity, text, screen) and its expiry
-        self.confirming = None  # the screen whose footer asks to confirm quitting
+        self.confirming = None  # the screen whose footer asks to confirm quitting (or `asking`)
+        self.asking = None      # (question, key, verb) of a screen's footer confirmation; None: the quit question
+        self.draft = ExperimentDraft()  # New Experiment, kept for the session
         self.repo = ExperimentRepository(root)
         self.snapshot = Snapshot()  # empty until the first scan (started on mount) lands
         self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
@@ -189,7 +193,7 @@ class XMR4ELApp(App):
         if self.note and self.note[2] is not screen:
             self.note = None
         if self.confirming is not screen:
-            self.confirming = None
+            self.confirming = self.asking = None
         self.refresh_bars()
 
     def refresh_bars(self):
@@ -220,13 +224,27 @@ class XMR4ELApp(App):
 
     async def action_quit(self):
         """ctrl+c (or ctrl+q) asks in the footer; a second ctrl+c quits, esc cancels. No timer."""
-        if self.confirming is self.screen:
+        if self.confirming is self.screen and self.asking is None:
             self.exit()
             return
         if isinstance(self.screen, ModalScreen):  # a dialog or the notification center: closed (cancelled) first
             self.screen.dismiss()
-        self.confirming = self.screen
+        self.confirming, self.asking = self.screen, None
         self.refresh_bars()
+
+    def ask(self, question, key, verb):
+        """The quit convention for a screen's own action: the footer asks `question`; `key` again does it (the screen
+        checks `asked`), esc cancels."""
+        self.confirming, self.asking = self.screen, (question, key, verb)
+        self.refresh_bars()
+
+    def asked(self, key):
+        """True (and the question closed) when the current screen's footer was asking for `key`."""
+        if self.confirming is self.screen and self.asking and self.asking[1] == key:
+            self.confirming = self.asking = None
+            self.refresh_bars()
+            return True
+        return False
 
     def on_text_selected(self, _):
         """Text selected with the mouse goes to the clipboard on release (OSC 52: the terminal running the TUI,
@@ -241,7 +259,12 @@ class XMR4ELApp(App):
         yield from (c for c in super().get_system_commands(screen) if c.title != "Theme")
 
     def action_new_experiment(self):
-        self.say("New Experiment: screen not built yet.")
+        """New Experiment (Dataset Setup) over the current screen; already open: back to it. Not over a dialog."""
+        open_ = next((s for s in self.screen_stack if isinstance(s, DatasetSetupScreen)), None)
+        if open_ is not None:
+            self.go_to(open_, 0)
+        elif not isinstance(self.screen, ModalScreen):
+            self.push_screen(DatasetSetupScreen())
 
     def action_help(self):
         if self.screen.query("HelpPanel"):
@@ -268,7 +291,7 @@ class XMR4ELApp(App):
 
     def action_escape(self):
         if self.confirming is self.screen:  # cancelled: feedback given meanwhile is dropped too
-            self.note = self.confirming = None
+            self.note = self.confirming = self.asking = None
             self.refresh_bars()
         else:
             self.action_help()

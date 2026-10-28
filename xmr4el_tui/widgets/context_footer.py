@@ -10,7 +10,7 @@ LABEL = {"information": "Notice", "warning": "Notice", "error": "Error"}
 
 class ContextFooter(Horizontal):
     """Shortcuts; a feedback note left of them for a few seconds; a confirmation in place of them until answered.
-    The state lives on the app (XMR4ELApp.say / ask_quit): this only draws it for its own screen."""
+    The state lives on the app (XMR4ELApp.say / action_quit / ask): this only draws it for its own screen."""
 
     def compose(self):
         yield Static(id="footer-note")
@@ -24,8 +24,9 @@ class ContextFooter(Horizontal):
         confirm = app.confirming is self.screen
         feedback = app.note if app.note and app.note[2] is self.screen else None
         if confirm:
-            text = Text.assemble((" Confirm ", theme.chip("warning")), " ", app.quit_question(), "   ",
-                                 ("ctrl+c", theme.style("accent", "bold")), " quit  ",
+            question, key, verb = app.asking or (app.quit_question(), "ctrl+c", "quit")
+            text = Text.assemble((" Confirm ", theme.chip("warning")), " ", question, "   ",
+                                 (key, theme.style("accent", "bold")), f" {verb}  ",
                                  ("esc", theme.style("accent", "bold")), " cancel")
         elif feedback:
             severity, message, _ = feedback

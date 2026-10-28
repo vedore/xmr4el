@@ -528,12 +528,3 @@ def test_help_keeps_the_navbar_and_a_narrow_bar_keeps_notifications(tmp_path):
         await pilot.pause()
         assert isinstance(app.screen, NotificationCenter)
     run_app(live_root(tmp_path / "narrow"), narrow, size=(40, 20))
-
-
-def test_new_experiment_is_not_advertised(tmp_path):
-    (tmp_path / "outputs/runs").mkdir(parents=True)
-
-    async def check(app, pilot):
-        assert "is planned" in app.screen.query_one("Description").text()
-        assert not any(b.binding.key == "n" for b in app.screen.active_bindings.values() if b.binding.show)
-    run_app(tmp_path, check)

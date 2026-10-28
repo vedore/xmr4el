@@ -78,7 +78,8 @@ HelpPanel {
     border-title-style: bold;
 }
 
-Description > .option-list--option-disabled {
+/* Description, Dataset Setup and the file picker (widgets/description.py Rows): headings in full colour */
+Rows > .option-list--option-disabled {
     color: $foreground;
 }
 
@@ -400,4 +401,79 @@ NotificationCenter {
 
 #nc-foot {
     margin-top: 1;
+}
+
+/* New Experiment, Dataset Setup (screens/dataset_setup.py): Datasets 30 % | Dataset Configuration */
+#ds {
+    height: 1fr;
+}
+
+#ds-list {
+    width: 30%;
+    min-width: 24;
+    height: 1fr;
+}
+
+#ds-config {
+    width: 1fr;
+    height: 1fr;
+}
+
+#ds-name-row {
+    height: 1;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#ds-name-label {
+    width: 13;
+    color: $foreground-muted;
+}
+
+#ds-name, #fp-path {
+    width: 1fr;
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: $xmr-overlay;
+}
+
+#ds-name:focus, #fp-path:focus {
+    background: $xmr-cursor-row;
+}
+
+#ds-rows {
+    height: 1fr;
+    border: none;
+    padding: 0;
+    background: $surface;
+}
+
+#ds-list, #ds-config {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+}
+
+#ds-list:focus, #ds-config:focus-within {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+/* File picker (screens/file_picker.py): the path field over its directory's entries */
+#fp {
+    height: 1fr;
+    background: $surface;
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+#fp-list {
+    height: 1fr;
+    margin-top: 1;
+    border: none;
+    padding: 0;
+    background: $surface;
 }

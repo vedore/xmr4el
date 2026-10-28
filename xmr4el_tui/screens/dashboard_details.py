@@ -241,8 +241,8 @@ def group_text(node, snapshot, root):
         elif not snapshot.found:
             t.append(f"\noutputs/runs/ not found under {root}. Start in the repository or pass --root.\n")
         elif not n:
-            t.append("\nNo saved trees yet. New Experiment (starting runs here) is planned; start runs with "
-                     "scripts/run_experiment.py.\n")
+            t.append("\nNo saved trees yet. Start runs with scripts/run_experiment.py; New Experiment (n) sets up the "
+                     "dataset, launching from it is planned.\n")
     else:
         _rows(t, [("Runs", len(node.children))])
     t.append("\nenter describes the selected item · left results · right run monitor\n", style="dim")

@@ -155,7 +155,10 @@ fullscreen). `c` follows the current stage again, `esc` returns. Cancel Run (`s`
 confirmation, only to a run this TUI (or an earlier one) launched; runs started from a shell are monitored only.
 Results (`r`, or `left` in the Description, on an evaluation with metrics) compares it, as the baseline, with up to
 three other evaluations of the same test file (VERIFIED / CAUTION / INCOMPATIBLE, deltas only where the
-recorded evidence allows them). New Experiment (`n`) is planned: it only says what it would open.
+recorded evidence allows them). New Experiment (`n`) starts with Dataset Setup: datasets recognized from
+`configs/experiments/*.json` and `datasets/`, or registered (saved in `outputs/tui/datasets.json`); `enter`
+configures one, the training file and Development / Test files can be changed with a file picker, `ctrl+s` confirms
+the dataset for the experiment (launching from New Experiment is planned).
 
 ## Configuration
 

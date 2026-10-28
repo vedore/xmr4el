@@ -124,6 +124,16 @@ falls back to `Notif`; `n` hidden from the footer and the empty Dashboard says N
 §4 + key table, tui_architecture.md. Full suite 269 pass, ruff clean. NEXT: push `tui` only on the user's OK; user may
 delete the audit file.
 
+**2026-10-28 New Experiment step 2, Dataset Setup (user's pasted prompt; committed on `tui`, not pushed):** `n` (Dashboard footer)
+opens `screens/dataset_setup.py` (Datasets 30 % | Dataset Configuration); `datasets.py` (stdlib: discovery from
+`configs/experiments/*.json` merged per directory + `runs.datasets/split_files/training_files`, registry
+`outputs/tui/datasets.json`, 64 KiB PubTator sniff, validation, statuses); `draft.py` (`app.draft`: selected, per-dataset
+edits, `confirmed` Selection for the next steps, `trees` placeholder); `screens/file_picker.py` (path field + entries,
+filter, typed/pasted path, esc cancels); footer confirmations generalized (`App.ask` / `asked`, used by `u` discard);
+`widgets/description.Rows` shared OptionList base. Docs tui.md §5.13 + keys, tui_architecture.md, README.
+tests/tui/test_dataset_setup.py (20); full suite 288 pass, ruff clean; renders 140x40 / 80x24 checked. Not built:
+Model Builder, Review Batch, launching. NEXT: user tries `python -m xmr4el_tui`, `n`; then Step 3 (Model Builder) reads `app.draft.confirmed`.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

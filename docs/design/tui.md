@@ -687,6 +687,71 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 - Beam colour: `theme.beam_color(beam) = palette[beam mod 6]`, the same everywhere, never discovery order; the
   number is always written (`B10`).
 
+### 5.13 New Experiment: Dataset Setup (built 2026-10-28)
+
+```text
+ Dashboard / New Experiment                XMR4EL                        Notifications
+
+╭ Datasets ──────────╮╭ Dataset Configuration ──────────────────────────────────────╮
+│   BC5CDR — Chemical││ BioRED — Chemical                                           │
+│    Ready           ││ Variant      Chemical                                       │
+│ > BioRED — Chemical││ Format       PubTator (the experiment runner's input)       │
+│   Ready · confirmed││ Directory    datasets/BioRED/chemical                       │
+│   ncbi tiny        ││ Recognized   biored_chemical.json, …, datasets/ scan        │
+│    Missing files   ││ Status       Ready  ·  Confirmed                            │
+│ Register local     ││                                                             │
+│ dataset            ││ Training file                                               │
+│                    ││ ( ) datasets/BioRED/chemical/train.pubtator            Ready │
+│                    ││ (x) datasets/BioRED/chemical/train_plus_ctd.pubtator   Ready │
+│                    ││     Choose another file…                                    │
+│                    ││ Evaluation files                                            │
+│                    ││ [x] Development  datasets/BioRED/chemical/dev.pubtator   Ready │
+│                    ││ [ ] Test         datasets/BioRED/chemical/test.pubtator  Ready │
+│                    ││   Confirm Dataset                                           │
+╰────────────────────╯╰─────────────────────────────────────────────────────────────╯
+ enter choose file  space toggle  esc back  ctrl+s confirm dataset  u discard changes
+```
+
+- `n` (Dashboard footer) opens it; the breadcrumb is `Dashboard / New Experiment`. Datasets 30 % (min 24 cells),
+  Dataset Configuration the rest; both scroll on their own.
+- Datasets = `datasets.discover`: one logical dataset per directory of the files the experiment specs name
+  (`configs/experiments/*.json`; eval-only specs too; model configs there are skipped; a spec's split role is its
+  declared split name, `dev`, `dev_*` -> Development, `test`, `test_*` -> Test), plus the split files of those
+  directories and of every `datasets/` directory with a dev or test file (`runs.split_files`,
+  `runs.training_files`). Disease / chemical subsets are separate directories, so separate datasets. Then the
+  registered datasets (`outputs/tui/datasets.json`, label `local`), then `Register local dataset`.
+- A recognized path is a suggestion: availability is `datasets.inspect` (stat + the first 64 KiB: UTF-8 text,
+  `<id>|t|` before abstracts and annotations, tab-separated annotation lines, at least one annotation when the whole
+  file fits; cached by mtime and size). No full parse, hash or embedding: launch-time checks stay with the runner and
+  Review. List statuses are checked in a worker.
+- Defaults: a training file only where one is recognized, or exactly one a spec names (train_plus_ctd over
+  train.pubtator; both listed, `space` / `enter` picks one); Development enabled when recognized; Test never enabled
+  by default. Several recognized files for one role and none chosen: Needs review.
+- Status (list and panel): Missing files > Invalid mapping > Needs review > Ready; Ready only when every check above
+  passed. The specific message sits under the affected row (`Development file not found: datasets/C/dev.pubtator`);
+  Confirm Dataset with a problem says the first one in the footer and moves the cursor to the control that fixes it.
+- Checks: training file set and found; at least one evaluation split enabled; each enabled split's file set and
+  found; readable; PubTator; an evaluation file that is the training file; duplicate split names; registered name
+  set and unique.
+- Draft (`app.draft`, `draft.ExperimentDraft`, memory only): `selected` = the dataset in the right panel (enter on
+  a dataset; moving the cursor changes nothing); `edits` = per dataset, changes not confirmed (kept when switching
+  datasets or leaving the screen; the list says `edited`); `confirmed` = the `datasets.Selection` Confirm Dataset
+  (`ctrl+s` or the row) validated: dataset key, name, variant, training file, evaluation splits (path, enabled),
+  format. The next New Experiment screens read `draft.confirmed`; every tree of the batch shares it (`draft.trees`,
+  Model Builder). Changes after confirming leave `confirmed` as it was until confirmed again (`Confirmed · changed
+  since, not confirmed`). `u` discards the dataset's unconfirmed changes after the footer confirmation (`u` again,
+  `esc` keeps them).
+- Register local dataset: a Name field, then the training / Development / Test files chosen with the picker (a
+  split's role is the row it is chosen for, never guessed from its name); confirming writes the registry (only file
+  this screen writes; an unreadable registry is never overwritten) and confirms it. Bundled specs and datasets are
+  never modified.
+- File picker (`screens/file_picker.py`, a screen, crumb `Training file` / `Development file` / `Test file`): a path
+  field over its directory's entries, on the machine the TUI runs on. Typing filters by the text after the last
+  `/`; a typed or pasted path to a directory opens it, to a file chooses it; `up` `down` move, `enter` opens / chooses
+  the highlighted entry, `..` goes up (past the project root too); `.pubtator` / `.txt` normal, other files dimmed
+  but selectable. Starts in the current file's directory with it highlighted. `esc` cancels: mapping, focus and
+  row unchanged. A file chosen for a split enables it. Paths are kept relative to the project root when inside it.
+
 ## 6. View states
 
 | View | Empty | Loading | Error |
@@ -728,7 +793,10 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Description | `enter` / click on `View Logs  [Open]` | Fullscreen read-only log of the item's run (evaluation: its run, between Run and State; run: between Type and State; tree: its training run, between Training run and Run state). `esc` returns with the row still selected. |
 | Log viewer | `↑` `↓` `pgup` `pgdn` `home` `end`, `/` search (enter finds, `esc` closes the box), `n` / `N` next / previous match, `l` level all → INFO+ → WARNING+ → ERROR+, `esc` back | Header: run name, id, state, file, level, match i/n. An active run is polled every second and follows the end while the view is at the end; a finished run is read once. A missing log shows why, nothing is generated. At most 100 000 lines kept, first read ≤ 8 MiB from the end. |
 | Explorer, Description, Active runs | mouse drag | Select text (blue); on release it is copied to the clipboard by OSC 52 (`App.copy_to_clipboard`), so it reaches the terminal the TUI runs in, also through `ssh` / `docker exec`; a toast says how many characters. A click without a drag copies nothing; dragging the explorer border resizes, never selects. The terminal must allow OSC 52. |
-| Everywhere | `n` | New Experiment (planned, screen not built: footer says so; not shown in the footer, and the empty Dashboard says it is planned). |
+| Everywhere | `n` | New Experiment: Dataset Setup (§5.13); shown in the Dashboard footer. Already open: back to it. |
+| Dataset Setup | Datasets: `up` `down`, `enter` / click; `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`); `esc` | Move (nothing changes) / configure the dataset; next / previous panel (Datasets, Name, configuration); back to the previous screen (unconfirmed edits stay in the draft). |
+| Dataset Setup | Configuration: `tab` `shift+tab` (or `up` `down`), `enter`, `space`, click on `[x]`, `ctrl+s`, `u`, `esc` | Move between controls; a file row opens the picker (training variant: selects it); select a training variant / toggle a split; toggle; Confirm Dataset; discard unconfirmed changes (asks); back to Datasets. `ctrl+r` rereads datasets. |
+| File picker | `up` `down`, typing, `enter`, `esc` | Move; filter or type / paste a path; open the directory or choose the file; cancel. |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |
 | Runs | `n` | New training run. |
