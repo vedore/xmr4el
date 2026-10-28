@@ -256,30 +256,35 @@ def run(spec, xmodel_path=None, run_dir=None, model_config_sha256=None, tree_id=
             progress(stage="eval", split=e["split"], part="write", phase="start")
             write_json(os.path.join(run_dir, f"metrics_{e['split']}.json"), m)
             progress(stage="eval", split=e["split"], part="write", phase="complete")
-            progress(stage="eval", split=e["split"], phase="complete", **{k: m[k] for k in ("acc@1",) if k in m})
             logger.info("Eval %s:\n%s", e["split"], format_metrics(m))
-            if not m["rows"]:
+            if not m["rows"]:  # metrics kept for diagnosis; the eval stays open and ends failed
                 raise ValueError(f"eval {e['split']}: no row has a gold label in the tree's vocabulary")
+            progress(stage="eval", split=e["split"], phase="complete", **{k: m[k] for k in ("acc@1",) if k in m})
         ENDING.set()
-        write_json(status, {"status": "completed", **record, "finished": datetime.now().isoformat(timespec="seconds")})
+        # final status last: a reader that sees it has every event, resources.json and log line already
         progress(stage="run", phase="complete")
         logger.info("Run completed: dir=%s", run_dir)
+        write_json(status, {"status": "completed", **record, "finished": datetime.now().isoformat(timespec="seconds")})
         return run_dir
     except (Stopped, KeyboardInterrupt) as err:
         ENDING.set()
         signame = "SIGTERM" if isinstance(err, Stopped) else "SIGINT"
-        write_json(status, {"status": "stopped", **record, "finished": datetime.now().isoformat(timespec="seconds"),
-                            "error": signame})
-        events.end_open("stopped", signal=signame)
-        logger.warning("Run stopped by %s", signame)
+        finished = datetime.now().isoformat(timespec="seconds")
+        try:
+            events.end_open("stopped", signal=signame)
+            logger.warning("Run stopped by %s", signame)
+        finally:
+            write_json(status, {"status": "stopped", **record, "finished": finished, "error": signame})
         raise
     except BaseException as err:
         ENDING.set()
         error = f"{type(err).__name__}: {err}"
-        write_json(status, {"status": "failed", **record, "finished": datetime.now().isoformat(timespec="seconds"),
-                            "error": error})
-        events.end_open("failed", error=error)
-        logger.exception("Run failed")
+        finished = datetime.now().isoformat(timespec="seconds")
+        try:
+            events.end_open("failed", error=error)
+            logger.exception("Run failed")
+        finally:
+            write_json(status, {"status": "failed", **record, "finished": finished, "error": error})
         raise
     finally:
         beat.set()

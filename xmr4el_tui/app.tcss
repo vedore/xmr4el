@@ -120,6 +120,7 @@ LogPanel {
 
 #overview {
     height: auto;
+    max-height: 50%;
     padding: 0 1;
 }
 

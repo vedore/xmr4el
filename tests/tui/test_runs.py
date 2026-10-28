@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fake_runs import bad_fields_run, make_run, patch_json
-from xmr4el_tui import fmt, progress, runs
+from xmr4el_tui import fmt, process, progress, runs
 from xmr4el_tui.services.experiment_repository import ExperimentRepository
 
 
@@ -254,3 +254,26 @@ def test_events_are_read_incrementally(tmp_path, monkeypatch):
     replacement.write_text(json.dumps({**start[0], "stage": "labels"}) + "\n")  # another file at the path
     replacement.replace(events)
     assert activity().stage == "labels" and reads[-1] == 0
+
+
+def test_malformed_run_artifacts_stay_local(tmp_path):
+    """An impossible date in a run id, control sequences in status.json, non-finite numbers: read as missing or as
+    plain text, never raised."""
+    bad = tmp_path / "outputs/runs/2026-99-99_00-00-00_bad"
+    bad.mkdir(parents=True)
+    path = make_run(tmp_path, "esc", status="failed")
+    patch_json(path / "status.json", error="boom\x1b]0;x\x07\x1b[2J")
+    found = {r.id: r for r in runs.scan(tmp_path)}
+    assert found[bad.name].started is None
+    assert found[path.name].error == "boom"
+    assert (fmt.duration(float("nan")), fmt.duration(1e309), fmt.size(float("inf")), fmt.count(10 ** 400)) == (
+        fmt.DASH, fmt.DASH, fmt.DASH, f"{10 ** 400:,}")
+
+
+def test_lost_run_has_no_elapsed_time(tmp_path):
+    """A LOST run died at an unknown time: no elapsed time counted to now; a live or unverifiable one counts."""
+    run = runs.read_run(make_run(tmp_path, "r", status="running", identity={"pid": 1}), tmp_path)
+    run = runs.replace(run, started=datetime(2026, 10, 20, 12), finished=None)
+    now = datetime(2026, 10, 20, 15)
+    for live, want in (("RUNNING", 3 * 3600), ("UNVERIFIED", 3 * 3600), ("LOST", None)):
+        assert runs.elapsed(runs.replace(run, live=process.Live(live)), now) == want, live

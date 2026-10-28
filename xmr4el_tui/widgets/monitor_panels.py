@@ -1,13 +1,14 @@
 """Run monitor Run overview and Resource monitor panels: display only (the screen fills them)."""
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.widgets import Button, Static
 
 from xmr4el_tui.widgets.resize import DragRightBorder
 
 
-class RunOverview(DragRightBorder, Vertical, can_focus=True):
-    """Run identity and state; `Cancel Run` (enabled only while the screen says the run is stoppable)."""
+class RunOverview(DragRightBorder, VerticalScroll, can_focus=True):
+    """Run identity and state; `Cancel Run` (enabled only while the screen says the run is stoppable). At most half
+    the column (app.tcss): a long error scrolls here instead of pushing the Pipeline off screen."""
     ALLOW_MAXIMIZE = True
 
     def compose(self) -> ComposeResult:

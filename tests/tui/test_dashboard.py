@@ -364,7 +364,7 @@ def test_scans_never_overlap_and_land_in_order(tmp_path):
             running[0] -= 1
             return made[-1]
         app.repo.snapshot = held
-        app.apply_scan = lambda snapshot, announce=False: applied.append(snapshot)
+        app.apply_scan = lambda snapshot, announce=False, reaped=(): applied.append(snapshot)
         app.rescan()
         await asyncio.to_thread(entered.wait, 10)
         for _ in range(3):

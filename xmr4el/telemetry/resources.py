@@ -92,10 +92,15 @@ class ResourceMonitor:
         return torch.mps.current_allocated_memory() if self.device.type == "mps" else None
 
     def sample(self):
-        rss, util, gpu_mem = rss_now(), self.gpu_util(), self.gpu_mem_sample()
+        """One sample of the stage open when it starts; dropped if that stage ended while measuring (the lock is
+        not held across the measurement: an NVML query may be slow)."""
         with self.lock:
             s = self.current
-            if s is None:
+        if s is None:
+            return
+        rss, util, gpu_mem = rss_now(), self.gpu_util(), self.gpu_mem_sample()
+        with self.lock:
+            if self.current is not s:
                 return
             s["n"] += 1
             if rss is not None:

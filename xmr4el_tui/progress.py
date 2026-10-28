@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from xmr4el_tui.fmt import count, metric
+from xmr4el_tui.fmt import clean, count, metric, number
 from xmr4el_tui.runs import parse_time, state_word
 
 TRAIN_STAGES = ("load", "encode", "labels", "hierarchy", "save")
@@ -146,9 +146,9 @@ def stages(events, kind, splits, recorded):
             phase = ev.get("phase")
             seconds = ev.get("duration_seconds")
             return Stage(k, {"failed": "failed", "stopped": "stopped"}.get(phase, "done"),
-                         seconds if isinstance(seconds, (int, float)) else _seconds(begun, t), begun, text, sub,
-                         bar, ev.get("error") if isinstance(ev.get("error"), str) else None)
-        return Stage(k, unfinished if begun else "pending", None, begun, text, sub, bar)
+                         seconds if number(seconds) else _seconds(begun, t), begun, clean(text), sub,
+                         bar, clean(ev["error"]) if isinstance(ev.get("error"), str) else None)
+        return Stage(k, unfinished if begun else "pending", None, begun, clean(text), sub, bar)
 
     def layer_parts():
         """A layer has only a start event: it ended when the next one started, or with the hierarchy."""

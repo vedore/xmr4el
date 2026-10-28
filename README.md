@@ -134,19 +134,23 @@ the run (spec, metrics, git state, input hashes, package versions) under `output
 are in `docs/results.md`.
 
 Browse saved trees, their evaluations and active runs in the terminal (optional `tui` extra; reads
-`outputs/runs/` and `outputs/saved_trees/` only, never loads a tree, writes nothing):
+`outputs/runs/` and `outputs/saved_trees/` only, never loads a tree; writes nothing except when it cancels a run):
 
 ```bash
 uv sync --locked --extra tui
 .venv/bin/python -m xmr4el_tui            # or xmr4el-tui; --root <repo> when started elsewhere
 ```
 
-One screen, the Dashboard: Explorer (Models > dataset > tree > evaluation, then runs without a saved tree),
-Description of the selected item, Active runs. `enter` describes, `]` / `[` (or `ctrl+tab`) cycle panels,
-`ctrl+b` hides the explorer, `<` / `>` resize it, `ctrl+r` rereads every run file, `?` lists the keys,
-`ctrl+c` twice quits. Mouse drag selects text and copies it. It rescans every 5 s. New Experiment (`n`),
-Results and Run monitor (`left` / `right` in the Description, `enter` on an active run) are not built yet:
-they only say what they would open.
+Dashboard: Explorer (Models > dataset > tree > evaluation, then runs without a saved tree), Description of
+the selected item, Active runs. `enter` describes, `]` / `[` (or `ctrl+tab`) cycle panels, `ctrl+b` hides the
+explorer, `<` / `>` resize it, `ctrl+r` rereads every run file, `?` lists the keys, `ctrl+c` twice quits.
+Mouse drag selects text and copies it. It rescans every 5 s. `View Logs` in the Description opens a run's log.
+
+Run Monitor (`enter` on an active run, `right` in the Description): Run overview, Pipeline (stages, parts,
+hierarchy layers), Resources of the selected stage, Live logs (`/` search, `n` / `N`, `l` level, `f`
+fullscreen). `c` follows the current stage again, `esc` returns. Cancel Run (`s`) sends SIGTERM after a
+confirmation, only to a run this TUI (or an earlier one) launched; runs started from a shell are monitored only.
+New Experiment (`n`) and Results (`left` in the Description) are planned: they only say what they would open.
 
 ## Configuration
 

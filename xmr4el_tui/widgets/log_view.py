@@ -2,6 +2,7 @@
 monitor reuses it). Only the rows on screen are rendered, so a large log costs one row per screen line; at most
 MAX_LINES lines are kept (the oldest are dropped)."""
 import re
+from bisect import bisect_left
 
 from rich.segment import Segment
 from rich.style import Style
@@ -30,20 +31,36 @@ class LogView(ScrollView, can_focus=True):
 
     # --- content ---------------------------------------------------------------------------------------------
     def append(self, lines, reset=False):
-        follow = self.scroll_offset.y >= self.max_scroll_y
+        follow, gone = self.scroll_offset.y >= self.max_scroll_y, 0
         if reset:
             self.all, self.width_max = [], 0
         self.all.extend(lines)
-        if len(self.all) > MAX_LINES or reset:
+        if reset:
             del self.all[:max(0, len(self.all) - MAX_LINES)]
             self.refilter()
         else:
             self.extend_shown(range(len(self.all) - len(lines), len(self.all)))
+            if len(self.all) > MAX_LINES:
+                gone = self.drop_oldest(len(self.all) - MAX_LINES)
         self.width_max = max([self.width_max, *(len(line.text) for line in lines)])
         self.virtual_size = Size(self.width_max, len(self.shown))
         self.refresh()
         if follow:
             self.call_after_refresh(self.scroll_end, animate=False)
+        elif gone:  # a reader scrolled back keeps the same text on screen
+            self.scroll_to(y=max(0, self.scroll_offset.y - gone), animate=False, immediate=True)
+
+    def drop_oldest(self, n):
+        """Forget the `n` oldest lines; the current search match stays current while its line is kept. Returns how
+        many shown rows went."""
+        del self.all[:n]
+        gone = bisect_left(self.shown, n)
+        self.shown = [i - n for i in self.shown[gone:]]
+        hit = self.matches[self.current] if self.current is not None else None
+        first = bisect_left(self.matches, gone)
+        self.matches = [r - gone for r in self.matches[first:]]
+        self.current = None if hit is None or hit < gone else self.current - first
+        return gone
 
     def passes(self, line):
         return self.min_level is None or (line.level in LEVELS and

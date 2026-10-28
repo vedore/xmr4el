@@ -11,13 +11,15 @@ pytest.importorskip("textual")
 from fake_runs import make_run, patch_json  # noqa: E402
 from xmr4el_tui import process  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
+from xmr4el_tui.logs import Line  # noqa: E402
 from xmr4el_tui.progress import stages  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen  # noqa: E402
 from xmr4el_tui.screens.log_screen import LogScreen  # noqa: E402
 from xmr4el_tui.screens.monitor_details import RUN_ROW, resource_text, summary_of  # noqa: E402
-from xmr4el_tui.screens.monitor_screen import RunMonitorScreen  # noqa: E402
+from xmr4el_tui.screens.monitor_screen import RunMonitorScreen, TelemetryRead  # noqa: E402
 from xmr4el_tui.screens.stop_dialog import StopDialog  # noqa: E402
 from xmr4el_tui.widgets.log_panel import LogPanel  # noqa: E402
+from xmr4el_tui.widgets import log_view  # noqa: E402
 from xmr4el_tui.widgets.log_view import LogView  # noqa: E402
 from xmr4el_tui.widgets.monitor_panels import ResourcePanel, RunOverview  # noqa: E402
 from xmr4el_tui.widgets.pipeline import Pipeline  # noqa: E402
@@ -360,3 +362,84 @@ def test_overview_is_compact_on_long_names(tmp_path, monkeypatch):
         assert screen.query_one("#overview-text").region.height == 7, "one line per field, cut, never wrapped"
         assert screen.query_one(RunOverview).region.height <= 12
     run_monitor(tmp_path, check, run_id=f"2026-10-23_14-10-00_{name}")
+
+
+def test_final_events_read_after_a_read_in_flight(live):
+    """The run ends while a telemetry read is in flight: that older read cannot stop polling; one more read lands
+    the final events (the runner writes them before its final status)."""
+    run, _ = live
+
+    async def check(app, pilot, screen):
+        old = screen.events
+        screen.reading = True  # a read started while the run was running, not landed yet
+        with open(run / "events.jsonl", "a") as f:
+            for e in ({"t": T.format(6), "stage": "hierarchy", "phase": "complete"},
+                      {"t": T.format(6), "stage": "save", "phase": "start"},
+                      {"t": T.format(6), "stage": "save", "phase": "complete"},
+                      {"t": T.format(7), "stage": "eval", "split": "dev", "phase": "start"},
+                      {"t": T.format(7), "stage": "eval", "split": "dev", "phase": "complete"}):
+                f.write(json.dumps(e) + "\n")
+        patch_json(run / "status.json", status="completed", finished="2026-10-23T14:20:00")
+        await rescan(app, pilot)
+        assert screen.again and screen.timer is not None
+        screen.post_message(TelemetryRead(old, screen.resources, screen.device, final=False))
+        await settle(app, pilot)
+        assert screen.timer is None and not screen.reading
+        assert [s.state for s in screen.stages] == ["done"] * 6
+    run_monitor(run.parent.parent.parent, check)
+
+
+def test_malformed_resources_and_truncated_events(live):
+    """resources.json with a non-list `stages` and non-string scopes shows no summary; a truncated events.jsonl
+    leaves no stale Pipeline rows."""
+    run, _ = live
+    (run / "resources.json").write_text(json.dumps({"stages": 7, "scope": {"cpu": 5}}))
+
+    async def check(app, pilot, screen):
+        pipe = screen.query_one(Pipeline)
+        pipe.move_cursor(pipe.rows[RUN_ROW])
+        await pilot.pause()
+        assert "No stage has ended yet" in resources_text(screen)
+        pipe.move_cursor(pipe.rows[("encode",)])
+        await pilot.pause()
+        assert "No summary recorded" in resources_text(screen)
+        (run / "events.jsonl").write_text("")
+        screen.tick()
+        await settle(app, pilot)
+        assert list(pipe.rows) == [RUN_ROW] and pipe.selected_key() == RUN_ROW
+        assert len(pipe.root.children) == 1
+    run_monitor(run.parent.parent.parent, check)
+
+
+def test_log_retention_keeps_a_scrolled_back_view(live, monkeypatch):
+    """At the line cap, dropping the oldest lines keeps the text a scrolled-back reader is looking at and the
+    current search match."""
+    run, _ = live
+    monkeypatch.setattr(log_view, "MAX_LINES", 200)
+    (run / "run.log").write_text("".join(f"row {i}\n" for i in range(200)))
+
+    async def check(app, pilot, screen):
+        view = screen.query_one(LogView)
+        await settle(app, pilot)
+        view.search("row 120")  # scrolls back: the match mid-view
+        await pilot.pause()
+        top = view.all[view.shown[view.scroll_offset.y]].text
+        assert top == f"row {120 - view.size.height // 2}"
+        view.append([Line(f"row {i}", None) for i in range(200, 220)])
+        await pilot.pause()
+        assert len(view.all) == 200 and view.all[view.shown[view.scroll_offset.y]].text == top
+        assert view.all[view.shown[view.matches[view.current]]].text == "row 120"
+    run_monitor(run.parent.parent.parent, check)
+
+
+def test_long_error_keeps_the_pipeline_on_screen(tmp_path):
+    error = "ValueError: " + "x" * 2000 + "\nTraceback line\n" * 20
+    path = make_run(tmp_path, "bad", stamp="2026-10-23_14-10-00", status="failed", tree_id=None,
+                    metrics={"dev": None}, events=EVENTS[:9])
+    patch_json(path / "status.json", error=error)
+    for size in ((140, 40), (100, 30)):
+        async def check(app, pilot, screen):
+            overview, pipeline = screen.query_one(RunOverview).region, screen.query_one(Pipeline).region
+            assert overview.height <= screen.query_one("#mon-left").region.height // 2
+            assert pipeline.y == overview.bottom and pipeline.bottom <= app.size.height - 1 and pipeline.height > 3
+        run_monitor(tmp_path, check, run_id=path.name, size=size)

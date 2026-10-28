@@ -34,9 +34,9 @@ THEME = Theme(
 class Scanned(Message):
     """A scan finished (posted from the scan thread: post_message is thread-safe and never blocks on shutdown)."""
 
-    def __init__(self, snapshot, announce):
+    def __init__(self, snapshot, announce, reaped=()):
         super().__init__()
-        self.snapshot, self.announce = snapshot, announce
+        self.snapshot, self.announce, self.reaped = snapshot, announce, reaped
 
 
 class XMR4ELApp(App):
@@ -77,19 +77,20 @@ class XMR4ELApp(App):
                 while self.scan_wanted and not worker.is_cancelled:
                     self.scan_wanted, announce, self.scan_announce = False, self.scan_announce, False
                     snapshot = self.repo.snapshot(fresh=announce)
+                    reaped = self.launches.reap()  # reads status / console files: here, not on the UI thread
                     if not worker.is_cancelled:  # cancelled on quit: publish nothing
-                        self.post_message(Scanned(snapshot, announce))
+                        self.post_message(Scanned(snapshot, announce, reaped))
             finally:
                 self.scan_lock.release()
 
     def on_scanned(self, message):
-        self.apply_scan(message.snapshot, message.announce)
+        self.apply_scan(message.snapshot, message.announce, message.reaped)
 
-    def apply_scan(self, snapshot, announce=False):
+    def apply_scan(self, snapshot, announce=False, reaped=()):
         if snapshot.problem and snapshot.problem != self.snapshot.problem:
             self.notify(snapshot.problem, title="Scan failed", severity="warning")
         self.snapshot = snapshot
-        for run_id, what in self.launches.reap():
+        for run_id, what in reaped:
             self.notify(f"{run_id}: {what}", title="Launch", severity="error")
         if announce:
             self.notify(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found

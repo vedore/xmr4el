@@ -2,6 +2,7 @@
 failure) and per-stage resource summaries (exact CPU, sampled memory, null when a metric is unavailable)."""
 import json
 import logging
+import threading
 from datetime import datetime
 
 from xmr4el.telemetry import events as ev_mod
@@ -168,3 +169,33 @@ def test_cuda_peak_is_the_allocators_and_reset_per_stage(tmp_path, monkeypatch):
     doc = json.loads((tmp_path / "r.json").read_text())
     assert calls == ["reset", "peak"] and doc["stages"][0]["resources"]["torch_gpu_allocated_peak_bytes"] == 123
     assert "max_memory_allocated" in doc["scope"]["gpu_memory"]
+
+
+def test_sample_taken_across_a_stage_change_is_dropped(tmp_path, monkeypatch):
+    """A sample measured while stage A was open and stored after B started would mix A's memory into B."""
+    rss, measuring, release = [10], threading.Event(), threading.Event()
+
+    def slow_rss():
+        value = rss[0]
+        if threading.current_thread().name == "late":
+            measuring.set()
+            release.wait(5)
+        return value
+    monkeypatch.setattr(resources, "rss_now", slow_rss)
+    mon = ResourceMonitor(str(tmp_path / "r.json"), "cpu", interval=3600)
+    try:
+        mon.start(("encode", None, None))
+        late = threading.Thread(target=mon.sample, name="late")
+        late.start()
+        measuring.wait(5)
+        mon.finish(("encode", None, None), "complete", 1.0)
+        rss[0] = 200
+        mon.start(("labels", None, None))
+        release.set()
+        late.join(5)
+        mon.finish(("labels", None, None), "complete", 1.0)
+    finally:
+        mon.close()
+    enc, lab = json.loads((tmp_path / "r.json").read_text())["stages"]
+    assert lab["resources"]["rss_avg_bytes"] == 200 and lab["samples"] == 2, "only labels' own start/end samples"
+    assert enc["resources"]["rss_avg_bytes"] == 10

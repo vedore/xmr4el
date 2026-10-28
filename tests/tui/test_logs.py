@@ -70,3 +70,14 @@ def test_log_path_falls_back_to_console(tmp_path):
     console.parent.mkdir(parents=True)
     console.write_text("Traceback: crashed before logging\n")
     assert log_path(tmp_path, run) == console
+
+
+def test_control_sequences_never_reach_the_terminal(tmp_path):
+    """CSI, OSC (BEL or ST ended) and other control bytes in a log are removed or shown as text; tabs, Unicode and
+    multi-line records stay readable."""
+    path = tmp_path / "run.log"
+    path.write_bytes((f"{ERROR}a\x1b[2JMARK\x1b[31mred\x1b[0m\x1b]0;title\x07b\x1b]52;c;eA==\x1b\\c\x9b2Jd\x07\x7f\n"
+                      "\tTraceback é ✓\nx\ry\n").encode())
+    got = texts(LogTail(path).read()[0])
+    assert got == [f"{ERROR}aMARKredbcd\\x07\\x7f", "    Traceback é ✓", "x", "y"]
+    assert not any(c in "".join(got) for c in "\x1b\x07\x9b\x9d\r")

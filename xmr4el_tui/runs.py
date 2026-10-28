@@ -11,6 +11,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+from xmr4el_tui.fmt import clean
+
 RUNS_DIR = Path("outputs", "runs")
 SEARCH_KEYS = ("beam_size", "topk", "knn_beta", "leaf_candidates")
 RUN_ID = re.compile(r"(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})_(.+)")
@@ -100,9 +102,9 @@ def dig(obj, *keys):
 
 
 def text(obj, key):
-    """obj[key] when it is a string, else None."""
+    """obj[key] when it is a string (control sequences removed, fmt.clean), else None."""
     value = obj.get(key) if isinstance(obj, dict) else None
-    return value if isinstance(value, str) else None
+    return clean(value) if isinstance(value, str) else None
 
 
 def parse_time(value):
@@ -129,12 +131,12 @@ def read_run(path, root):
         return obj
 
     def string(obj, name, key):
-        """obj[key] when a string; present with another type: a problem, read as absent."""
+        """obj[key] when a string (fmt.clean); present with another type: a problem, read as absent."""
         value = (obj or {}).get(key)
         if value is not None and not isinstance(value, str):
             problems.append(f"{name}: {key} is not a string")
             return None
-        return value
+        return value and clean(value)
 
     def time(name, key):
         value = string(status, name, key)
@@ -163,7 +165,7 @@ def read_run(path, root):
 
     spec_evals = (spec or {}).get("evals")
     if isinstance(spec_evals, list) and all(isinstance(e, dict) and isinstance(e.get("split"), str) for e in spec_evals):
-        splits = [(e["split"], e) for e in spec_evals]
+        splits = [(clean(e["split"]), e) for e in spec_evals]
     else:  # no usable spec: whatever metrics exist, in name order
         splits = [(p.name[len("metrics_"):-len(".json")], {}) for p in sorted(path.glob("metrics_*.json"))]
     evals = []
@@ -177,13 +179,20 @@ def read_run(path, root):
     identity = {k: v for k, v in status.items() if k not in STATUS_KEYS} or None
     return Run(id=path.name, path=path, name=string(spec, "spec.json", "name") or (m.group(2) if m else path.name),
                kind=kind, recorded=recorded,
-               started=time("status.json", "started") or (datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S")
-                                                          if m else None),
+               started=time("status.json", "started") or id_time(m),
                finished=time("status.json", "finished"), error=string(status, "status.json", "error"),
                tree_id=string(tree, "tree.json", "tree_id"), tree_path=tree_path,
                tree_here=tree_on_disk(root, tree_path),
                evals=tuple(evals), identity=identity, problems=tuple(problems),
                train_path=string(spec, "spec.json", "train_path"))
+
+
+def id_time(m):
+    """The start time in a RUN_ID match, None without one or when it is no date (2026-99-99_…)."""
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S") if m else None
+    except ValueError:
+        return None
 
 
 def state_word(run):
@@ -194,7 +203,8 @@ def state_word(run):
 
 
 def elapsed(run, now=None):
-    end = run.finished or (now or datetime.now() if run.recorded == "running" else None)
+    """Finish - start; a recorded-running run counts to `now` unless it is LOST (when it died is unknown: None)."""
+    end = run.finished or (now or datetime.now() if run.recorded == "running" and state_word(run) != "LOST" else None)
     return (end - run.started).total_seconds() if end and run.started else None
 
 

@@ -1,6 +1,8 @@
 """Display formats (tui.md §4). Stdlib only."""
 import locale
+import math
 import os
+import re
 import sys
 
 DASH = "—"
@@ -10,6 +12,15 @@ STATE_STYLE = {"RUNNING": "bold #5CC8FF", "UNVERIFIED": "#F5C451", "LOST": "#FF6
 STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",
                "STOPPED": "STOP", "UNKNOWN": "?"}
 ASCII_MARKERS = {"done": "ok", "current": ">>", "pending": "..", "failed": "xx"}
+# terminal escape sequences (CSI, OSC ended by BEL or ST) and any other C0/C1 control character but tab and newline
+ESCAPES = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def clean(text):
+    """File text made safe to draw: escape sequences removed, other control characters shown as \\xNN. Rich does
+    not strip ESC, so text from run files would otherwise reach the terminal as commands."""
+    return CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", ESCAPES.sub("", text))
 
 
 def use_ascii():
@@ -19,8 +30,8 @@ def use_ascii():
 
 
 def duration(seconds):
-    """m:ss under an hour, h:mm:ss above; None -> dash."""
-    if seconds is None:
+    """m:ss under an hour, h:mm:ss above; None (or not a finite number) -> dash."""
+    if not number(seconds):
         return DASH
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
@@ -35,8 +46,8 @@ def stamp(dt, long=False):
 
 
 def number(x):
-    """A JSON number (not a bool): what the formats below accept; anything else shows as a dash."""
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    """A finite JSON number (not a bool, NaN or inf): what the formats below accept; anything else shows as a dash."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and (isinstance(x, int) or math.isfinite(x))
 
 
 def metric(x):

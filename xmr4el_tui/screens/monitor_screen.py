@@ -33,9 +33,9 @@ TITLES = {"overview": "Run overview", "pipeline": "Pipeline", "resources": "Reso
 class TelemetryRead(Message):
     """events.jsonl and resources.json as read by the telemetry worker."""
 
-    def __init__(self, events, resources, device):
+    def __init__(self, events, resources, device, final):
         super().__init__()
-        self.events, self.resources, self.device = events, resources, device
+        self.events, self.resources, self.device, self.final = events, resources, device, final
 
 
 class StopSent(Message):
@@ -65,6 +65,7 @@ class RunMonitorScreen(Screen):
         self.tail, self.resources_sig, self.provenance = EventTail(self.run.path / "events.jsonl"), None, None
         self.events, self.resources, self.device, self.stages = [], None, None, []
         self.reading, self.timer, self.cancelling, self.left_want, self.single = False, None, False, None, False
+        self.again = False  # a tick came while reading: read once more when that read lands
 
     def compose(self) -> ComposeResult:
         yield TopBar("Run Monitor", id="top")
@@ -97,12 +98,16 @@ class RunMonitorScreen(Screen):
 
     # --- telemetry ------------------------------------------------------------------------------------------
     def tick(self):
-        if not self.reading:  # one read at a time: the tails are not shared between threads
+        """One read at a time (the tails are not shared between threads); a tick during a read is not dropped."""
+        if self.reading:
+            self.again = True
+        else:
             self.reading = True
-            self.read_telemetry()
+            self.read_telemetry(not self.active())
 
     @work(thread=True, group="telemetry")
-    def read_telemetry(self):
+    def read_telemetry(self, final):
+        """`final`: started after the run ended (its runner wrote the final status after every event)."""
         self.tail.read()
         path = self.run.path / "resources.json"
         try:
@@ -115,7 +120,7 @@ class RunMonitorScreen(Screen):
         if self.provenance is None:  # read once
             self.provenance = self.run.provenance() or {}
         device = runs.text(self.provenance, "torch_device") or runs.text(resources, "device")
-        self.post_message(TelemetryRead(self.tail.events, resources, device))
+        self.post_message(TelemetryRead(self.tail.events, resources, device, final))
 
     def on_telemetry_read(self, message):
         self.reading = False
@@ -124,7 +129,10 @@ class RunMonitorScreen(Screen):
         if changed:
             self.refresh_stages()
             self.show_overview()
-        if not self.active() and self.timer:  # this was the read after the run ended: stop polling
+        if self.again:
+            self.again = False
+            self.tick()
+        elif message.final and self.timer:  # this read started after the run ended: stop polling
             self.timer.stop()
             self.timer = None
 

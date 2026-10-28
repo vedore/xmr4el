@@ -45,6 +45,18 @@ push `tui` only on the user's OK. Cancel Run is offered only for runs leading th
 or shell launches via `setsid`; macOS: `python -c "import os,sys; os.setsid(); os.execvp(...)"` wrapper). Offered,
 not decided: a pid-only SIGTERM fallback for shell runs (its workers would not get the signal); ask before building.
 
+**2026-10-28 Run monitor audit (`/private/tmp/XMR4EL-run-monitor-audit.md`) fixed (not committed yet):** RM-01
+Cancel Run needs a TUI launch record (`process.spawn` writes `.console/<id>.launch.json`; `process.owned`; `stop`
+refuses a status.json identity changed since read) — shell runs, even under `setsid`, are now monitor only; RM-02
+`fmt.clean` strips CSI/OSC and escapes control chars (log lines, run-file strings, event text); RM-03 runner writes
+final status last, monitor/log reads coalesce ticks and stop only after a read started post-end; RM-04 non-list
+`stages`, non-string scopes, non-finite numbers, impossible run-id dates read as missing; RM-05 zero-row eval ends
+`failed`; RM-06 resource sample dropped if its stage ended while measuring; RM-07 log retention keeps a scrolled-back
+view and search match; RM-08 overview max 50 % + scrolls; RM-09 LOST has no elapsed; RM-10 Pipeline prunes stale
+rows; RM-11 README; R-01 reap in the scan thread, log path chosen in the log worker. Docs tui.md §9,
+tui_architecture.md. Committed on `tui`, not pushed. NEXT: push only on the user's OK; try a TUI launch once New Experiment exists (Cancel Run is never
+offered before that).
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

@@ -70,11 +70,18 @@ def sleeper(new_session=True, ignore_term=False):
     return child
 
 
-def recorded_running(root, name, child, **override):
+def recorded_running(root, name, child, launched=True, **override):
+    """`launched`: the launch record spawn writes (TUI ownership) for the child's real identity."""
     live = procinfo.identity(child.pid)
     identity = {"pid": child.pid, "host": "h", **live, "runtime": procinfo.runtime(),
                 "isolated_group": live["pgid"] == live["sid"] == child.pid, **override}
     path = make_run(root, name, status="running", tree_id=None, metrics={"dev": None}, identity=identity)
+    if launched:
+        console = Path(root, process.CONSOLE_DIR)
+        console.mkdir(parents=True, exist_ok=True)
+        (console / f"{path.name}.launch.json").write_text(json.dumps(
+            {"run_id": path.name, "run_dir": str(path.resolve()), "pid": child.pid, "start": live["start"],
+             "uid": live["uid"], "runtime": procinfo.runtime()}))
     return runs.read_run(path, root)
 
 
@@ -103,6 +110,50 @@ def test_derived_state_and_stop(tmp_path):
         child.wait()
     old = runs.read_run(make_run(tmp_path, "e", status="running", tree_id=None, metrics={"dev": None}), tmp_path)
     assert process.derived_state(old, here).state == "UNVERIFIED" and state_word(old) == "UNVERIFIED"
+
+
+def test_external_isolated_run_is_monitor_only(tmp_path, monkeypatch):
+    """An isolated process the TUI did not launch (no launch record, one for another run / directory / process, or
+    a status.json replaced after it was read) is RUNNING, never signalled."""
+    child = sleeper()
+    sent = []
+    monkeypatch.setattr(os, "killpg", lambda *a: sent.append(a))
+    try:
+        here = procinfo.runtime()
+        external = recorded_running(tmp_path, "ext", child, launched=False)
+        assert process.derived_state(external, here) == process.Live("RUNNING",
+                                                                     "not launched by the TUI (monitor only)")
+        assert process.stop(external).startswith("not signalled")
+        run = recorded_running(tmp_path, "own", child)
+        launch = tmp_path / process.CONSOLE_DIR / f"{run.id}.launch.json"
+        good = launch.read_text()
+        for field, value in (("run_id", "other"), ("run_dir", "/elsewhere"), ("pid", 1), ("start", "x")):
+            launch.write_text(json.dumps({**json.loads(good), field: value}))
+            assert not process.derived_state(run, here).stoppable, field
+        launch.write_text(good)
+        assert process.derived_state(run, here).stoppable
+        status = run.path / "status.json"
+        status.write_text(json.dumps({**json.loads(status.read_text()), "pid": 1}))
+        assert process.stop(run) == "not signalled: status.json changed since it was read"
+        assert sent == [] and child.poll() is None
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_spawn_writes_launch_record(tmp_path):
+    fake_runner(tmp_path, "import time\njson.load(sys.stdin)\ntime.sleep(30)\n")
+    child = process.spawn(tmp_path, {"name": "own"}, "2026-10-23_15-00-00_own")
+    try:
+        launch = json.loads((tmp_path / process.CONSOLE_DIR / "2026-10-23_15-00-00_own.launch.json").read_text())
+        live = procinfo.identity(child.pid)
+        assert launch == {"run_id": "2026-10-23_15-00-00_own",
+                          "run_dir": str((tmp_path / "outputs/runs/2026-10-23_15-00-00_own").resolve()),
+                          "pid": child.pid, "start": live["start"], "uid": live["uid"],
+                          "runtime": procinfo.runtime()}
+    finally:
+        child.kill()
+        child.wait()
 
 
 def test_shared_group_not_stoppable(tmp_path):

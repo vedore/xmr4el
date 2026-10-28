@@ -39,6 +39,7 @@ class Pipeline(DragRightBorder, Selectable, FullRow, Tree):
         for s in stages:
             rows.append(((s.key,), stage_row(s, run.kind) if s.parts else Text("  ").append_text(stage_row(s, run.kind))))
             rows += [((s.key, p.key), stage_row(p, run.kind, width=18)) for p in s.parts]
+        self.prune({key for key, _ in rows})
         for key, label in rows:
             node = self.rows.get(key)
             if node is None:
@@ -63,6 +64,22 @@ class Pipeline(DragRightBorder, Selectable, FullRow, Tree):
             self.target = self.rows[(active.key,)] if active else self.rows[RUN_ROW]
             if self.target is not self.cursor_node:
                 self.move_cursor(self.target)
+
+    def prune(self, keep):
+        """Remove rows whose stage / part is no longer in the events (a replaced or truncated events.jsonl); a
+        selection that goes with them resumes following."""
+        gone = sorted(set(self.rows) - keep, key=len, reverse=True)  # parts before their stage
+        if self.selected_key() in gone:
+            self.follow()
+        for key in gone:
+            node = self.rows.pop(key)
+            self.labels.pop(key, None)
+            if len(key) == 1:
+                self.opened.discard(key[0])
+            node.remove()
+            if len(key) == 2 and key[:1] in self.rows:
+                parent = self.rows[key[:1]]
+                parent.allow_expand = bool(parent.children)
 
     def follow(self):
         self.following = True

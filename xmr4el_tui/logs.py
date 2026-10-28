@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from xmr4el_tui.fmt import clean
 from xmr4el_tui.process import CONSOLE_DIR
 
 LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -74,5 +75,5 @@ class LogTail:
         for raw in data.decode("utf-8", "replace").splitlines():
             if m := HEADER.match(raw):
                 self.level = m.group(1)
-            out.append(Line(raw.expandtabs(4), self.level))
+            out.append(Line(clean(raw.expandtabs(4)), self.level))
         return out

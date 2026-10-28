@@ -348,5 +348,9 @@ def test_empty_eval_fails_run(tmp_path, monkeypatch):
     status = json.loads((run_dir / "status.json").read_text())
     assert status["status"] == "failed" and "no row" in status["error"]
     assert json.loads((run_dir / "metrics_oov.json").read_text())["rows"] == 0
+    ends = [(e["stage"], e["phase"]) for e in map(json.loads, (run_dir / "events.jsonl").read_text().splitlines())
+            if e.get("part") is None and e["phase"] != "start"]
+    assert ends[-2:] == [("eval", "failed"), ("run", "failed")], "the zero-row eval is the failed stage"
+    assert json.loads((run_dir / "resources.json").read_text())["stages"][-1]["status"] == "failed"
     assert not [h for h in logging.getLogger().handlers if isinstance(h, logging.FileHandler)
                 and str(run_dir) in h.baseFilename]

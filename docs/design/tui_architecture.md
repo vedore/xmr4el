@@ -205,9 +205,11 @@ scroll and marks by run `id` (§7).
 
 ```python
 def check(root, spec, xmodel_path, revision) -> CheckResult   # spawns -check, parses one JSON object
-def spawn(root, spec, run_dir, xmodel_path, config_sha, tree_id) -> Popen
+def spawn(root, spec, run_dir, xmodel_path, config_sha, tree_id) -> Popen  # + .console/<id>.launch.json
+def owned(run, rec) -> bool                   # the launch record matches run id, run dir and identity
 def derived_state(run, here) -> Live          # RUNNING | LOST | UNVERIFIED; stoppable only when the live
-                                              # process leads its group and session (the recorded flag is no proof)
+                                              # process leads its group and session (the recorded flag is no
+                                              # proof) and owned() (a TUI launched it)
 def stop(run, force=False) -> str             # re-verifies identity first (§9); returns outcome
 class Launches                                # start() = spawn + keep the handle; reap() -> [(run id, what
                                               # happened)] for exits without a final status (exit 3: rejection)

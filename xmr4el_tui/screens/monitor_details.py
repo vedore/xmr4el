@@ -91,12 +91,17 @@ def run_row(run):
     return t
 
 
+def stage_summaries(doc):
+    """resources.json's stage summaries: the objects of its `stages` list ([] when it is not a list)."""
+    found = as_dict(doc).get("stages")
+    return [s for s in found if isinstance(s, dict)] if isinstance(found, list) else []
+
+
 def summary_of(doc, key):
     """resources.json summary of top-level stage `key` (load, …, eval:<split>), the last one recorded for that
     (stage, split), or None."""
     stage, split = ("eval", key[5:]) if key.startswith("eval:") else (key, None)
-    found = [s for s in as_dict(doc).get("stages") or [] if isinstance(s, dict)
-             and (s.get("stage"), s.get("split")) == (stage, split)]
+    found = [s for s in stage_summaries(doc) if (s.get("stage"), s.get("split")) == (stage, split)]
     return found[-1] if found else None
 
 
@@ -132,7 +137,7 @@ def resources_block(t, res, scope):
 def resource_text(key, run, stages, doc):
     """(title, text) of the Resource monitor for Pipeline row `key`: RUN_ROW, (stage,) or (stage, part)."""
     doc = doc if isinstance(doc, dict) else None
-    scope = as_dict((doc or {}).get("scope"))
+    scope = {k: fmt.clean(v) for k, v in as_dict((doc or {}).get("scope")).items() if isinstance(v, str)}
     t = Text()
     if key is None or not stages and key != RUN_ROW:
         t.append("Select a stage in the pipeline to see its resources.", style="dim")
@@ -180,7 +185,7 @@ def overall_text(run, doc, scope):
     word = state_word(run)
     t.append(word, style=STATE_STYLE[word])
     t.append(f"  {fmt.duration(elapsed(run, datetime.now()))}\n\n")
-    found = [s for s in as_dict(doc).get("stages") or [] if isinstance(s, dict)]
+    found = stage_summaries(doc)
     if doc is None:
         t.append("No resources.json for this run (written before resource telemetry, or -resource_interval 0).",
                  style="dim")

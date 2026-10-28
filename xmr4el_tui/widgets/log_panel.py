@@ -36,8 +36,9 @@ class LogPanel(Vertical):
 
     def __init__(self, run, root, named=True, **kwargs):
         super().__init__(**kwargs)
-        self.run, self.named, self.path = run, named, log_path(root, run)
-        self.tail, self.reading, self.timer = LogTail(self.path), False, None
+        self.run, self.named, self.root = run, named, root
+        self.path = self.tail = None  # chosen by the first read, in the worker (it stats files)
+        self.reading, self.timer, self.again = False, None, False
 
     def compose(self) -> ComposeResult:
         yield Static(id="log-header")
@@ -48,7 +49,6 @@ class LogPanel(Vertical):
     def on_mount(self):
         self.query_one("#log-search").display = False
         self.query_one("#log-missing").display = False
-        self.border_title = f"Log · {self.path}"
         if self.active():
             self.timer = self.set_interval(POLL_SECONDS, self.tick)
         self.tick()
@@ -60,22 +60,31 @@ class LogPanel(Vertical):
     def set_run(self, run):
         """The run as the latest scan sees it; once finished, the next tick is the final read."""
         self.run = run
-        self.header(self.tail.error)
+        self.header()
 
     # --- reading ---------------------------------------------------------------------------------------------
     def tick(self):
-        if not self.reading:  # one read at a time: the LogTail is not shared between threads
+        """One read at a time (the LogTail is not shared between threads); a tick during a read is not dropped.
+        A read started after the run ended is final: the runner logged everything before its final status."""
+        if self.reading:
+            self.again = True
+        else:
             self.reading = True
             self.load(not self.active())
 
     @work(thread=True, group="log")
     def load(self, final):
+        if self.tail is None:
+            self.path = log_path(self.root, self.run)
+            self.tail = LogTail(self.path)
         lines, reset = self.tail.read(final)
         self.post_message(LogRead(lines, reset, self.tail.error, final))
 
     def on_log_read(self, message):
         message.stop()
         self.reading = False
+        if self.named:  # the Run monitor titles its panel itself
+            self.border_title = f"Log · {self.path}"
         view, missing = self.query_one(LogView), self.query_one("#log-missing", Static)
         if message.lines or message.reset:
             view.append(message.lines, message.reset)
@@ -84,20 +93,23 @@ class LogPanel(Vertical):
         if empty:
             missing.update(Text(f"No log to show: {self.path} ({message.error}). Nothing is generated here; the "
                                 "runner writes run.log from the start of a run.", style="yellow"))
-        if message.final and self.timer:
+        if self.again:
+            self.again = False
+            self.tick()
+        elif message.final and self.timer:
             self.timer.stop()
             self.timer = None
-        self.header(message.error)
+        self.header()
 
     # --- header and keys -------------------------------------------------------------------------------------
-    def header(self, error=None):
-        view = self.query_one(LogView)
+    def header(self):
+        view, error = self.query_one(LogView), self.tail and self.tail.error
         t = Text()
         if self.named:
             word = state_word(self.run)
             t.append_text(Text.assemble((f" {self.run.name}", "bold"), f"  {self.run.id}  ",
                                         (word, STATE_STYLE[word]), "  "))
-        if self.tail.skipped:
+        if self.tail and self.tail.skipped:
             t.append(f"(first {fmt.count(self.tail.skipped)} bytes not loaded)  ", style="dim")
         if error and view.all:
             t.append(f"log {error}  ", style="yellow")
@@ -123,15 +135,15 @@ class LogPanel(Vertical):
         view.search(event.value)
         event.input.display = False
         view.focus()
-        self.header(self.tail.error)
+        self.header()
 
     def action_match(self, direction):
         self.query_one(LogView).step(direction)
-        self.header(self.tail.error)
+        self.header()
 
     def action_level(self):
         self.query_one(LogView).cycle_level()
-        self.header(self.tail.error)
+        self.header()
 
     def check_action(self, action, parameters):
         """Typing in the search box is text, not n / N / l / slash; esc here only closes an open search box (else

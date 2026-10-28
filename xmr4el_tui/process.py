@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from xmr4el_tui import procinfo
-from xmr4el_tui.runs import RUNS_DIR, read_dict
+from xmr4el_tui.runs import RUNS_DIR, STATUS_KEYS, read_dict
 
 RUNNER = Path("scripts", "run_experiment.py")
 CONSOLE_DIR = RUNS_DIR / ".console"
@@ -37,7 +37,7 @@ class Live:
     state: str                # RUNNING | LOST | UNVERIFIED
     reason: str = ""          # why LOST / UNVERIFIED
     other_runtime: bool = False
-    stoppable: bool = False   # RUNNING, identity verified, it leads its own process group and session
+    stoppable: bool = False   # RUNNING, identity verified, leads its own group and session, launched by a TUI
 
 
 def runner_args(xmodel_path, *extra):
@@ -71,7 +71,8 @@ def check(root, spec, xmodel_path, revision, timeout=300):
 def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None):
     """Start the runner for `spec` in outputs/runs/<run_id> (new session: its own process group), stdout/stderr to
     outputs/runs/.console/<run_id>.log. Returns the Popen (only to reap it). An existing console log (the run id was
-    used before) raises FileExistsError: nothing is started or overwritten."""
+    used before) raises FileExistsError: nothing is started or overwritten. The child's identity goes to
+    .console/<run_id>.launch.json: the ownership evidence `owned` requires before a run may be cancelled."""
     extra = ["-run_dir", str(RUNS_DIR / run_id)]
     extra += ["-model_config_sha256", config_sha] if config_sha else []
     extra += ["-tree_id", tree_id] if tree_id else []
@@ -80,6 +81,10 @@ def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None):
     with open(console / f"{run_id}.log", "x") as log:
         child = subprocess.Popen(runner_args(xmodel_path, *extra), cwd=root, stdin=subprocess.PIPE, stdout=log,
                                  stderr=subprocess.STDOUT, start_new_session=True, text=True)
+    ident = procinfo.identity(child.pid) or {}
+    with open(console / f"{run_id}.launch.json", "x") as f:
+        json.dump({"run_id": run_id, "run_dir": str(Path(root, RUNS_DIR, run_id).resolve()), "pid": child.pid,
+                   "start": ident.get("start"), "uid": ident.get("uid"), "runtime": procinfo.runtime()}, f)
     try:
         child.stdin.write(json.dumps(spec))
         child.stdin.close()
@@ -104,6 +109,16 @@ def rejection(root, run_id):
     return None
 
 
+def owned(run, rec):
+    """True when a TUI launched `run` as the process in identity `rec`: its launch record (written by spawn) names
+    this run id and directory and the same pid, start token, UID and runtime. An isolated group alone is no
+    ownership: a shell run under setsid is monitored, never cancelled."""
+    launch = read_dict(run.path.parent / ".console" / f"{run.id}.launch.json") or {}
+    return (launch.get("run_id") == run.id and launch.get("run_dir") == str(run.path.resolve())
+            and all(launch.get(k) is not None and launch.get(k) == rec.get(k) for k in ("pid", "start", "uid",
+                                                                                         "runtime")))
+
+
 def derived_state(run, here):
     """Live state of a run recorded running, seen from runtime `here` (procinfo.runtime())."""
     rec = run.identity or {}
@@ -121,20 +136,25 @@ def derived_state(run, here):
     if (live["start"], live["uid"]) != (rec["start"], rec["uid"]):
         return Live("LOST", f"process {rec['pid']} is gone (pid reused)")
     # the recorded isolated_group flag is no proof: the live process must lead its own group and session now
-    stoppable = procinfo.same(rec, live) and live["pgid"] == live["sid"] == rec["pid"]
-    return Live("RUNNING", "" if stoppable else "process group is shared", stoppable=stoppable)
+    if not (procinfo.same(rec, live) and live["pgid"] == live["sid"] == rec["pid"]):
+        return Live("RUNNING", "process group is shared")
+    if not owned(run, rec):
+        return Live("RUNNING", "not launched by the TUI (monitor only)")
+    return Live("RUNNING", stoppable=True)
 
 
 def stop(run, force=False):
     """Cancel `run` (tui.md §9): SIGTERM (force: SIGKILL) to its process group after re-reading status.json (a run
-    that already wrote a final status is not signalled) and re-verifying its identity, runtime and that it leads
-    its group. Returns what happened; on any mismatch nothing is sent. Safe to repeat: the runner records the first
+    that already wrote a final status, or whose recorded identity changed since `run` was read, is not signalled)
+    and re-verifying its identity, runtime, TUI launch record and that it leads its group. Returns what happened; on any mismatch nothing is sent. Safe to repeat: the runner records the first
     SIGTERM as stopped and ignores later ones, and ignores one that arrives after its final status is decided.
     A SIGKILLed runner records nothing, so a forced stop records it here (`record_forced`): blocks up to
     FORCE_WAIT seconds (call it from a worker)."""
-    recorded = (read_dict(run.path / "status.json") or {}).get("status")
-    if recorded in FINAL:
-        return f"not signalled: run already {recorded}"
+    status = read_dict(run.path / "status.json") or {}
+    if status.get("status") in FINAL:
+        return f"not signalled: run already {status['status']}"
+    if {k: v for k, v in status.items() if k not in STATUS_KEYS} != run.identity:
+        return "not signalled: status.json changed since it was read"
     live = derived_state(run, procinfo.runtime())
     if not live.stoppable:
         return f"not signalled: {live.reason or live.state}"

@@ -589,7 +589,7 @@ esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
 | Run monitor | `ctrl+tab` / `ctrl+shift+tab` (or `]` / `[`) | Next / previous panel: Run overview (its Cancel Run button when usable), Pipeline, Resources, Live logs. |
 | Run monitor | `up` `down`, `tab` `shift+tab`, `left` / `right`, `enter` (Pipeline) | Move between stages / collapse or parent, expand / toggle a stage's parts. The selected row's resources show in Resources. |
 | Run monitor | `c` | Follow the current stage again (moving the cursor stops following). |
-| Run monitor | `s`, `Cancel Run` | Cancel Run confirmation (§5.9), only while the run is RUNNING with a verified isolated group and no cancel is pending. |
+| Run monitor | `s`, `Cancel Run` | Cancel Run confirmation (§5.9), only while the run is RUNNING with a verified isolated group, a TUI launch record (§9) and no cancel is pending. |
 | Run monitor | `f`, `esc` | The focused panel fills the screen (Live logs: the fullscreen log, same reader, search and filter); `esc` restores, then goes back to the Dashboard with its selection kept. |
 | Run monitor | `<` / `>`, drag the left column's right border | Narrower / wider left column by 2 cells: default 35 %, at least 30 cells, at most 60 %, the right side never under 44; kept for the session. |
 | Run monitor | Live logs: `/` `n` `N` `l`, scroll keys | As the log viewer. |
@@ -741,14 +741,23 @@ identity fields in the final record. The runner touches a `heartbeat` file every
 - TUI children use `start_new_session=True`. The runner sets `isolated_group` only
   after verifying `pid == pgid == sid`; ordinary CLI launches may share a shell's
   group and must not be assumed isolated.
-- Stop is offered only for RUNNING with a verified isolated group. Before SIGTERM
+- Stop is offered only for RUNNING with a verified isolated group **and** a TUI launch record:
+  `process.spawn` writes `outputs/runs/.console/<id>.launch.json` (run id, canonical run dir, child pid,
+  start token, UID, runtime); `process.owned` requires all of them to match the recorded identity. An
+  isolated group is no ownership: a shell run under `setsid` is monitored, never cancelled. `stop` also
+  refuses when status.json's identity changed since the run was read. Before SIGTERM
   and again before SIGKILL, recheck process-start identity, runtime, UID, PGID and
   SID. On mismatch, denial, or process exit, send nothing and refresh the state.
   Never fall back to signalling a shell's group. Command arguments corroborate
   identity; substring matching a run path does not establish it.
 - A reattached TUI in the same runtime can stop a verified isolated run started by
-  an earlier TUI. A verified non-isolated CLI run stays RUNNING with
-  `Stop unavailable: process group is shared`; use its launching terminal to stop it.
+  an earlier TUI (the launch record persists). A verified non-isolated CLI run stays RUNNING with
+  `Stop unavailable: process group is shared`, an isolated one without a launch record with
+  `not launched by the TUI (monitor only)`; use its launching terminal to stop it.
+- The runner writes its final status last: open stages closed, resources.json and the final log
+  record first, so a reader that sees a final status has every artifact. The monitor and log panel
+  coalesce a tick that arrives during a read and stop polling only after a read that started after
+  the run ended.
 - `procps` is already in the image; `ps` exists on macOS.
 
 **Cancellation (2026-10-27).** `process.stop(run, force=False)` is the one service a screen calls
