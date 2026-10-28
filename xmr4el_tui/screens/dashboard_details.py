@@ -139,7 +139,7 @@ def _provenance(t, run, details):
 def tree_text(node, details):
     tr, t = node.ref, Text()
     trained = tr.trained_by
-    t.append(f"{node.label}\n", style=HEAD)
+    t.append(f"{explorer.tree_title(node)}\n", style=HEAD)
     dataset = explorer.dataset_of(tr)
     place = Text("on this machine", style=style("success")) if tr.here else Text(
         f"missing: {tr.path}/xmodel.pkl (moved, deleted or not synced)", style=style("warning"))
@@ -184,7 +184,7 @@ def eval_text(node, tree_node, activity, details):
     t.append(f"{e.split} · {run.name}\n", style=HEAD)
     metrics = run.path / f"metrics_{e.split}.json"
     _rows(t, [("Run", f"{run.id} · {KIND[run.kind]} run"), (VIEW_LOGS, OPEN), ("State", state_text(node.state)),
-              ("Tree", f"{tree_node.label} · {fmt.tree(tree_node.ref.id)}" if tree_node else None),
+              ("Tree", f"{explorer.tree_title(tree_node)} · {tree_node.short}" if tree_node else None),
               ("Test file", e.test_path), ("Strings from", e.train_path),
               ("Started", fmt.stamp(run.started, long=True)), ("Finished", fmt.stamp(run.finished, long=True)
                                                               if run.finished else None),

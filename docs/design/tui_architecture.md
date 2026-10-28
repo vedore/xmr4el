@@ -36,7 +36,8 @@ xmr4el_tui/
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
   theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
   process.py       -check, spawn, derived state, stop; Launches (owner of started children)
-  explorer.py      Dashboard explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels
+  explorer.py      explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels, tree
+                   descriptor / detail / collision-safe short id, prune (search, Results filter)
   messages.py      RunsChanged (the app rescanned)
   app.py           App: serialized, coalesced scan worker every 5 s; Snapshot; Launches reaping; global keys, theme
   services/
@@ -55,7 +56,8 @@ xmr4el_tui/
     results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
     results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
   widgets/
-    explorer.py    Explorer tree (resizable) + node labels; ResultsExplorer (row states, beam chip, ⓘ click)
+    explorer.py    Explorer tree (resizable; items of 1-2 rows + gap rows over Tree lines; `/` search) + node
+                   labels; ResultsExplorer (row states, beam chip, ⓘ click); one widget for both screens
     results_panels.py  BaselinePanel, ComparisonSummary, DetailedAnalysis (DataTable + notes), InspectionView
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins

@@ -98,7 +98,10 @@ def test_model_edge_cases(tmp_path):
     (lone / "xmodel.json").write_text(json.dumps({"tree_id": "dddd4444", "initial_labels": {"len": 7}}))
     (lone / "xmodel.pkl").write_bytes(b"")
     idx = model(tmp_path)
-    assert labels(idx, ("dataset", "datasets/x")) == ["dup · bbbb2222", "dup · aaaa1111"], "duplicate names"
+    dups = idx[("dataset", "datasets/x")][0].children
+    assert [c.label for c in dups] == ["dup", "dup"], "names are not identities"
+    assert [c.detail for c in dups] == ["Oct 21 · bbbb2222", "Oct 20 · aaaa1111"], "date and short id on line 2"
+    assert dups[0].descriptor == "SapBERT", "features recorded, no depth: no depth shown"
     assert idx[("tree", "aaaa1111")][0].note == "missing"
     unknown = idx[("dataset", None)][0]
     assert unknown.label == explorer.UNKNOWN_DATASET
@@ -479,7 +482,7 @@ def test_branch_guides_stay_lit(tmp_path):
         tree = app.screen.query_one(Explorer)
         await goto(pilot, app, ("tree", TREE))
         await pilot.press("right")
-        sibling = tree.cursor_line + 2 - int(tree.scroll_offset.y)  # second evaluation of the tree
+        sibling = tree.row_of(tree.cursor_node.children[1]) - int(tree.scroll_offset.y)  # second evaluation
         assert "#2cf5c5" in colours(tree.render_line(sibling)), "on the tree: its evaluations' guides lit"
         await pilot.press("down")  # on the first evaluation (a leaf): the branch stays lit
         assert "#2cf5c5" in colours(tree.render_line(sibling))
@@ -497,16 +500,19 @@ def test_full_row_selection_and_description_rows(tmp_path):
         screen, tree = app.screen, app.screen.query_one(Explorer)
         desc = screen.query_one(Description)
         await goto(pilot, app, ("tree", TREE))
-        focused = bg(tree.render_line(tree.cursor_line - int(tree.scroll_offset.y)))
+        top = tree.row_of(tree.cursor_node) - int(tree.scroll_offset.y)
+        below = tree.row_of(tree.cursor_node.children[0]) - int(tree.scroll_offset.y)
+        focused = bg(tree.render_line(top))
         assert focused == "#2cf5c5", "focused cursor: accent across the whole row"
-        assert bg(tree.render_line(tree.cursor_line + 1)) != focused
+        assert bg(tree.render_line(top + 1)) == focused, "both rows of the tree item"
+        assert bg(tree.render_line(below)) != focused
         await pilot.press("enter")
         await settle(app, pilot)
         assert isinstance(app.focused, Description) and desc.border_title == "Description — Trained tree"
         rows = [i for i in range(desc.option_count) if not desc.get_option_at_index(i).disabled]
         assert desc.highlighted == rows[0] and desc.keys[rows[0]] == "Tree id"
-        blurred = bg(tree.render_line(tree.cursor_line - int(tree.scroll_offset.y)))
-        assert blurred not in (focused, bg(tree.render_line(tree.cursor_line + 1))), "selected, not focused"
+        blurred = bg(tree.render_line(top))
+        assert blurred not in (focused, bg(tree.render_line(below))), "selected, not focused"
         assert "Evaluations" in desc.keys and desc.get_option_at_index(desc.keys.index("Evaluations")).disabled
         await pilot.press("down")
         assert desc.keys[desc.highlighted] == "Dataset"

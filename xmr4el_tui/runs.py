@@ -23,7 +23,7 @@ SPLIT_FILE = re.compile(r"(?:.*[_-])?(train|dev|test)\.pubtator|.*pubtator[_-](t
 SPLITS = ("train", "dev", "test")
 # status.json keys that are not process identity (§9)
 STATUS_KEYS = {"status", "started", "finished", "error", "forced"}  # forced: process.record_forced
-RUN_FILES = ("status.json", "spec.json", "tree.json")  # with metrics_*.json: every file read_run reads
+RUN_FILES = ("status.json", "spec.json", "tree.json", "model_config.json")  # with metrics_*.json: every file read_run reads
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,8 @@ class Run:
     problems: tuple[str, ...] # "metrics_dev.json: invalid JSON", ...
     live: object = None       # process.Live of a recorded-running run (set by the app's scan), else None
     train_path: str | None = None  # spec train_path of a train run
+    features: str | None = None    # model_config.json of a train run (explorer descriptor)
+    depth: int | None = None
 
     def spec(self):
         return read_dict(self.path / "spec.json")
@@ -145,6 +147,7 @@ def read_run(path, root):
         return parse_time(value)
 
     status, spec, tree = load("status.json"), load("spec.json"), load("tree.json")
+    model = load("model_config.json") or {}
     if status is None and not any(p.startswith("status.json") for p in problems):
         problems.append("status.json: missing")
     if spec is None and not any(p.startswith("spec.json") for p in problems):
@@ -184,7 +187,8 @@ def read_run(path, root):
                tree_id=string(tree, "tree.json", "tree_id"), tree_path=tree_path,
                tree_here=tree_on_disk(root, tree_path),
                evals=tuple(evals), identity=identity, problems=tuple(problems),
-               train_path=string(spec, "spec.json", "train_path"))
+               train_path=string(spec, "spec.json", "train_path"), features=text(model, "features"),
+               depth=model.get("depth") if type(model.get("depth")) is int else None)
 
 
 def id_time(m):

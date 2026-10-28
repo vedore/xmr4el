@@ -29,6 +29,9 @@ DARK = {
     "warning-on-accent": "#7A4300",                  # caution symbol over a selected (accent) row
     # comparison
     "baseline-row": ACCENT, "member-row": ACCENT, "on-selected": "#101418", "delta": "#A5B4C3",
+    "delta-unavailable": "#5C6B7A",                  # Δ — : a delta withheld (not verifiably comparable)
+    "spec-differs": "#5CC8FF",                       # Specs value other than the baseline's
+    "divider": "#3A4754",                            # rule between summary rows and Caution notes
     # beam identity: a beam value always gets the same one (beam_color)
     "beams": ("#E6C7A1", "#B48CFF", "#FF6FB5", "#5CC8FF", "#A3E635", "#FF9F43"),
     "beam-unknown": "#5C6B7A", "on-beam": "#101418",

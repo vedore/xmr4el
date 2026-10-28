@@ -1,7 +1,9 @@
 """Results (tui.md §5.12): Current Baseline over the explorer | Comparison Summary over Detailed Analysis.
 
 One screen, one layout: zero to three challengers next to a fixed baseline (an evaluation chosen on the Dashboard).
-enter inspects the explorer's evaluation in place of the right column; esc closes the inspection, then goes back.
+The explorer lists the baseline and the evaluations it can be compared with (Show incompatible lists the rest too).
+enter inspects the explorer's evaluation in place of the right column. esc: closes the inspection, else from a
+right panel (or the filter) goes to the explorer, else back to the Dashboard.
 Read-only, from saved files only: the scan's metrics, plus the small run files comparison.read_facts reads in a worker.
 Each opening is a new session: no challengers.
 """
@@ -11,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import Screen
-from textual.widgets import ContentSwitcher, Footer
+from textual.widgets import Checkbox, ContentSwitcher, Footer
 
 from xmr4el_tui import explorer
 from xmr4el_tui.screens.results_details import analysis, baseline_text, inspection, summary
@@ -35,7 +37,7 @@ class ResultsScreen(Screen):
     """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, < / > resize the columns."""
     BINDINGS = [Binding("escape", "back", "back"),
                 *(Binding(str(i + 1), f"group({i})", "metric group" if i == 0 else name, show=i == 0,
-                          key_display="1-4") for i, name in enumerate(GROUP_NAMES)),
+                          key_display=f"1-{len(GROUP_NAMES)}") for i, name in enumerate(GROUP_NAMES)),
                 Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
                 Binding("less_than_sign", f"resize({-STEP})", "narrower left", show=False),
@@ -45,7 +47,7 @@ class ResultsScreen(Screen):
         """`baseline`: explorer key ("eval", run id, split) of an evaluation with metrics, in the app's snapshot."""
         super().__init__()
         self.base, self.members = baseline, []  # challengers in selection order
-        self.group, self.inspecting, self.left_want = 0, None, None
+        self.group, self.inspecting, self.left_want, self.show_all, self.roots = 0, None, None, False, ()
         self.facts, self.compat, self.names, self.seq, self.facts_runs = {}, {}, {}, 0, None
 
     def compose(self) -> ComposeResult:
@@ -53,6 +55,7 @@ class ResultsScreen(Screen):
         with Horizontal(id="res"):
             with Vertical(id="res-left"):
                 yield BaselinePanel(id="baseline")
+                yield Checkbox("Show incompatible", id="show-all")
                 yield ResultsExplorer(id="res-explorer")
             with ContentSwitcher(id="res-right", initial="res-compare"):
                 with Vertical(id="res-compare"):
@@ -79,25 +82,47 @@ class ResultsScreen(Screen):
         self.refresh_tree()
 
     def refresh_tree(self):
-        """Explorer = the Dashboard's Models branch (datasets > trees > evaluations); cursor, expansion and members
-        survive. Challengers whose run vanished are dropped; the baseline keeps its last facts."""
+        """Explorer = the Dashboard's Models branch (datasets > trees > evaluations), cut to `visible`; cursor,
+        expansion and members survive. Challengers whose run vanished are dropped (hidden ones are not); the
+        baseline keeps its last facts."""
         tree, snap = self.query_one(ResultsExplorer), self.app.snapshot
-        roots, sig = explorer.build(snap.runs, snap.trees)[0].children, tree.sig
-        tree.fill(roots)
+        self.roots = explorer.build(snap.runs, snap.trees)[0].children
+        full = explorer.index(self.roots)
         kept = {self.base: self.names[self.base]} if self.base in self.names else {}  # vanished baseline: last name
-        self.names = kept | {key: f"{tree.index[path[-1]][0].label} · {node.label}"
-                             for key, (node, path) in tree.index.items() if node.kind == "eval"}
-        gone = [m for m in self.members if m not in tree.index]
+        self.names = kept | {key: f"{tree_node.label} · {tree_node.short} · {node.label}"
+                             for key, (node, path) in full.items() if node.kind == "eval"
+                             for tree_node in (full[path[-1]][0],)}
+        gone = [m for m in self.members if m not in full]
         if gone:
             self.members = [m for m in self.members if m not in gone]
             self.notify(f"{len(gone)} challenger(s) no longer found (run moved or deleted): removed.",
                         severity="warning")
+        sig = tree.sig
+        self.refill()
         if gone or tree.sig is not sig:  # an unchanged rescan redraws nothing
             self.mark()
         if snap.runs != self.facts_runs:
             self.facts_runs = snap.runs
             self.seq += 1
-            self.load_facts({k: n.ref for k, (n, _) in tree.index.items() if n.kind == "eval"}, snap.runs, self.seq)
+            self.load_facts({k: n.ref for k, (n, _) in full.items() if n.kind == "eval"}, snap.runs, self.seq)
+
+    def visible(self, node, _ancestors=()):
+        """Shown in the explorer: the baseline, and (Show incompatible off) only evaluations assessed VERIFIED or
+        CAUTION; a tree or dataset is shown while one of its evaluations is. Not yet assessed: hidden."""
+        if self.show_all or node.key == self.base:
+            return True
+        c = self.compat.get(node.key)
+        return node.kind == "eval" and c is not None and c.level != INCOMPATIBLE
+
+    def refill(self):
+        tree = self.query_one(ResultsExplorer)
+        tree.fill(self.roots if self.show_all else explorer.prune(self.roots, self.visible)[0])
+
+    def on_checkbox_changed(self, event):
+        """Show incompatible: a view filter only (members, baseline, group, inspection unchanged)."""
+        self.show_all = event.value
+        self.refill()
+        self.mark()
 
     @work(thread=True, exclusive=True, group="facts")
     def load_facts(self, evals, all_runs, seq):
@@ -119,6 +144,7 @@ class ResultsScreen(Screen):
                         severity="warning")
         tree = self.query_one(ResultsExplorer)
         tree.compat = self.compat
+        self.refill()
         self.mark()
 
     def mark(self):
@@ -151,7 +177,8 @@ class ResultsScreen(Screen):
             self.query_one(ComparisonSummary).show("Reading evaluation files…")
             panel.show([], [], [])
             return
-        self.query_one(ComparisonSummary).show(summary(entries, compats, self.names))
+        box = self.query_one(ComparisonSummary)
+        box.show(summary(entries, compats, self.names, box.scrollable_content_region.width or 80))
         panel.show(*analysis(GROUP_NAMES[self.group], entries, compats, self.names))
 
     def show_inspection(self):
@@ -218,12 +245,16 @@ class ResultsScreen(Screen):
         view.focus()
 
     def action_back(self):
-        """esc: close the inspection (explorer, members, group and scroll as they were), else back to the Dashboard."""
+        """esc: close the inspection (explorer, members, group and scroll as they were); from another panel, to the
+        explorer; from the explorer, back to the Dashboard (an explorer search is cleared by the explorer first)."""
+        tree = self.query_one(ResultsExplorer)
         if self.inspecting is None:
-            self.dismiss()
+            if self.focused is tree:
+                self.dismiss()
+            else:
+                tree.focus()
             return
         self.inspecting = None
-        tree = self.query_one(ResultsExplorer)
         tree.disabled = False
         self.query_one(ContentSwitcher).current = "res-compare"
         self.show_right()
@@ -235,7 +266,8 @@ class ResultsScreen(Screen):
 
     def action_panel(self, step):
         panels = [self.query_one(InspectionView)] if self.inspecting is not None else [
-            self.query_one(ResultsExplorer), self.query_one(ComparisonSummary), self.query_one("#analysis-table")]
+            self.query_one(Checkbox), self.query_one(ResultsExplorer), self.query_one(ComparisonSummary),
+            self.query_one("#analysis-table")]
         here = next((p for p in panels if self.focused is p), None)
         i = panels.index(here) if here is not None else -step
         panels[(i + step) % len(panels)].focus()
@@ -251,6 +283,7 @@ class ResultsScreen(Screen):
                                                                 RIGHT_MIN)
         self.query_one("#res-left").styles.width = column_width(self.left_want, width, LEFT_SHARE, LEFT_MIN,
                                                                  LEFT_MAX_SHARE, RIGHT_MIN)
+        self.call_after_refresh(self.show_right)  # Summary names are cut to the panel's new width
 
     def action_resize(self, step):
         self.set_left_width(column_width(self.left_want, self.size.width, LEFT_SHARE, LEFT_MIN, LEFT_MAX_SHARE,

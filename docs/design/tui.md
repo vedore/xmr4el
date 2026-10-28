@@ -567,26 +567,28 @@ esc dashboard  s cancel run  c follow stage  f fullscreen  ? keys
 - Polling: events.jsonl from its last offset (`progress.EventTail`, shared with the scan's Activity) and
   resources.json only when its (inode, mtime, size) changed, every 1 s while active; state from the app's 5 s scan.
 
-### 5.12 Results (built 2026-10-28)
+### 5.12 Results (built 2026-10-28; V1 refinement 2026-10-28)
 
 ```text
                                         XMR4EL          Dashboard  New Experiment  Run Monitor  Results
-╭ Current Baseline ────────────╮╭ Comparison Summary ────────────────────────────────────────────────╮
-│ ncbi_disease · a64127ef B10  ││          Evaluation            Acc@1_all       Acc@1     Coverage  │
-╰──────────────────────────────╯│Base B10  ncbi_disease · …dev      89.17%      92.59%       96.30%  │
-╭ Explorer ────────────────────╮│1    B20  beta · dev         90.04% +0.87 93.46% +0.87 96.30% +0.00 │
-│▼ ncbi_disease  3             ││2    B10  ncbi_disease · … ⚠ 89.04% -0.13      92.46% 96.30% +0.00  │
-│  ▼ ncbi_disease · a64127ef   ││⚠ 2 …: in-vocabulary population not verified: … Matches: … Affects: │
-│    ⓘ B10 dev  baseline       │╰────────────────────────────────────────────────────────────────────╯
-│  ▼ beta                      │╭ Detailed Analysis ─────────────────────────────────────────────────╮
-│    ⓘ B20 dev                 ││Metric          Base B10       1 B20            2 B10               │
-│  ▼ ncbi_disease · 8528b624  ⚠││                ncbi_dise…     beta · dev       ncbi_dise…          │
-│    ⓘ B10 test · …  ✗         ││Acc@1_all       89.17%         90.04% +0.87     89.04% -0.13        │
-│    ⓘ B10 dev  ⚠              ││Acc@1           92.59%         93.46% +0.87     92.46%              │
-│▶ nlm_chem  1                 ││                                                                    │
-│                              ││                                                                    │
-╰──────────────────────────────╯╰─────────── 1 Performance  2 Ranking  3 Generalization  4 Efficiency ╯
-⏎ inspect  space add / remove  esc back  1-4 metric group  ? keys
+╭ Current Baseline ─────────────────╮╭ Comparison Summary ──────────────────────────────────────────────╮
+│ ncbi_disease · a64127ef · dev  B10││      Evaluation                   Acc@1_all     Acc@1        Cov… │
+╰───────────────────────────────────╯│Base B10 ncbi_disease · a64127ef…  89.17%        92.59%       96.… │
+ X Show incompatible                 │1    B10 ncbi_disease · 878b59c2…  89.17% +0.00  92.59% +0.00 96.… │
+╭ Explorer ─────────────────────────╮│2 ⚠  B10 ncbi_disease · 8528b624…  89.04% -0.13  92.46%  Δ —  96.… │
+│▼ ncbi_disease  3                  ││──────────────────────────────────────────────────────────────────│
+│├── ▼ ncbi_disease · SapBERT D2    ││⚠ 2 ncbi_disease · 8528b624 · dev: in-vocabulary population not   │
+││      Oct 28 · a64127ef           ││    verified: no population hash, and runs not all at one clean …  │
+││     └── ⓘ B10 dev  baseline      ││    Matches test file sha256, 757 loaded rows; no deltas for …     │
+││                                  │╰──────────────────────────────────────────────────────────────────╯
+│├── ▼ ncbi_disease · SapBERT D2    │╭ Detailed Analysis ───────────────────────────────────────────────╮
+││      Oct 28 · 878b59c2           ││Metric      Base B10         1 B10             2 B10               │
+││     └── ⓘ B10 dev                ││Acc@1_all   89.17%           89.17% +0.00      89.04% -0.13        │
+││                                  ││R@5         96.71%           96.71% +0.00      96.71% Δ —          │
+│└── ▼ ncbi_disease · SapBERT D2  ⚠ ││Δ vs baseline in percentage points … · Δ — not verifiably compar… │
+│       Oct 20 · 8528b624           │╰─── 1 Performance  2 Ranking  3 Generalization  4 Efficiency  5 Specs╯
+╰───────────────────────────────────╯
+⏎ inspect  space add / remove  / search  esc back  1-5 metric group  ? keys
 ```
 
 Baseline row (Summary) and member rows (Explorer) are on the accent; the explorer cursor row is `cursor-row`.
@@ -600,7 +602,13 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   Dashboard's: `<` `>`, border drag), Current Baseline (one line) over the Explorer; right: Comparison Summary
   (content height, at most half) over Detailed Analysis.
 - Explorer = the Dashboard's `Explorer` (same model, `explorer.build` Models branch: dataset > tree >
-  evaluation), as `ResultsExplorer`. Rows: `ⓘ` (click = inspect), beam chip, label, `baseline` / `⚠` Caution /
+  evaluation; same two-row trees, gap rows and `/` search, §7), as `ResultsExplorer`; trees open at once. Shows
+  only the baseline and evaluations assessed VERIFIED or CAUTION (per evaluation: a tree stays while one of its
+  evaluations does, a dataset while one of its trees does; not yet assessed = hidden). **Show incompatible** (a
+  one-row view filter above it, focus with `ctrl+tab`, `space` / click toggles, off in every new session) also
+  lists INCOMPATIBLE ones (dim, `✗`): inspectable, never addable; toggling keeps members, baseline, group,
+  inspection and expansion, and a hidden cursor row falls back to its nearest shown ancestor. A search or the
+  filter hiding a member never removes it. Rows: `ⓘ` (click = inspect), beam chip, label, `baseline` / `⚠` Caution /
   `✗` Incompatible (dim); a tree shows `⚠` when one of its evaluations is Caution. Keyboard cursor = `cursor-row`
   background; comparison member (and the baseline) = accent background, kept when the cursor leaves; the cursor
   on a member keeps the accent and adds `focus-outline` bars at both row edges. `space` / click on an evaluation
@@ -614,14 +622,22 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   preprocessing, one clean commit); a known difference (hashes or training files differ) withholds them as a note,
   not a Caution. Vocabulary, beam and search settings never block. Generalization deltas also need equal
   seen/unseen reference files (eval `train_path` sha256). No timing deltas at all (hardware not recorded).
-- Summary: baseline row on the accent, challengers in selection order; Acc@1_all (the comparison metric, fixed),
-  Acc@1, Coverage (rows / rows_total), each challenger with its delta; one line per Caution challenger with its
-  reason. No ranking or winner. Detailed Analysis: one group (`1`-`4`: Performance, Ranking, Generalization,
-  Efficiency) for every evaluation at once, one column each (scrolls horizontally when narrow); value and delta
-  (percentage points; MRR on its own scale); a missing metric is `N/A`, never 0; known-difference notes below.
+- Summary: baseline row on the accent, challengers in selection order (`2 ⚠` marks Caution by the role);
+  Acc@1_all (the comparison metric, fixed), Acc@1, Coverage (rows / rows_total) beside the name (name cut to the
+  panel, at most 30 cells; values and deltas padded into aligned columns; narrow: the delta wraps under its value).
+  Below a rule, per Caution challenger: its reason, then (muted) what matches and which deltas it affects. No
+  instructions, no ranking or winner; as tall as its content. Detailed Analysis: one group (`1`-`5`: Performance,
+  Ranking, Generalization, Efficiency, Specs) for every evaluation at once, one column each (scrolls horizontally
+  when narrow); value and delta (percentage points; MRR on its own scale). A delta the compatibility service
+  withholds is `Δ —` (muted; both values recorded), never 0 or blank; the value stays. A missing metric is `N/A`.
+  Notes: the group's note, known differences, one Δ legend; Caution reasons stay in the Summary. Efficiency =
+  measured times and candidates/query (no timing deltas). Specs = recorded `beam_size` (beam colour), `topk`,
+  `knn_beta`, `leaf_candidates`, `features`, no deltas, a value other than the baseline's in `spec-differs`.
 - Inspection (`enter`): the explorer's evaluation (member or not) replaces the right column, read-only: identity,
   beam, standing against the baseline (level, reason, matches, affects), every group. The explorer is disabled;
   `esc` restores members, group, cursor and expansion. Not a screen.
+- `esc`: inspection → closes it (focus on the explorer); Summary, Analysis or the filter → the explorer; an
+  explorer search → cleared; the explorer → the Dashboard as it was left. Focus moves only: nothing reloads.
 - Data: metrics from the scan; `comparison.read_facts` (provenance / git / spec / model_config of the run and its
   tree's training run) for every evaluation in a worker, rerun only when the scan's runs change. A FAILED run's
   written metrics stay usable.
@@ -647,12 +663,13 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
 | Everywhere | `ctrl+c` (also `ctrl+q`) twice within 3 s | Quit; the first press only warns. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
 | Dashboard | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[` where the terminal sends ctrl+tab as tab) | Next / previous panel: Explorer, Description, Active runs. |
-| Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. |
+| Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. Shared widget (Dashboard, Results): a tree is two rows, `name · descriptor` (features and depth of its training run's model_config, nothing invented) then `Oct 28 · a64127ef` (training date, short tree id: 8 characters, more where two ids share them; `explorer.short_ids`); a gap row above every later tree / dataset / group, none between evaluations; a click anywhere on an item's rows selects it. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
 | Explorer | `enter` | Describe the item and focus Description. |
+| Explorer (Dashboard, Results) | `/`, then text, `backspace`, `enter`, `esc` | Search: every word in a node's name, descriptor, date, id (short or full), dataset, run id, split or features, or in an ancestor's; matches keep their subtree, their ancestors open while the search lasts (the user's expansion returns after). `enter` keeps the query (shown in the border), `esc` clears it. |
 | Dashboard, Description | `r`, `left` / `right` / `esc` | Results with the evaluation as the baseline (a tree: its only evaluation with metrics; several: the tree opens to choose) / Run monitor of its run (tree: training run; evaluation: its split's stage selected) / back to Explorer. |
 | Results | `up` `down`, `left` / `right`, `space`, `enter` | Explorer: move, collapse / expand, add or remove the evaluation (a tree: expand), inspect. Mouse: click an evaluation adds / removes, its `ⓘ` inspects, a tree row expands. |
-| Results | `1`-`4`, `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`), `<` / `>`, `esc` | Metric group; next / previous panel (Explorer, Summary, Analysis); narrower / wider left column; close inspection, then back to the Dashboard. |
+| Results | `1`-`5`, `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`), `<` / `>`, `esc` | Metric group; next / previous panel (Show incompatible, Explorer, Summary, Analysis); narrower / wider left column; close inspection, else to the Explorer, else back to the Dashboard. |
 | Active runs | `up` `down`, `enter` | Move, open the run in the Run monitor. |
 | Run monitor | `ctrl+tab` / `ctrl+shift+tab` (or `]` / `[`) | Next / previous panel: Run overview (its Cancel Run button when usable), Pipeline, Resources, Live logs. |
 | Run monitor | `up` `down`, `tab` `shift+tab`, `left` / `right`, `enter` (Pipeline) | Move between stages / collapse or parent, expand / toggle a stage's parts. The selected row's resources show in Resources. |

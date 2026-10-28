@@ -1,6 +1,6 @@
 """Results comparison (tui.md §5.12, §11): what is known about each saved evaluation, how a challenger relates to the
-baseline (VERIFIED / CAUTION / INCOMPATIBLE, with the reason), and the metric rows of the four analysis groups with
-the deltas the evidence allows. Stdlib only, no UI.
+baseline (VERIFIED / CAUTION / INCOMPATIBLE, with the reason), and the rows of the five analysis groups with the
+deltas the evidence allows. Stdlib only, no UI.
 
 Reads only small run files (provenance, git, spec, model_config) of the evaluation's run and of its tree's training
 run; never a corpus, never a pickle, never re-evaluates. Identity is the explorer key ("eval", run id, split).
@@ -15,6 +15,7 @@ from xmr4el_tui.runs import dig, training_run
 VERIFIED, CAUTION, INCOMPATIBLE = "VERIFIED", "CAUTION", "INCOMPATIBLE"
 MAX_CHALLENGERS = 3
 NA = "N/A"
+NO_DELTA = "Δ —"  # a delta the row has, withheld because the populations cannot be shown equal
 STRING_GROUPS = ("all", "seen, 1 label", "seen, >1 label", "unseen string")
 STRING_COLS = (("tree", "model"), ("dict", "dictionary"), ("either", "either"), ("routed", "routed"))
 SUBSET = "acc@1, MRR, R@k, R@cand, hybrid"  # in-vocabulary metrics: deltas need equal populations
@@ -167,12 +168,13 @@ GROUPS = {
                                                        *((c, n, "pct", "strings") for c, n in STRING_COLS)))),
     "Efficiency": (("Prediction time", _m("predict_seconds"), "s", None), ("ms/query", _m("ms_per_query"), "ms", None),
                    ("Eval time", _m("eval_seconds"), "s", None),
-                   ("Candidates/query", _m("candidates_per_query"), "count", None),
-                   *((k, _search(k), "text", None) for k in ("beam_size", "topk", "knn_beta", "leaf_candidates")),
-                   ("Features", _m("features"), "text", None)),
+                   ("Candidates/query", _m("candidates_per_query"), "count", None)),
+    "Specs": (*((k, _search(k), "text", None) for k in ("beam_size", "topk", "knn_beta", "leaf_candidates")),
+              ("features", _m("features"), "text", None)),  # as recorded; no defaults filled in
 }
 GROUP_NOTES = {"Efficiency": "No timing deltas: equal hardware and load are not recorded.",
-               "Generalization": "Seen/unseen groups are mention strings of the evaluation's train_path."}
+               "Generalization": "Seen/unseen groups are mention strings of the evaluation's train_path.",
+               "Specs": "As recorded in each metrics file; highlighted where it differs from Base."}
 
 
 def allowed(flag, c):
@@ -199,14 +201,18 @@ def delta_text(x, y, kind):
 
 def rows(group, entries, compats):
     """[(label, [(value, delta or None) per entry])]; entries[0] is the baseline (no delta). A delta is given only
-    where the row's Compat flag allows it; a missing metric is N/A, never 0."""
+    where the row's Compat flag allows it, else NO_DELTA (both values recorded) or None (a row without deltas); a
+    missing metric is N/A, never 0."""
     out = []
     for label, get, kind, flag in GROUPS[group]:
         base = get(entries[0].metrics or {})
         cells = []
         for i, (f, c) in enumerate(zip(entries, compats)):
             x = get(f.metrics or {})
-            cells.append((value_text(x, kind), delta_text(base, x, kind) if i and allowed(flag, c) else None))
+            d = None
+            if i and flag is not None:
+                d = delta_text(base, x, kind) if allowed(flag, c) else NO_DELTA if number(base) and number(x) else None
+            cells.append((value_text(x, kind), d))
         if group != "Generalization" or any(v != NA for v, _ in cells):  # old runs record no breakdown
             out.append((label, cells))
     return out

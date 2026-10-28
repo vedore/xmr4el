@@ -67,6 +67,18 @@ sha256 + rows_total; population hash or §11 derivation for subset deltas; reuse
 §5.12, §7; tui_architecture.md. Full suite 220 pass, ruff clean; renders checked at 140x40 and 80x24 on real
 outputs/runs. NEXT: user reviews (`python -m xmr4el_tui`, `r` on an evaluation); the user has changes to Results planned for the next session.
 
+**2026-10-28 Results V1 refinement + shared Explorer (user's pasted prompt; committed on `tui`, not pushed):**
+shared `Explorer` widget (Dashboard and Results): trees on two rows (`name · SapBERT D2` from the training run's
+model_config `features`/`depth`, read by the scan, `model_config.json` in the cache key; then `Oct 28 · <short id>`,
+`explorer.short_ids` grows past 8 chars on collisions), gap rows above later trees/datasets/groups, whole item is
+the click target, `/` search (cross-level words, temporary opens, esc clears first). Results: Summary compact
+(metrics by the name, aligned, `2 ⚠` role, rule + Caution notes, no instructions); `Δ —` for withheld deltas;
+Specs = 5th group (search keys + features, out of Efficiency); esc: right panels/filter → Explorer → Dashboard;
+Show incompatible filter (off per session; VERIFIED/CAUTION shown, INCOMPATIBLE/unknown sha hidden, per evaluation).
+Tokens `delta-unavailable`, `spec-differs`, `divider`. Docs tui.md §5.12, §7; tui_architecture.md. tests/tui 99
+(new `test_explorer.py`), full suite 229, ruff clean; renders 140x40 / 80x24 on real outputs/runs checked.
+Δ legend shortened, one blank row above and below it. NEXT: push `tui` only on the user's OK.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 
