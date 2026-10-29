@@ -154,7 +154,7 @@ LogPanel {
 }
 
 /* Cancel Run confirmation (screens/stop_dialog.py) */
-StopDialog {
+StopDialog, StopBatchDialog, QuitDialog {
     align: center middle;
 }
 
@@ -672,8 +672,15 @@ ModelBuilderScreen {
 }
 
 #rv-launch {
-    width: 16;
-    margin-left: 1;
+    width: 1fr;
+    margin: 0 1;
+}
+
+#rv-reason {
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
 
 #rv-info, #rv-state {
@@ -720,6 +727,51 @@ ModelBuilderScreen {
 }
 
 #rv-left:focus-within, #rv-details:focus-within {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+/* Batch monitor (screens/batch_monitor.py) and the batch list */
+#bm, #bm-left, #bm-right {
+    height: 1fr;
+}
+
+#bm-left {
+    width: 35%;
+    min-width: 30;
+}
+
+#bm-right {
+    width: 1fr;
+}
+
+#bm-overview, #bm-detail {
+    height: auto;
+    max-height: 50%;
+    padding: 0 1;
+}
+
+#bm-queue, #bm-logs, #bm-list {
+    height: 1fr;
+}
+
+#bm-queue {
+    padding: 0;
+}
+
+#bm-stop {
+    margin: 0 1;
+}
+
+#bm-overview, #bm-detail, #bm-queue, #bm-logs, #bm-list {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+}
+
+#bm-overview:focus-within, #bm-detail:focus-within, #bm-queue:focus-within, #bm-logs:focus-within,
+#bm-list:focus-within {
     border: round $border;
     border-title-color: $accent;
     border-title-style: bold;

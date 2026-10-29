@@ -11,10 +11,11 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.worker import get_current_worker
 
-from xmr4el_tui import explorer, process, theme
+from xmr4el_tui import batch, explorer, process, theme
 from xmr4el_tui.draft import ExperimentDraft
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.runs import state_word
+from xmr4el_tui.screens.batch_monitor import BatchMonitorScreen
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
 from xmr4el_tui.screens.dataset_setup import DatasetSetupScreen
 from xmr4el_tui.screens.model_builder import ModelBuilderScreen
@@ -22,6 +23,7 @@ from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.screens.notification_center import NotificationCenter
 from xmr4el_tui.screens.results_screen import ResultsScreen
 from xmr4el_tui.screens.review_batch import ReviewBatchScreen
+from xmr4el_tui.screens.stop_dialog import QuitDialog
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
 from xmr4el_tui.services.notifications import Notice, Notifications, incarnation, subject
 from xmr4el_tui.widgets.context_footer import ContextFooter
@@ -80,6 +82,7 @@ class XMR4ELApp(App):
         self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
         self.scan_wanted = self.scan_announce = False  # requests the running scan picks up
         self.launches = process.Launches(root)
+        self.coordinators = []  # Popen of the batch coordinators this TUI started: reaped here, never owned
 
     def get_theme_variable_defaults(self):
         """The theme tokens ($xmr-...) exist before THEME is applied (app.tcss is parsed first)."""
@@ -106,6 +109,7 @@ class XMR4ELApp(App):
                 while self.scan_wanted and not worker.is_cancelled:
                     self.scan_wanted, announce, self.scan_announce = False, self.scan_announce, False
                     snapshot = self.repo.snapshot(fresh=announce)
+                    self.coordinators = [c for c in self.coordinators if c.poll() is None]
                     reaped = self.launches.reap()  # reads status / console files: here, not on the UI thread
                     if not worker.is_cancelled:  # cancelled on quit: publish nothing
                         self.post_message(Scanned(snapshot, announce, reaped))
@@ -127,7 +131,8 @@ class XMR4ELApp(App):
                               subject(run, snapshot.runs) if run else run_id, what, at,
                               ("monitor", run_id, inc) if run else None))
         self.snapshot = snapshot
-        self.toast(self.notices.add(new) + self.notices.observe(snapshot.runs, at, snapshot.problem))
+        self.toast(self.notices.add(new) + self.notices.observe(snapshot.runs, at, snapshot.problem)
+                   + self.notices.observe_batches(snapshot.batches, at))
         if announce:
             self.say(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found
                      else "Rescanned: outputs/runs/ not found")
@@ -168,6 +173,13 @@ class XMR4ELApp(App):
         directory name); else nothing opens and the footer says so."""
         kind, ref, inc = notice.target or (None, None, None)
         snap = self.snapshot
+        if kind == "batch":
+            info = next((i for i in snap.batches if i.id == ref), None)
+            if info is None:
+                self.say("That batch is no longer found.", "warning")
+            elif not (isinstance(self.screen, BatchMonitorScreen) and self.screen.batch_id == ref):
+                self.push_screen(BatchMonitorScreen(ref, info))
+            return
         if kind == "results":
             node = explorer.index(explorer.build(snap.runs, snap.trees)).get(ref, (None,))[0]
             ok = node is not None and node.kind == "eval" and bool(node.ref[1].metrics) \
@@ -194,6 +206,43 @@ class XMR4ELApp(App):
             self.pop_screen()
         if level < len(screen.crumbs) - 1:
             screen.back_to_crumb(level)
+
+    def go_dashboard(self):
+        """Esc at the top of a monitor: the screens above the Dashboard close without asking (`leave_guard` is for
+        leaving an editor, not for this). The New Experiment screens among them are first written to the draft
+        (`remember_workflow`), so `c` / `n` on the Dashboard rebuilds them: nothing applied, nothing discarded."""
+        if self.remember_workflow():
+            self.call_after_refresh(self.say, "Experiment kept: c resumes it, unapplied editor changes included.")
+        while not isinstance(self.screen, DashboardScreen):
+            self.pop_screen()
+
+    def remember_workflow(self):
+        """`draft.resume`: the New Experiment screens of the stack, bottom first, each with what its constructor needs
+        (Dataset Setup's Fix Issue, the Model Builder's origin and open editor). The draft stays the only state."""
+        steps = []
+        for s in self.screen_stack:
+            if isinstance(s, DatasetSetupScreen):
+                steps.append(("setup", {"fix": s.fix}))
+            elif isinstance(s, ModelBuilderScreen):
+                steps.append(("builder", {"from_review": s.from_review, "restore": s.saved_editor()}))
+            elif isinstance(s, ReviewBatchScreen):
+                steps.append(("review", {}))
+        if steps:
+            self.draft.resume = steps
+        return bool(steps)
+
+    def resumable(self):
+        d = self.draft
+        return bool(d.resume or d.confirmed or d.trees)
+
+    def action_resume_experiment(self):
+        """Rebuild the recorded New Experiment stack over the Dashboard (else Dataset Setup, as `n` always did)."""
+        if isinstance(self.screen, ModalScreen):
+            return
+        steps, self.draft.resume = self.draft.resume or [("setup", {"fix": None})], None
+        for kind, kw in steps:
+            self.push_screen({"setup": DatasetSetupScreen, "builder": ModelBuilderScreen,
+                              "review": ReviewBatchScreen}[kind](**kw))
 
     def screen_changed(self, screen):
         """Feedback and a pending confirmation belong to the screen they were shown on: navigating drops them (the
@@ -242,7 +291,19 @@ class XMR4ELApp(App):
         return "Quit XMR4EL?" + (f" {active} active run{'s' * (active > 1)} will keep running." if active else "")
 
     async def action_quit(self):
-        """ctrl+c (or ctrl+q) asks in the footer; a second ctrl+c quits, esc cancels. No timer."""
+        """ctrl+c (or ctrl+q, the palette) asks in the footer; a second ctrl+c quits, esc cancels. No timer. While a
+        batch is active the three-choice dialog replaces that question (read from the files, not the last scan)."""
+        if isinstance(self.screen, QuitDialog):  # asked again over the dialog: the safe answer
+            self.screen.dismiss("stay")
+            return
+        active = [i for i in batch.scan(self.root) if i.active]
+        if active:
+            if isinstance(self.screen, ModalScreen):
+                self.screen.dismiss()
+            self.confirming = self.asking = None
+            self.refresh_bars()
+            self.push_screen(QuitDialog(active), self.quit_answered)
+            return
         if self.confirming is self.screen and self.asking is None:
             self.exit()
             return
@@ -250,6 +311,23 @@ class XMR4ELApp(App):
             self.screen.dismiss()
         self.confirming, self.asking = self.screen, None
         self.refresh_bars()
+
+    def quit_answered(self, answer):
+        if answer == "leave":
+            self.exit()
+        elif answer == "stop":
+            self.stop_and_exit()
+
+    @work(thread=True, group="quit-stop")
+    def stop_and_exit(self):
+        """Request the stop of every active batch; exit only when each request is accepted (the coordinator then
+        cancels the running tree and the queue on its own)."""
+        results = [(i.name, batch.request_stop(self.root, i.id)) for i in batch.scan(self.root) if i.active]
+        failed = [f"{name}: {what}" for name, what in results if not what.startswith("stop requested")]
+        if failed:
+            self.call_from_thread(self.say, "Not exiting. " + "; ".join(failed), "error")
+        else:
+            self.call_from_thread(self.exit)
 
     async def on_event(self, event):
         """A footer confirmation is modal: until it is answered only its key, esc and ctrl+c / ctrl+q reach the
@@ -294,9 +372,13 @@ class XMR4ELApp(App):
 
     def action_new_experiment(self):
         """New Experiment (Dataset Setup) over the current screen; already open: back to it. Not over a dialog."""
-        open_ = next((s for s in self.screen_stack if isinstance(s, DatasetSetupScreen)), None)
+        if self.draft.resume and not isinstance(self.screen, ModalScreen):
+            self.action_resume_experiment()
+            return
+        open_ = next((s for s in reversed(self.screen_stack)
+                      if isinstance(s, (DatasetSetupScreen, ModelBuilderScreen, ReviewBatchScreen))), None)
         if open_ is not None:
-            self.go_to(open_, 0)
+            self.go_to(open_, len(open_.crumbs) - 1)  # the top-most one, as it was left (no crumb change)
         elif not isinstance(self.screen, ModalScreen):
             self.push_screen(DatasetSetupScreen())
 

@@ -74,9 +74,10 @@ class ModelBuilderScreen(Screen):
                 Binding("up", "field_step(-1)", show=False), Binding("down", "field_step(1)", show=False),
                 *(Binding(str(i), f"tree({i - 1})", f"tree {i}", show=False) for i in range(1, 10))]
 
-    def __init__(self, focus=None):
+    def __init__(self, focus=None, from_review=False, restore=None):
         super().__init__()
-        self.from_review = focus is not None  # opened from Review Batch: esc from the grid goes straight back to it
+        self.restore = restore   # saved_editor() of an editor closed with the screen: reopened on mount
+        self.from_review = from_review or focus is not None  # opened from Review Batch: esc from the grid goes straight back to it
         self.focus_issue = focus  # review.Issue to open on mount (Review Batch's Fix Issue / open tree), then None
         self.focus_path = None   # configuration path the preview emphasises while the editor was opened for it
         self.editing = None
@@ -124,6 +125,28 @@ class ModelBuilderScreen(Screen):
         self.query_one(PipelineGrid).focus()
         if self.focus_issue is not None:
             self.call_later(self.open_focus)
+        elif self.restore is not None:
+            self.call_later(self.restore_editor)
+
+    def saved_editor(self):
+        """The open editor as plain data (slot, component, working keys, text boxes that do not parse), else None."""
+        ed = self.editing
+        if ed is None:
+            return None
+        texts = {w.id: w.value for i in ed.errors for w in self.query(f"#mbf-{i}, #mbf-{i}-0, #mbf-{i}-1")
+                 if isinstance(w, Input)}
+        return {"comp": ed.comp.id, "keys": copy.deepcopy(ed.draft), "texts": texts}
+
+    async def restore_editor(self):
+        """Reopen the saved editor on the same slot with the unapplied values; unparsable text is typed back in."""
+        saved, self.restore = self.restore, None
+        slot = components.slot(self.draft.slot)
+        await self.open_editor(next(c for c in slot.components if c.id == saved["comp"]))
+        self.editing.draft = copy.deepcopy(saved["keys"])
+        await self.build_fields()
+        for wid, text in saved["texts"].items():
+            self.query_one(f"#{wid}", Input).value = text  # the field's own handler parses it again
+        self.fill_preview(scroll=True)
 
     def on_screen_resume(self):
         """Shown again (Review Batch above it was closed): the draft may have changed there (order, names, trees)."""

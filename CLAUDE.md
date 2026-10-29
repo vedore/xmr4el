@@ -60,3 +60,19 @@ implemented-behavior table, synthetic checks and pipeline observations. Do not
 duplicate them here. Internal nodes set `fused_scores` from the matcher's cluster scores in
 `MLModel.train`, and `prepare_layer` consumes them; score fusion for that step
 (`fused_predict`) is future work (`docs/future_work.md` item 5).
+
+## Development workflow
+
+Claude Code uses `/model opusplan`: Opus for planning and Sonnet for execution. Use this configuration without unnecessary manual model switching.
+
+- For complex or cross-cutting changes, use Plan Mode to resolve architecture, tradeoffs, integration risks, and important edge cases before implementation.
+- For small, well-scoped changes, implement directly without unnecessary planning overhead.
+- Inspect only the relevant code, dependencies, and documentation. Do not repeat completed architecture audits.
+- Reuse established patterns and extend existing functionality. Avoid speculative refactoring, duplicate abstractions, and unrelated changes.
+- Keep plans concise and actionable: affected files, implementation approach, risks, and focused tests.
+- During execution, follow the approved plan. Reconsider architecture only when new evidence reveals a material issue.
+- Prefer focused tests and relevant regression checks. Expand test coverage when shared infrastructure changes or failures indicate wider impact.
+- Preserve scientific correctness, reproducibility, configuration semantics, and existing TUI behavior. Never sacrifice correctness to reduce model usage.
+- Report changes, tests performed, failures, and unresolved limitations accurately.
+
+`AGENTS.md` defines repository conventions. `STATUS.md` owns current progress and priorities. Do not duplicate their contents here.

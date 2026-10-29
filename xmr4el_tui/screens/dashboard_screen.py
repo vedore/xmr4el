@@ -19,6 +19,7 @@ from xmr4el_tui import explorer, fmt
 from xmr4el_tui.runs import elapsed, state_word
 from xmr4el_tui.screens.dashboard_details import (DESCRIPTION_TITLE, KIND, VIEW_LOGS, eval_text, group_text,
                                                    run_text, state_text, tree_text)
+from xmr4el_tui.screens.batch_monitor import BatchesScreen, BatchMonitorScreen, duration, word
 from xmr4el_tui.screens.log_screen import LogScreen
 from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.screens.results_screen import ResultsScreen
@@ -60,7 +61,13 @@ class DashboardScreen(Screen):
                 Binding("less_than_sign", f"resize_explorer({-EXPLORER_STEP})", "narrower explorer", show=False),
                 Binding("greater_than_sign", f"resize_explorer({EXPLORER_STEP})", "wider explorer", show=False),
                 Binding("ctrl+r", "rescan", "rescan", show=False),
-                Binding("r", "results", "results"), Binding("n", "app.new_experiment", "new experiment")]
+                Binding("r", "results", "results"), Binding("b", "batches", "batches"),
+                Binding("n", "app.new_experiment", "new experiment"),
+                Binding("c", "app.resume_experiment", "resume experiment")]
+
+    def check_action(self, action, parameters):
+        """Resume Experiment is offered while an unfinished draft exists."""
+        return self.app.resumable() if action == "app.resume_experiment" else True
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
@@ -125,8 +132,13 @@ class DashboardScreen(Screen):
         table = self.query_one(ActiveRuns)
         keep = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value if table.row_count else None
         active = self.active_runs()
+        live = [i for i in self.app.snapshot.batches if i.active]
         table.clear()
         table.forget_lines()
+        for i in live:  # a running batch: one row above its trees' own runs
+            cur = i.current
+            table.add_row(i.name, "Batch", f"{len(i.status['trees'])} trees", word(i.state), duration(i),
+                          cur["name"] if cur else fmt.DASH, fmt.stamp(None), fmt.DASH, i.id, key=f"batch:{i.id}")
         for r in active:
             activity = self.app.snapshot.active.get(r.id, Activity())
             stage, device = activity.stage, activity.device
@@ -135,7 +147,7 @@ class DashboardScreen(Screen):
             table.add_row(r.name, KIND[r.kind], model or fmt.DASH, state_text(state_word(r)),
                           fmt.duration(elapsed(r, datetime.now())), stage or fmt.DASH, fmt.stamp(r.started),
                           device or fmt.DASH, r.id, key=r.id)
-        self.active_ids = [r.id for r in active]
+        self.active_ids = [f"batch:{i.id}" for i in live] + [r.id for r in active]
         if keep in self.active_ids:
             table.move_cursor(row=self.active_ids.index(keep))
 
@@ -204,7 +216,12 @@ class DashboardScreen(Screen):
 
     def on_data_table_row_selected(self, event):
         if event.data_table.id == "active-runs":
-            self.open_run(event.row_key.value)
+            key = event.row_key.value
+            if key.startswith("batch:"):
+                info = next((i for i in self.app.snapshot.batches if i.id == key[6:]), None)
+                self.app.push_screen(BatchMonitorScreen(key[6:], info)) if info else None
+            else:
+                self.open_run(key)
 
     def action_describe(self):
         self.show()
@@ -269,6 +286,9 @@ class DashboardScreen(Screen):
             self.open_run(node.ref.trained_by.id)
         else:
             self.app.say("No recorded training run for this tree (trained outside run_experiment, or not synced).")
+
+    def action_batches(self):
+        self.app.push_screen(BatchesScreen())
 
     def action_rescan(self):
         self.app.rescan(announce=True)

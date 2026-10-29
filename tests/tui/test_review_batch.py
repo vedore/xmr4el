@@ -268,7 +268,7 @@ def test_opens_from_the_builder_with_header_queue_and_two_views_only(tmp_path):
         assert "Ready" in queue[1] or "Caution" in queue[1]
         assert [v for v, _ in VIEWS] == ["overview", "differences"]
         assert not any("check" in str(w.id or "").lower() for w in screen.query("*"))
-        assert screen.query_one("#rv-launch").disabled and "Step 5" in str(screen.query_one("#rv-state").render())
+        assert not screen.query_one("#rv-launch").disabled and "Ready" in str(screen.query_one("#rv-state").render())
         left, right = screen.query_one("#rv-left").region.width, screen.query_one("#rv-details").region.width
         assert abs(left / (left + right) - 0.30) < 0.04
         await pilot.press("escape")
@@ -300,10 +300,10 @@ def test_overview_shows_applied_values_by_stage_and_differences_are_a_second_vie
         await pilot.press("1")
         assert screen.view == "overview"
         screen.query_one(Queue).focus()
-        await pilot.press("tab")  # Tab cycles the queue's trees (wrapping) and never leaves it
-        assert app.focused is screen.query_one(Queue) and screen.selected == app.draft.trees[0].id
+        await pilot.press("tab")  # Tab reaches Launch Batch (the queue's local region), shift+tab comes back
+        assert app.focused is screen.query_one("#rv-launch")
         await pilot.press("shift+tab")
-        assert screen.selected == app.draft.trees[1].id
+        assert app.focused is screen.query_one(Queue)
         assert not any(screen.query_one(b).can_focus for b in ("#rv-grab", "#rv-details-open", "#rv-edit"))
         await pilot.press("enter")  # enter goes to the details, where Tab cycles tabs and list only
         assert app.focused is screen.query_one(DetailsList)
@@ -386,6 +386,7 @@ def test_invalid_tree_shows_issues_in_the_queue_and_launch_is_refused(tmp_path):
         queue = [str(o.prompt) for o in screen.query_one(Queue).options]
         assert "Invalid · 1 issue" in queue[1] and "Ready" in queue[0]
         assert "Not ready · 1 blocking issue" in str(screen.query_one("#rv-state").render())
+        assert "1 configuration issue must be fixed." in str(screen.query_one("#rv-reason").render())
         await pilot.press("l")
         assert "Cannot launch an invalid batch" in footer(app)
         await pilot.press("down")

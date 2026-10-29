@@ -4,9 +4,11 @@ Execution Queue 30 % | Review Details 70 % (Overview, Differences).
 Read-only over the app's draft (`app.draft`): the one thing edited here is the batch name, and the one thing changed
 is the execution order (`draft.move`, the same tree objects in a new order). Validation runs on its own when the
 screen opens and whenever it is shown again (`review.validate` pieces: trees at once, the shared dataset in a
-worker); moving the cursor never re-reads a file. Fix Issue opens the existing editor (Model Builder at the slot and
+worker); moving the cursor never re-reads a file. Launch Batch hands a copy of the draft (`review.plan`) to `batch.launch` in a
+worker: hashing and the coordinator start never block the UI, a second activation is refused while one runs, and a
+failure leaves the draft as it is. Fix Issue opens the existing editor (Model Builder at the slot and
 field, Dataset Setup at the mapping) on top of this screen, which stays in the stack, so its selection, view, scroll
-and focus are where the user left them. Launch Batch stays disabled: the coordinator is Step 5.
+and focus are where the user left them.
 """
 from pathlib import Path
 
@@ -21,8 +23,9 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Static
 from textual.widgets.option_list import Option
 
-from xmr4el_tui import components, review, theme
+from xmr4el_tui import batch, components, review, theme
 from xmr4el_tui.screens import review_details
+from xmr4el_tui.screens.batch_monitor import BatchMonitorScreen
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.description import Rows
 from xmr4el_tui.widgets.top_bar import TopBar
@@ -35,6 +38,14 @@ class DatasetChecked(Message):
     def __init__(self, selection, issues):
         super().__init__()
         self.selection, self.issues = selection, issues
+
+
+class Launched(Message):
+    """The launch worker's answer: the started batch (`bdir`, `child`) or why none started (`error`)."""
+
+    def __init__(self, bdir=None, child=None, error=None):
+        super().__init__()
+        self.bdir, self.child, self.error = bdir, child, error
 
 
 class Queue(Rows):
@@ -103,7 +114,7 @@ class ReviewBatchScreen(Screen):
     between the panels; esc goes back one, from the queue to the Model Builder."""
     crumbs = ("Review Batch",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("f2", "rename_batch", "rename batch"),
-                Binding("l", "launch", "launch batch", show=False),
+                Binding("l", "launch", "launch"),
                 Binding("alt+left", "move(-1)", show=False),
                 Binding("alt+right", "move(1)", show=False),
                 Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False)]
@@ -119,6 +130,7 @@ class ReviewBatchScreen(Screen):
         self.renaming = None         # focus to return to after renaming the batch; None: not renaming
         self.first = True
         self.last_index = 0
+        self.launching = False   # a launch is preparing / starting (no second one)
         self.grab = None         # (tree id, order of ids before it was picked up) while reordering
 
     def compose(self) -> ComposeResult:
@@ -128,7 +140,6 @@ class ReviewBatchScreen(Screen):
                 with Horizontal(id="rv-name-row"):
                     yield Static(id="rv-name")
                     yield Input(id="rv-rename", placeholder="Batch name", compact=True)
-                    yield Button("Launch Batch", id="rv-launch", compact=True, disabled=True)
                 yield Static(id="rv-info")
                 yield Static(id="rv-state")
             with Horizontal(id="rv-body"):
@@ -138,6 +149,8 @@ class ReviewBatchScreen(Screen):
                         yield Button("Reorder", id="rv-grab", compact=True)
                         yield Button("Details", id="rv-details-open", compact=True)
                         yield Button("Edit", id="rv-edit", compact=True)
+                    yield Static(id="rv-reason")
+                    yield Button("Launch Batch", id="rv-launch", variant="primary", disabled=True)
                 with Vertical(id="rv-details"):
                     yield ViewTabs(id="rv-tabs")
                     yield DetailsList(id="rv-list")
@@ -149,7 +162,6 @@ class ReviewBatchScreen(Screen):
         self.query_one("#rv-rename").display = False
         for b in ("#rv-grab", "#rv-details-open", "#rv-edit"):
             self.query_one(b).can_focus = False  # mouse only
-        self.query_one("#rv-launch").tooltip = "Execution is connected in Step 5"
         self.selected = self.draft.tree if any(t.id == self.draft.tree for t in self.draft.trees) else \
             self.draft.trees[0].id
         self.revalidate()
@@ -223,7 +235,9 @@ class ReviewBatchScreen(Screen):
             f"{data} · {n} tree{'s' * (n != 1)} · On tree failure: continue")
         found = self.every()
         errors, cautions = len(review.blocking(found)), len(found) - len(review.blocking(found))
-        if self.dataset_issues is None:
+        if self.launching:
+            word, style = "Preparing the batch: hashing inputs, starting the coordinator…", "text-muted"
+        elif self.dataset_issues is None:
             word, style = "Validating the shared dataset…", "text-muted"
         elif errors:
             word, style = f"Not ready · {errors} blocking issue{'s' * (errors != 1)}", "error"
@@ -231,8 +245,25 @@ class ReviewBatchScreen(Screen):
             word, style = f"Ready · {cautions} caution{'s' * (cautions != 1)}", "warning"
         else:
             word, style = "Ready", "success"
-        self.query_one("#rv-state", Static).update(Text.assemble(
-            (word, theme.style(style, "bold")), ("  ·  Launch Batch is connected in Step 5", theme.style("text-muted"))))
+        self.query_one("#rv-state", Static).update(Text.assemble((word, theme.style(style, "bold"))))
+        reason = self.launch_blocker()
+        self.query_one("#rv-launch", Button).disabled = reason is not None
+        ok = reason is None
+        self.query_one("#rv-reason", Static).update(Text(
+            "Ready to launch." if ok else reason, style=theme.style("success" if ok else "warning")))
+
+    def launch_blocker(self):
+        """Why Launch Batch is unavailable now (None: it is available). Cautions never block."""
+        errors = len(review.blocking(self.every()))
+        if self.launching:
+            return "Preparing batch execution…"
+        if self.dataset_issues is None:
+            return "Validating the shared dataset…"
+        if self.grab is not None:
+            return "Drop the moved tree first."
+        if errors:
+            return f"{errors} configuration issue{'s' * (errors != 1)} must be fixed."
+        return None
 
     def tree_status(self, tree):
         found = self.tree_issues.get(tree.id, [])
@@ -377,7 +408,7 @@ class ReviewBatchScreen(Screen):
             self.app.say(f"{tree.name} is already {'first' if step < 0 else 'last'} in the queue.", screen=self)
 
     def on_button_pressed(self, event):
-        {"rv-grab": self.action_grab, "rv-details-open": self.action_focus_details,
+        {"rv-launch": self.action_launch, "rv-grab": self.action_grab, "rv-details-open": self.action_focus_details,
          "rv-edit": self.action_edit}.get(event.button.id, lambda: None)()
 
     def open_tree(self, tree_id):
@@ -394,7 +425,15 @@ class ReviewBatchScreen(Screen):
             self.app.open_builder(issue)
 
     def action_launch(self):
-        """Not connected (Step 5): said, never started; an invalid batch is refused first."""
+        """Launch Batch: refused while validating, preparing or invalid; otherwise a copy of the draft goes to the
+        launcher in a worker. Tree and batch-name issues are rechecked now, the dataset in the worker."""
+        if self.launching:
+            self.app.say("A launch is already in progress.", "warning", self)
+            return
+        if self.grab is not None:
+            self.app.say(self.launch_blocker(), "warning", self)
+            return
+        self.revalidate_trees()
         found = review.blocking(self.every())
         if self.dataset_issues is None:
             self.app.say("Still validating the shared dataset.", "warning", self)
@@ -402,7 +441,37 @@ class ReviewBatchScreen(Screen):
             self.app.say(f"Cannot launch an invalid batch: {len(found)} blocking issue{'s' * (len(found) != 1)}.",
                          "error", self)
         else:
-            self.app.say("Launch Batch is not connected yet: execution arrives in Step 5.", "warning", self)
+            self.launching = True
+            self.fill_head()
+            self.start_batch(batch.with_id(review.plan(self.draft), batch.new_id(self.draft.id)))
+
+    def revalidate_trees(self):
+        self.tree_issues, self.batch_issues = review.tree_issues(self.draft), review.batch_issues(self.draft)
+
+    @work(thread=True, group="rv-launch")
+    def start_batch(self, plan_):
+        issues = review.blocking(review.dataset_issues(self.app.root, plan_.dataset))  # the files as they are now
+        if issues:
+            self.post_message(Launched(error=f"The shared dataset changed: {issues[0].message}"))
+            return
+        try:
+            bdir, child = batch.launch(self.app.root, plan_)
+        except batch.BatchError as err:
+            self.post_message(Launched(error=str(err)))
+        else:
+            self.post_message(Launched(bdir, child))
+
+    def on_launched(self, message):
+        self.launching = False
+        if message.error:
+            self.revalidate()
+            self.app.say(f"Batch not started: {message.error}", "error", self)
+            return
+        self.app.coordinators.append(message.child)
+        self.fill_head()
+        self.app.rescan()
+        self.app.say(f"Batch started: {self.draft.name}", "success", self)
+        self.app.push_screen(BatchMonitorScreen(message.bdir.name))
 
     # --- batch name ---------------------------------------------------------------------------------------------------------
     def action_rename_batch(self):
@@ -446,13 +515,13 @@ class ReviewBatchScreen(Screen):
             self.app.pop_screen()
 
     def action_local(self, step):
-        """Tab / shift+tab cycle inside the focused panel: the queue's trees, or Review Details' tabs and list. Enter
-        and esc are the only ways between the panels; the Up / Down / Edit buttons are for the mouse."""
+        """Tab / shift+tab cycle inside the focused panel: the queue and Launch Batch, or Review Details' tabs and list.
+        Enter and esc are the only ways between the panels; the Reorder / Details / Edit buttons are for the mouse."""
         if self.renaming is not None or self.grab is not None:
             return
-        queue = self.query_one(Queue)
-        if self.focused is queue and queue.option_count:
-            queue.highlighted = ((queue.highlighted or 0) + step) % queue.option_count
+        queue, launch = self.query_one(Queue), self.query_one("#rv-launch", Button)
+        if self.focused in (queue, launch):
+            (queue if self.focused is launch or launch.disabled else launch).focus()
             return
         members = [self.query_one(ViewTabs), self.query_one(DetailsList)]
         if self.focused in members:

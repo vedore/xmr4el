@@ -40,6 +40,7 @@ class ExperimentDraft:
         self.tree = None        # id of the tree shown in the Model Builder
         self.slot = "transformer"  # Model Builder slot under the cursor, and the last feature slot visited
         self.feature_slot = "char_tfidf"
+        self.resume = None      # [(screen kind, constructor kwargs)] of the New Experiment screens closed from a monitor
 
     def baseline(self, dataset):
         """What `dataset` shows without edits: its confirmed selection, else the recognized default."""

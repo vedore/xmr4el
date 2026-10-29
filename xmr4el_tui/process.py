@@ -40,8 +40,8 @@ class Live:
     stoppable: bool = False   # RUNNING, identity verified, leads its own group and session, launched by a TUI
 
 
-def runner_args(xmodel_path, *extra):
-    args = [sys.executable, str(RUNNER), "-spec", "-", *extra]
+def runner_args(xmodel_path, *extra, runner=RUNNER):
+    args = [sys.executable, str(runner), "-spec", "-", *extra]
     return args + (["-xmodel_path", xmodel_path] if xmodel_path else [])
 
 
@@ -68,7 +68,7 @@ def check(root, spec, xmodel_path, revision, timeout=300):
                        response["search"])
 
 
-def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None):
+def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None, runner=RUNNER):
     """Start the runner for `spec` in outputs/runs/<run_id> (new session: its own process group), stdout/stderr to
     outputs/runs/.console/<run_id>.log. Returns the Popen (only to reap it). An existing console log (the run id was
     used before) raises FileExistsError: nothing is started or overwritten. The child's identity goes to
@@ -79,7 +79,7 @@ def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None):
     console = Path(root, CONSOLE_DIR)
     console.mkdir(parents=True, exist_ok=True)
     with open(console / f"{run_id}.log", "x") as log:
-        child = subprocess.Popen(runner_args(xmodel_path, *extra), cwd=root, stdin=subprocess.PIPE, stdout=log,
+        child = subprocess.Popen(runner_args(xmodel_path, *extra, runner=runner), cwd=root, stdin=subprocess.PIPE, stdout=log,
                                  stderr=subprocess.STDOUT, start_new_session=True, text=True)
     ident = procinfo.identity(child.pid) or {}
     with open(console / f"{run_id}.launch.json", "x") as f:

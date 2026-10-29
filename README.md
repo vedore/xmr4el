@@ -160,7 +160,7 @@ recorded evidence allows them). New Experiment (`n`) starts with Dataset Setup: 
 configures one, the training file and Development / Test files can be changed with a file picker, `ctrl+s` confirms
 the dataset for the experiment; `m` then opens the Model Builder: one or more trees (tabs), each a hybrid
 pipeline of eight slots whose components are chosen and edited with a live JSON preview and applied with `ctrl+s`
-(launching from New Experiment is planned).
+(Review Batch launches the batch through a detached coordinator: `xmr4el_tui/batch.py`, `coordinator.py`; one running batch at a time; tui.md §5.16).
 
 ## Configuration
 

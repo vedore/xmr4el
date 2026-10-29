@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from xmr4el_tui import procinfo, process, runs
+from xmr4el_tui import batch, procinfo, process, runs
 from xmr4el_tui.progress import EventTail, current_stage, last_stage_event
 
 
@@ -29,6 +29,7 @@ class Snapshot:
     scanned: bool = False     # False: the first scan has not landed yet
     problem: str | None = None  # why this scan failed (the other fields are then the last successful scan's)
     at: datetime | None = None  # when this scan started (before anything was read)
+    batches: tuple = ()       # batch.Info, newest first (outputs/batches/; a dead coordinator's batch is marked lost)
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class ExperimentRepository:
         # recorded-running run id -> (EventTail, state word and Activity derived from it: LOST fails the current
         # stage). ponytail: every parsed event of the run kept; a streaming reducer if files get huge
         self.tails = {}
+        self.batch_cache = {}
         self.last = Snapshot()  # last successful scan
 
     def snapshot(self, fresh=False):
@@ -59,10 +61,12 @@ class ExperimentRepository:
         if fresh:
             self.cache.clear()
             self.tails.clear()
+            self.batch_cache.clear()
         try:
             found = runs.scan(self.root, self.cache)
         except FileNotFoundError:
-            self.last = Snapshot(trees=tuple(runs.trees(self.root, [])), scanned=True, at=at)
+            self.last = Snapshot(trees=tuple(runs.trees(self.root, [])), scanned=True, at=at,
+                                 batches=tuple(batch.scan(self.root, self.batch_cache)))
             return self.last
         except OSError as err:  # outputs/runs cannot be listed: keep the last good scan, say why
             return replace(self.last, scanned=True, at=at, problem=f"outputs/runs/ cannot be read ({type(err).__name__}); "
@@ -71,7 +75,8 @@ class ExperimentRepository:
         found = [self.live(r, here) if r.recorded == "running" else r for r in found]
         active = {r.id: self.activity(r) for r in found if r.recorded == "running"}
         self.tails = {k: v for k, v in self.tails.items() if k in active}
-        self.last = Snapshot(tuple(found), True, tuple(runs.trees(self.root, found)), active, scanned=True, at=at)
+        self.last = Snapshot(tuple(found), True, tuple(runs.trees(self.root, found)), active, scanned=True, at=at,
+                             batches=tuple(batch.scan(self.root, self.batch_cache)))
         return self.last
 
     def live(self, run, here):

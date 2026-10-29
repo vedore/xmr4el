@@ -178,8 +178,20 @@ another reference tree (only removal changes it). NEXT: user tries it (`python -
 `[` `]`, `2` Differences, break a value in a tree to see Fix Issue, delete a dev file for the dataset issue);
 commit/push on OK; then Step 5 (detached batch coordinator).
 
+**2026-10-29 Step 5 batch execution (user's pasted prompt; not committed):** `xmr4el_tui/batch.py` (plan/status files,
+flock locks, `prepare`/`start`/`launch`, `scan`/`info`/`mark_lost`/`request_stop`), `xmr4el_tui/coordinator.py`
+(detached, sequential, continue on tree failure, input re-hash per tree, stop by `stop` file), `process.spawn/runner_args`
+got a `runner` kwarg, `screens/batch_monitor.py` (monitor + batch list), `StopBatchDialog`/`QuitDialog`, Review Batch
+Launch wired (worker, no double launch), Dashboard `b` + batch rows in Active runs, `Notifications.observe_batches`,
+`Snapshot.batches`. Docs tui.md §5.16. tests/tui/test_batch.py (20, fake runner), test_batch_ui.py (8); full suite 404 pass,
+ruff clean. No real training run. Not tried on the real runner: NEXT user tries `python -m xmr4el_tui`, `n`... Launch Batch
+with `configs/xmr4el_tiny_config.json` / `datasets/ncbi_tiny` (Leave running, reopen, Stop Batch). Commit/push on OK.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
+
+**2026-10-29 Review Batch launch access + Batch Monitor Esc (not committed):** root cause: Tab on the queue only cycled trees (`action_local`), so the header Launch button was unreachable by keyboard and `l` was hidden from the footer; the button was already wired to `batch.launch`. Launch Batch (primary) now sits under the Execution Queue with a reason line (`launch_blocker`: preparing / validating / drop moved tree / N configuration issues); Tab/Shift+Tab toggle queue <-> Launch; `L launch` shown in the footer. Batch Monitor Esc = `app.go_dashboard()` (closes everything above the Dashboard; execution untouched). tests/tui 252 pass.
+**2026-10-29 Monitor Esc + workflow resume (not committed):** `App.go_dashboard` pops every screen above the Dashboard without `leave_guard`, after `remember_workflow` wrote the New Experiment screens to `draft.resume` (`[(kind, kwargs)]`: Dataset Setup `fix`, Model Builder `from_review` + `saved_editor()` = component, unapplied keys, unparsable text; Review Batch). No parked or duplicate screens (parking removed). Dashboard `c` "resume experiment" (offered while `app.resumable()`: resume record, confirmed dataset or trees) and `n` (when a record exists) rebuild the stack via `action_resume_experiment`; the Model Builder reopens the editor on mount (`restore_editor`), so esc follows editor > library > grid > Tree Selection > Dataset Setup / Review Batch. Tests (`test_batch_ui.py`, real edit, no stubs): monitor Esc keeps the edit unapplied, resume restores slot/component/value, discard ask still works, esc chain ends at Dataset Setup, confirmed dataset kept, batch keeps running; Review Batch restored as parent; 3-cycle test keeps one Dashboard. tests/tui 256 pass. Limits: the editor's focused field/scroll are not restored (first field focused); `from_review` (Fix Issue origin) is recorded but has no dedicated test; a clean editor is also reopened.
 
 ## Scope and working rules
 

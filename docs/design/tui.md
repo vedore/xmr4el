@@ -868,6 +868,51 @@ enabled splits, tree count, "On tree failure: continue", readiness) over Executi
   id, name, dataset, ordered trees with applied configs), `review.run_spec(plan, tree, model_config_path)` (runner spec;
   run name = `<batch id>_<tree id>`) and `review.validate(root, draft)`.
 
+### 5.16 New Experiment: Batch execution (built 2026-10-29)
+
+Launch Batch (Review Batch, `l` or the button) starts a **detached coordinator**; the TUI never owns a run.
+
+- **Launch.** Tree and name issues are rechecked, then a worker re-validates the dataset and calls `batch.launch`
+  (`review.plan` copy of the draft, id = launch time + draft id). Hashing the inputs and starting the coordinator never
+  block the UI; the header says "Preparing the batch…" and a second activation is refused. Failure: footer error, the
+  review screen and draft untouched, batch directory left `failed` (diagnosable) or removed (`prepare` failed).
+  Success: Batch monitor over Review Batch.
+- **Files** `outputs/batches/<id>/`: `batch.json` (immutable plan: dataset, input sha256, git commit/dirty, python,
+  per tree the runner spec and model-config sha; written once with `x`; its sha256 is in status.json and re-checked by
+  the coordinator), `status.json` (mutable, atomic; only the coordinator writes it, plus `mark_lost` for a dead one),
+  `stop` (the stop request), `coordinator.log`, `coordinator.lock`, `configs/<tree id>.json` (what each run reads).
+  Runs are ordinary `outputs/runs/<timestamp>_<batch id>_<tree id>/` runs, so Dashboard and Results need nothing new.
+- **Coordinator** `python -m xmr4el_tui.coordinator <dir>` (stdlib, `start_new_session`, stdio to the log). One tree
+  at a time through `process.spawn` (own session/group, launch record, `-model_config_sha256`). Policy
+  `continue_on_tree_failure`, no retries. Before each tree the shared inputs are re-hashed; a change, a `batch.json`
+  that no longer matches its recorded hash, a stop, or an unwritable status are batch-wide: unstarted trees become
+  `cancelled`, finished runs are kept. States: batch preparing / running / stopping / completed /
+  completed_with_failures / stopped / blocked / failed / lost; tree pending / running / succeeded / failed /
+  cancelled / interrupted.
+- **Locks (flock).** `coordinator.lock` (one coordinator per batch; its holder is alive, so liveness cannot be a reused
+  PID) and `outputs/batches/.active.lock` (V1: one running batch; it names the holder). Both are held for the
+  coordinator's life, opened non-inheritable, and runners are started with `close_fds`, so a runner that outlives a
+  killed coordinator holds neither. The coordinator's `procinfo` identity (macOS and Linux) is recorded in status.json.
+- **Stop.** The TUI only creates the `stop` file (idempotent). The coordinator sends SIGTERM to its runner's group (it
+  is its own unreaped child leading that group; the group is verified before each signal), SIGKILL after `GRACE`
+  (30 s) and records the forced stop like `process.record_forced`, cancels the rest and writes `stopped`.
+- **Lost.** A scan finding a recorded-active batch whose lock is free marks it `lost` (a `preparing` one only after
+  60 s): the running tree becomes `interrupted`, pending trees stay pending, nothing is relaunched or signalled.
+  A runner that survived is left running and reported through its own run.
+- **Batch monitor** (`screens/batch_monitor.py`): Batch overview + Execution queue (35 %), selected tree's state and
+  the existing LogPanel on its run (65 %); `o` / enter opens the tree's run in the ordinary Run Monitor (pipeline,
+  resources, Cancel Run); `s` Stop Batch (dialog, Keep running is the default). Status is read every second from
+  status.json; run state/stage comes from the 5 s scan. `b` on the Dashboard lists every batch; running batches are
+  also a row of Active runs.
+- **Quit** with an active batch (read from the files): dialog Leave batch running / Stop batch and exit / Stay in
+  XMR4EL (default, esc, a second ctrl+c). Stop-and-exit exits only after every stop request was written.
+- **Notifications** (`Notifications.observe_batches`): batch started, tree started/completed/failed/interrupted, batch
+  ended; first scan silent, each transition once.
+- **Test seam.** `XMR4EL_TEST_RUNNER` (read only by the coordinator, set by `batch.start(runner=...)`) replaces
+  `scripts/run_experiment.py` in tests; no user-facing option sets it.
+- **Not built:** concurrent trees/batches, retry, resume of a lost batch, per-tree Cancel inside the batch monitor
+  (use the tree's Run Monitor), Results grouping by batch.
+
 ## 6. View states
 
 | View | Empty | Loading | Error |

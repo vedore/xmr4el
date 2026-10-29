@@ -20,6 +20,15 @@ KIND = {"train": "Training", "eval": "Evaluation"}
 FINAL = ("COMPLETED", "FAILED", "STOPPED")  # recorded outcomes: nothing about the run changes after them
 
 
+TERMINAL_NOTES = {"completed": ("success", "Batch completed", "{ok} of {n} trees succeeded."),
+                  "completed_with_failures": ("warning", "Batch completed with failures",
+                                              "{ok} succeeded, {bad} failed."),
+                  "stopped": ("information", "Batch stopped", "Stopped on request."),
+                  "blocked": ("error", "Batch blocked", "A batch-wide problem stopped it."),
+                  "failed": ("error", "Batch failed", "The batch could not run."),
+                  "lost": ("warning", "Batch interrupted", "The coordinator ended unexpectedly.")}
+
+
 @dataclass(frozen=True)
 class Notice:
     key: tuple             # (incarnation, end state) or ("scan", problem): the deduplication identity
@@ -79,6 +88,7 @@ class Notifications:
         self.known = set()     # incarnations of the last scan
         self.since = None      # start of the first scan, to the second: runs started at or after it are this session's
         self.requested = set() # incarnations this TUI sent a stop to
+        self.batches = None    # batch id -> (state, {tree id: state}) of the last scan; None: no scan yet
         self.sent = set()      # notice keys made this session (Clear all keeps them: an event is reported once)
 
     def observe(self, all_runs, now=None, problem=None):
@@ -111,7 +121,45 @@ class Notifications:
         self.known = set(states)
         self.watched = {inc for inc in self.watched if inc[0] in ids}
         self.requested = {inc for inc in self.requested if inc[0] in ids}
-        self.sent = {k for k in self.sent if k == ("scan", problem) or isinstance(k[0], tuple) and k[0][0] in ids}
+        self.sent = {k for k in self.sent if k == ("scan", problem) or isinstance(k[0], tuple) and (k[0][0] in ids or k[0][0] == "batch")}
+        return self.add(new)
+
+    def observe_batches(self, infos, now=None):
+        """Notices for batch transitions since the last scan: batch started, each tree started / finished, batch ended.
+        The first scan only records (old batches are no events); a batch first seen later has its whole history
+        still ahead of it, so a short one is reported from its first state."""
+        now = now or datetime.now()
+        seen = {i.id: (i.state, {t["id"]: t["state"] for t in i.status.get("trees", ())}) for i in infos}
+        if self.batches is None:
+            self.batches = seen
+            return []
+        new = []
+        for i in infos:
+            state, trees = seen[i.id]
+            old_state, old_trees = self.batches.get(i.id, (None, {}))
+            ref, target = ("batch", i.id), ("batch", i.id, i.id)
+
+            def note(key, severity, title, text):
+                new.append(Notice((ref, key), severity, title, i.name, text, now, target))
+            if i.id not in self.batches and state != "unreadable":
+                note("started", "information", "Batch started", f"{len(trees)} trees queued.")
+            names = {t["id"]: t["name"] for t in i.status.get("trees", ())}
+            for tid, tstate in trees.items():
+                if tstate == old_trees.get(tid):
+                    continue
+                if tstate == "running":
+                    note(f"{tid}:running", "information", "Tree started", names[tid])
+                elif tstate == "succeeded":
+                    note(f"{tid}:succeeded", "success", "Tree completed", names[tid])
+                elif tstate in ("failed", "interrupted"):
+                    err = next((t["error"] for t in i.status["trees"] if t["id"] == tid), None) or "see its log"
+                    note(f"{tid}:{tstate}", "error", "Tree failed" if tstate == "failed" else "Tree interrupted",
+                         f"{names[tid]}: {str(err).splitlines()[0]}")
+            if state != old_state and state in TERMINAL_NOTES:
+                severity, title, text = TERMINAL_NOTES[state]
+                note(state, severity, title, i.status.get("error") or text.format(
+                    ok=i.count("succeeded"), bad=i.count("failed"), n=len(trees)))
+        self.batches = seen
         return self.add(new)
 
     def add(self, notices):

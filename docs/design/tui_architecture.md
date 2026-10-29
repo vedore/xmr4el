@@ -59,6 +59,7 @@ xmr4el_tui/
     results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
     results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
     dataset_setup.py   DatasetSetupScreen (§5.13); file_picker.py FilePicker
+    batch_monitor.py   BatchMonitorScreen, BatchesScreen (§5.16): queue + selected tree's log, Stop Batch
     model_builder.py   ModelBuilderScreen (§5.14): tree tabs + grid, Library, editor (Editing copy), preview()
   widgets/
     explorer.py    Explorer tree (resizable; items of 1-2 rows + gap rows over Tree lines; `/` search) + node
