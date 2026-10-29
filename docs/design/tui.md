@@ -834,6 +834,40 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   says `needs attention` in the error colour. `left` / `right` follow a branch (a branch end goes on to Hierarchy,
   Hierarchy goes back to the last feature slot), `up` / `down` change branch; `enter` opens the library.
 
+### 5.15 New Experiment: Review Batch (built 2026-10-29)
+
+Final inspection before launch; read-only except the batch name and the execution order. the `Review Batch` button of the Model Builder's top panel (Tab to it, enter) opens it; the Tree Actions menu
+and the `r` key are gone. In Review, enter on the queue reads the details, `e` edits the tree (the Model Builder
+banner says `EDITING TREE`), reordering = space picks a tree up, up / down carry it, space drops it, esc restores the old order (alt+left / alt+right
+move one place; the mouse buttons are Reorder / Drop, Details, Edit),
+esc leaving a screen needs a second press,
+left / right switch Overview / Differences, Tab moves between panels. Compact header (batch name `F2`, shared dataset, training file,
+enabled splits, tree count, "On tree failure: continue", readiness) over Execution Queue 30 % | Review Details 70 %
+(Overview, Differences; `1` / `2` or click; no Checks tab). Code: `review.py` (pure: `Issue`, `validate`,
+`diff`, `plan`, `run_spec`), `screens/review_batch.py`, `screens/review_details.py`; the draft gained `name`,
+`reference`, `Tree.seq`.
+
+- **Draft:** the batch has a display `name` (`rename_batch`, 60 chars) apart from its identity `id`; trees keep
+  their ids; `[` / `]` or Up / Down buttons call `draft.move` (the objects change place, nothing is copied).
+- **Reference (Differences):** the first-created surviving tree (`Tree.seq`), by id: reordering and renaming never
+  change it; removal falls back to the next oldest and the footer says so. Not the Results baseline.
+- **Differences:** `review.effective` = every Model Builder field with the backend default where the config leaves it
+  out, plus any other key as written (missing stays distinct from null); compared by path (numbers by value,
+  booleans only as booleans, lists element-wise), grouped Features / Hierarchy / Matcher / Search / Other.
+- **Validation (automatic):** trees = `components.problems` + tree name + unknown top-level keys (`XModel(**cfg)`
+  would refuse them) + duplicate-configuration Caution; dataset = `datasets.validate` on the confirmed selection plus
+  runner split-name check, run once in a worker (Validating until it lands) and shown once under SHARED DATASET.
+  Ready / Caution (never blocks) / Invalid. No hashing or parsing of whole files: provenance stays with the runner's
+  `check_inputs`, so Ready is preflight only.
+- **Fix Issue** (enter on an issue row): `App.open_builder(issue)` / `open_setup(issue)` push the existing editor
+  over Review Batch (it stays in the stack, so selection, view, scroll and focus return as left). Model Builder: tree,
+  slot, editor opened for the installed component, field focused, error under it, JSON line of the path emphasised;
+  slot without a supported component: its library; name issue: the rename box. Dataset Setup (`fix=`): the
+  confirmed dataset, the mapping focused, normal picker and Confirm Dataset; `m` or esc returns.
+- **Launch Batch** is disabled ("connected in Step 5"); `l` says why. Step 5 reads `review.plan(draft)` (copy of
+  id, name, dataset, ordered trees with applied configs), `review.run_spec(plan, tree, model_config_path)` (runner spec;
+  run name = `<batch id>_<tree id>`) and `review.validate(root, draft)`.
+
 ## 6. View states
 
 | View | Empty | Loading | Error |

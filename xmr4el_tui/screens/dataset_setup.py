@@ -76,8 +76,9 @@ class DatasetSetupScreen(Screen):
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
                 Binding("ctrl+r", "reload", "reread datasets", show=False)]
 
-    def __init__(self):
+    def __init__(self, fix=None):
         super().__init__()
+        self.fix = fix  # review.Issue (Review Batch's Fix Issue): this screen opened over Review Batch to correct it
         self.datasets, self.statuses, self.problem, self.variants = [], {}, None, []
 
     def compose(self) -> ComposeResult:
@@ -99,6 +100,18 @@ class DatasetSetupScreen(Screen):
         if self.draft.selected in self.keys():
             listed.highlighted = self.keys().index(self.draft.selected)
         listed.focus()
+        if self.fix is not None:
+            self.start_fix()
+
+    def start_fix(self):
+        """Show the confirmed dataset with the focus on the mapping that needs correcting and say what is wrong. The
+        correction goes through the normal picker and Confirm Dataset; esc returns to Review Batch."""
+        c = self.draft.confirmed
+        if c is not None and c.key in self.keys():
+            self.configure(c.key)
+            if self.fix.target:
+                self.go_to_problem(self.fix.target)
+        self.app.say(self.fix.message, "warning", self)
 
     @property
     def draft(self):
@@ -347,10 +360,14 @@ class DatasetSetupScreen(Screen):
         self.fill_list()
         self.fill_config()
         self.app.say(f"Dataset confirmed: {sel.name}" + (f" — {sel.variant}" if sel.variant else "") +
-                     ". m opens the Model Builder.", "success")
+                     (". m returns to Review Batch." if self.fix is not None else ". m opens the Model Builder."),
+                     "success")
 
     def action_builder(self):
         """Model Builder (next step) over this screen; esc there comes back here. Needs a confirmed dataset."""
+        if self.fix is not None:  # opened from Review Batch: back to it
+            self.app.pop_screen()
+            return
         if self.draft.confirmed is None:
             self.app.say("Confirm a dataset first (ctrl+s).", "warning")
             return
@@ -397,6 +414,8 @@ class DatasetSetupScreen(Screen):
         in the draft (said on the screen below)."""
         if self.focused is not self.query_one(DatasetList):
             self.query_one(DatasetList).focus()
+            return
+        if not self.app.leave(self, "Dataset Setup"):
             return
         edited = len(self.draft.edits)
         self.app.pop_screen()

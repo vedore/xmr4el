@@ -293,27 +293,16 @@ class ZoomBar(Widget):
             grid.action_zoom(1 if hit == "in" else -1)
 
 
-class ActionsButton(Widget):
-    """The mouse trigger of the Tree Actions menu, beside the tab strip."""
-    DEFAULT_CSS = "ActionsButton { width: 11; height: 1; }"
-
-    def render(self):
-        return Text(" Actions ", theme.style("accent", "bold"))
-
-    def on_click(self):
-        self.screen.action_tree_menu()
-
-
 class TreeTabs(Widget, can_focus=True):
     """The batch's trees in execution order (`[1] Tree 1`, ...), then `Add tree`. This is Tree Selection: left / right
     move the highlight only (the shown tree and every draft stay), enter shows the highlighted tree and returns to
-    the grid (on `Add tree`: creates a tree and opens it), 1-9 jump to a tree, a opens Tree Actions, x removes the highlighted tree (asks), shift+left / right
+    the grid (on `Add tree`: creates a tree and opens it), 1-9 jump to a tree, x removes the highlighted tree (asks), shift+left / right
     reorder it, F2 renames. A click on a tab shows it. Tabs after the ninth have no number: arrows reach them."""
     BINDINGS = [Binding("left", "cursor(-1)", "navigate", key_display="←→"),
                 Binding("right", "cursor(1)", show=False),
                 Binding("enter", "activate", "select"),
                 Binding("1", "screen.tree(0)", "jump to tree", key_display="1-9"),
-                Binding("a", "screen.tree_menu", "tree actions"), Binding("x", "screen.remove_tree", "remove tree"),
+                Binding("x", "screen.remove_tree", "remove tree"),
                 Binding("shift+left", "screen.move_tree(-1)", show=False),
                 Binding("shift+right", "screen.move_tree(1)", show=False),
                 Binding("n", "screen.add_tree", show=False), Binding("d", "screen.duplicate_tree", show=False),
@@ -349,7 +338,7 @@ class TreeTabs(Widget, can_focus=True):
         self.refresh()
 
     def on_blur(self):
-        if not self.screen.query_one("#mb-menu").display and self.screen.renaming is None:
+        if self.screen.renaming is None:
             self.cursor = self.current  # leaving Tree Selection drops the highlight back on the shown tree
         self.refresh()
 

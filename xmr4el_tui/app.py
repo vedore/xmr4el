@@ -1,5 +1,6 @@
 """Textual app: rescans outputs/runs every 5 s in a thread and tells the screens (tui.md §5, §7)."""
 import threading
+import time
 from datetime import datetime
 
 from textual import events, work
@@ -16,9 +17,11 @@ from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.runs import state_word
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen
 from xmr4el_tui.screens.dataset_setup import DatasetSetupScreen
+from xmr4el_tui.screens.model_builder import ModelBuilderScreen
 from xmr4el_tui.screens.monitor_screen import RunMonitorScreen
 from xmr4el_tui.screens.notification_center import NotificationCenter
 from xmr4el_tui.screens.results_screen import ResultsScreen
+from xmr4el_tui.screens.review_batch import ReviewBatchScreen
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
 from xmr4el_tui.services.notifications import Notice, Notifications, incarnation, subject
 from xmr4el_tui.widgets.context_footer import ContextFooter
@@ -69,6 +72,7 @@ class XMR4ELApp(App):
         self.notices = Notifications()  # this session's notifications (memory only)
         self.note, self.note_timer = None, None  # footer feedback (severity, text, screen) and its expiry
         self.confirming = None  # the screen whose footer asks to confirm quitting (or `asking`)
+        self.leaving = None     # (screen, time) of an esc that asked to leave it
         self.asking = None      # (question, key, verb) of a screen's footer confirmation; None: the quit question
         self.draft = ExperimentDraft()  # New Experiment, kept for the session
         self.repo = ExperimentRepository(root)
@@ -221,6 +225,17 @@ class XMR4ELApp(App):
             self.note = None
             self.refresh_bars()
 
+    def leave(self, screen, name):
+        """Leaving a New Experiment screen takes two esc presses within FEEDBACK_SECONDS: the first only says so in the
+        footer. True on the second (the caller closes the screen)."""
+        now = time.monotonic()
+        if self.leaving and self.leaving[0] is screen and now - self.leaving[1] <= FEEDBACK_SECONDS:
+            self.leaving = None
+            return True
+        self.leaving = (screen, now)
+        self.say(f"Press esc again to leave {name}.", screen=screen)
+        return False
+
     def quit_question(self):
         """Runs are detached (process.spawn: own session, output to files): quitting stops none of them."""
         active = sum(state_word(r) in explorer.ACTIVE for r in self.snapshot.runs)
@@ -284,6 +299,18 @@ class XMR4ELApp(App):
             self.go_to(open_, 0)
         elif not isinstance(self.screen, ModalScreen):
             self.push_screen(DatasetSetupScreen())
+
+    # New Experiment screens open each other through the app (they never import one another)
+    def open_builder(self, focus=None):
+        """Model Builder over the current screen; `focus`: a review.Issue naming the tree / slot / field to open."""
+        self.push_screen(ModelBuilderScreen(focus))
+
+    def open_setup(self, fix=None):
+        """Dataset Setup over the current screen; `fix`: a review.Issue naming the mapping to correct."""
+        self.push_screen(DatasetSetupScreen(fix))
+
+    def open_review(self):
+        self.push_screen(ReviewBatchScreen())
 
     def action_help(self):
         if self.screen.query("HelpPanel"):

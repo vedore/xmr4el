@@ -241,7 +241,7 @@ def test_keyboard_select_confirm_and_back(tmp_path):
         assert "Dataset confirmed: A" in footer(app) and "confirmed" in str(listed.options[0].prompt)
         await pilot.press("escape")  # configuration -> Datasets
         assert app.focused is listed and isinstance(app.screen, DatasetSetupScreen)
-        await pilot.press("escape")  # Datasets -> Dashboard
+        await pilot.press("escape", "escape")  # Datasets -> Dashboard (the first esc asks)
         assert isinstance(app.screen, DashboardScreen)
         await pilot.press("n")  # the draft is the session's: the same dataset comes back
         await pilot.pause()
@@ -372,6 +372,8 @@ def test_register_local_dataset(tmp_path):
 
 def test_dashboard_offers_new_experiment(tmp_path):
     async def go(app, pilot, screen):
+        await pilot.press("escape")
+        assert "Press esc again to leave Dataset Setup." in footer(app) and app.screen is screen
         await pilot.press("escape")
         assert any(b.binding.key == "n" for b in app.screen.active_bindings.values() if b.binding.show)
         assert "New Experiment (n)" in app.screen.query_one("Description").text()

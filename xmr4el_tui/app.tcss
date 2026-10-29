@@ -487,6 +487,15 @@ ModelBuilderScreen {
     height: 1fr;
 }
 
+#mb-banner {
+    height: 1;
+    padding: 0 1;
+    background: $accent;
+    color: $xmr-on-accent;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
 #mb-top {
     height: 45%;
     min-height: 5;
@@ -494,19 +503,6 @@ ModelBuilderScreen {
 
 #mb-bottom {
     height: 55%;
-}
-
-#mb-menu {
-    layer: overlay;
-    width: 30;
-    height: 8;
-    border: round $border;
-    background: $surface;
-    padding: 0;
-}
-
-#mb-actions, #mb-zoom {
-    margin-left: 1;
 }
 
 #mb-tabs-row {
@@ -562,6 +558,12 @@ ModelBuilderScreen {
     padding: 0 1;
     border-top: solid $border-blurred;
     color: $foreground-muted;
+}
+
+#mb-help:focus {
+    border-top: solid $accent;
+    border-title-color: $accent;
+    border-title-style: bold;
 }
 
 #mb-help-text {
@@ -644,4 +646,81 @@ ModelBuilderScreen {
 #mb-buttons Button {
     margin-right: 2;
     min-width: 10;
+}
+
+/* New Experiment, Review Batch (screens/review_batch.py): compact header over Execution Queue 30 % | Review Details */
+#rv {
+    height: 1fr;
+}
+
+#rv-head {
+    height: auto;
+    padding: 0 1;
+}
+
+#rv-name-row {
+    height: 1;
+}
+
+#rv-name, #rv-rename {
+    width: 1fr;
+    height: 1;
+}
+
+#rv-rename {
+    background: $xmr-cursor-row;
+}
+
+#rv-launch {
+    width: 16;
+    margin-left: 1;
+}
+
+#rv-info, #rv-state {
+    height: 1;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+#rv-body {
+    height: 1fr;
+}
+
+#rv-left {
+    width: 30%;
+    min-width: 24;
+    height: 1fr;
+}
+
+#rv-details {
+    width: 1fr;
+    height: 1fr;
+}
+
+#rv-queue, #rv-list {
+    height: 1fr;
+    border: none;
+    padding: 0;
+    background: $surface;
+}
+
+#rv-moves {
+    height: 1;
+}
+
+#rv-moves Button {
+    margin-right: 1;
+    min-width: 6;
+}
+
+#rv-head, #rv-left, #rv-details {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+}
+
+#rv-left:focus-within, #rv-details:focus-within {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
 }

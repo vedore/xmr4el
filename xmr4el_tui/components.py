@@ -480,6 +480,17 @@ def json_lines(config):
     return out + [("}", None)]
 
 
+def path_line(lines, path):
+    """Index in `json_lines` output of the line holding the key at `path`, searched only inside its top-level key's
+    own lines; None when the config does not write it (a default left out)."""
+    own = [i for i, (_, key) in enumerate(lines) if key == path[0]]
+    at = own[0] if own else None
+    for key in path[1:]:
+        at = next((i for i in own if at is not None and i > at and lines[i][0].lstrip().startswith(json.dumps(key) + ":")),
+                  None)
+    return at
+
+
 def dumps(config):
     return json.dumps(config, indent=2)
 

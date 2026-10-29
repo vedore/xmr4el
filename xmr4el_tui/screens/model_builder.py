@@ -15,14 +15,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Input, OptionList, Select, Static
+from textual.widgets import Button, Input, Select, Static
 from textual.widgets.option_list import Option
 
 from xmr4el_tui import components, theme
 from xmr4el_tui.components import HYBRID
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.description import Rows
-from xmr4el_tui.widgets.pipeline_grid import BRANCHES, ActionsButton, PipelineGrid, TreeTabs, ZoomBar
+from xmr4el_tui.widgets.pipeline_grid import BRANCHES, PipelineGrid, TreeTabs, ZoomBar
 from xmr4el_tui.widgets.top_bar import TopBar
 
 FEATURE_SLOTS = {sid for _, slots in BRANCHES for sid in slots}
@@ -56,17 +56,6 @@ class AttrSelect(Select):
     BINDINGS = [Binding("up", "screen.field_step(-1)", show=False), Binding("down", "screen.field_step(1)", show=False)]
 
 
-class TreeMenu(OptionList):
-    """Tree Actions: closes (focus left to the screen's choice) when it loses focus."""
-
-    def on_blur(self):
-        self.screen.close_menu(restore=False)
-
-
-TREE_ACTIONS = (("rename", "Rename tree", "F2"), ("duplicate", "Duplicate tree", "d"), ("earlier", "Move earlier", ""),
-                ("later", "Move later", ""), ("add", "Add tree", "n"), ("remove", "Remove tree", "delete"))
-
-
 class JsonPreview(ScrollableContainer):
     """Read-only full configuration of the tree as Apply would commit it; scrolls on its own. y copies it."""
     BINDINGS = [Binding("y", "screen.copy_json", "copy JSON")]
@@ -79,28 +68,33 @@ class ModelBuilderScreen(Screen):
     crumbs = ("Model Builder",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "apply", "apply"),
                 Binding("u", "discard", "discard changes"), Binding("f2", "rename", show=False),
+                Binding("alt+left", "move_tree(-1)", show=False),
+                Binding("alt+right", "move_tree(1)", show=False),
                 Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False),
                 Binding("up", "field_step(-1)", show=False), Binding("down", "field_step(1)", show=False),
                 *(Binding(str(i), f"tree({i - 1})", f"tree {i}", show=False) for i in range(1, 10))]
 
-    def __init__(self):
+    def __init__(self, focus=None):
         super().__init__()
+        self.from_review = focus is not None  # opened from Review Batch: esc from the grid goes straight back to it
+        self.focus_issue = focus  # review.Issue to open on mount (Review Batch's Fix Issue / open tree), then None
+        self.focus_path = None   # configuration path the preview emphasises while the editor was opened for it
         self.editing = None
         self.pending = None      # what runs after the footer's discard (u)
         self.refocus = None      # control to focus again when that question is cancelled
         self.renaming = None     # focus to return to after renaming; None: not renaming
         self.attr_focus = None   # the attribute control last focused (where esc from the preview returns)
         self.rename_id = None    # the tree being renamed
-        self.menu_origin = None  # focus to return to when Tree Actions closes
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
         with Vertical(id="mb"):
+            yield Static(id="mb-banner")
             with Vertical(id="mb-top"):
                 with Horizontal(id="mb-tabs-row"):
                     yield TreeTabs(id="mb-tabs")
-                    yield ActionsButton(id="mb-actions")
                     yield ZoomBar(id="mb-zoom")
+                    yield Button("Review Batch", id="mb-review", compact=True)
                     yield Input(id="mb-rename", placeholder="Tree name", compact=True)
                 with ScrollableContainer(id="mb-grid-box"):
                     yield PipelineGrid(id="mb-grid")
@@ -117,22 +111,57 @@ class ModelBuilderScreen(Screen):
                             yield Button("Preview", id="mb-preview", compact=True)
                     with JsonPreview(id="mb-json"):
                         yield Static(id="mb-json-text")
-        yield TreeMenu(*(Option(Text.assemble(label, ("  " + key if key else "", theme.style("text-muted"))), id=cid)
-                         for cid, label, key in TREE_ACTIONS), id="mb-menu")
         yield ContextFooter()
 
     def on_mount(self):
         self.query_one("#mb-top").border_title = "Model Builder"
+        self.query_one("#mb-help").border_title = "Help · ↑↓ scroll"
         self.query_one("#mb-rename").display = False
         self.query_one("#mb-editor").display = False
-        self.query_one("#mb-menu").display = False
         if not self.draft.trees:
             self.draft.add_tree(self.template())
         self.fill()
         self.query_one(PipelineGrid).focus()
+        if self.focus_issue is not None:
+            self.call_later(self.open_focus)
 
     def on_screen_resume(self):
-        self.fill_dataset()
+        """Shown again (Review Batch above it was closed): the draft may have changed there (order, names, trees)."""
+        if self.editing is None and self.draft.trees:
+            self.fill()
+        else:
+            self.fill_dataset()
+
+    async def open_focus(self):
+        """Go where Review Batch pointed: the tree's grid; for a setting, its slot's editor with the field focused and
+        its JSON path emphasised (a slot with no supported component: its library); for a name, the rename box."""
+        issue, self.focus_issue = self.focus_issue, None
+        if not any(t.id == issue.tree for t in self.draft.trees):
+            self.app.say("That tree is no longer in the batch.", "warning", self)
+            return
+        tabs = self.query_one(TreeTabs)
+        self.show_tree(issue.tree)
+        if issue.dest == "rename":
+            tabs.focus()
+            self.action_rename()
+        elif issue.slot:
+            self.move_to(issue.slot)
+            slot = components.slot(issue.slot)
+            comp = components.installed(self.tree.config, slot)
+            if comp is None:
+                self.query_one(Library).focus()
+            else:
+                self.focus_path = components.path_of(slot, issue.field) if issue.field else None
+                await self.open_editor(comp)
+                if issue.field in self.editing.fields:
+                    self.query(f"#mbf-{self.editing.fields.index(issue.field)}, "
+                               f"#mbf-{self.editing.fields.index(issue.field)}-0").first().focus()
+        if issue.message:
+            self.app.say(issue.message, "warning", self)
+
+    def action_review(self):
+        """Review Batch over this screen (unapplied editor changes are asked about first, never applied)."""
+        self.guard(self.app.open_review)
 
     @property
     def draft(self):
@@ -152,6 +181,10 @@ class ModelBuilderScreen(Screen):
     def fill(self):
         self.fill_dataset()
         self.query_one(TreeTabs).show(self.draft.trees, self.tree.id)
+        banner = self.query_one("#mb-banner", Static)
+        banner.display = self.from_review
+        banner.update(Text.assemble(("EDITING TREE  ", "bold"), (self.tree.name, "bold underline"),
+                                    ("   opened from Review Batch: esc leaves", "")))
         self.query_one(PipelineGrid).show(self.tree.config, self.draft.slot)
         if self.editing is None:
             self.fill_library()
@@ -217,9 +250,7 @@ class ModelBuilderScreen(Screen):
             self.query_one(Library).focus()
 
     async def on_option_list_option_selected(self, event):
-        if event.option_list.id == "mb-menu":
-            self.run_tree_action(event.option.id)
-        elif event.option_list.id == "mb-library":
+        if event.option_list.id == "mb-library":
             slot = components.slot(self.draft.slot)
             await self.open_editor(next(c for c in slot.components if c.id == event.option.id))
 
@@ -336,7 +367,7 @@ class ModelBuilderScreen(Screen):
         """Whole proposed configuration; the edited slot's keys (by JSON path) on the accent tint, the rest muted."""
         ed = self.editing
         box = self.query_one(JsonPreview)
-        text, first = preview(self.proposed(), ed.slot.keys, box.scrollable_content_region.width or 0)
+        text, first = preview(self.proposed(), ed.slot.keys, box.scrollable_content_region.width or 0, self.focus_path)
         self.query_one("#mb-json-text", Static).update(text)
         box.border_title = f"Configuration · {self.tree.name}"
         bad = len(ed.errors)
@@ -372,6 +403,9 @@ class ModelBuilderScreen(Screen):
                 self.query_one("#mb-apply").focus()
 
     def on_button_pressed(self, event):
+        if event.button.id == "mb-review":
+            self.action_review()
+            return
         if event.button.id == "mb-preview":
             self.query_one(JsonPreview).focus()
             return
@@ -404,7 +438,7 @@ class ModelBuilderScreen(Screen):
     def close_editor(self):
         """Drop the working copy; the library for the grid's slot comes back."""
         keep = self.editing.comp.id if self.editing else None
-        self.editing = None
+        self.editing = self.focus_path = None
         self.query_one("#mb-editor").display = False
         self.query_one("#mb-attrs").remove_children()
         self.attr_focus = None
@@ -463,9 +497,7 @@ class ModelBuilderScreen(Screen):
     def action_back(self):
         """Preview -> attributes; editor -> library (asks with unapplied changes) -> grid -> Tree Selection -> the
         previous screen (Dataset Setup)."""
-        if self.query_one(TreeMenu).display:
-            self.close_menu()
-        elif self.renaming is not None:
+        if self.renaming is not None:
             self.end_rename()
         elif self.editing is not None:
             if self.focused is self.query_one(JsonPreview):
@@ -475,10 +507,10 @@ class ModelBuilderScreen(Screen):
                 self.guard(self.to_library)
         elif self.focused is self.query_one(Library):
             self.query_one(PipelineGrid).focus()
-        elif self.focused is self.query_one(PipelineGrid):
+        elif self.focused is self.query_one(PipelineGrid) and not self.from_review:
             self.query_one(TreeTabs).cursor = self.tree.id  # Tree Selection
             self.query_one(TreeTabs).focus()
-        else:
+        elif self.app.leave(self, "Review Batch" if self.from_review else "Model Builder"):
             self.app.pop_screen()
 
     def action_copy_json(self):
@@ -505,7 +537,7 @@ class ModelBuilderScreen(Screen):
     def members(self, name):
         """The controls Tab visits in a panel, in order: only focusable ones that are shown."""
         if name == "top":
-            found = [self.query_one(TreeTabs), self.query_one(PipelineGrid)]
+            found = [self.query_one(TreeTabs), self.query_one(PipelineGrid), self.query_one("#mb-review")]
         elif name == "library":
             found = [self.query_one(Library)]
         elif name == "attrs":
@@ -518,7 +550,7 @@ class ModelBuilderScreen(Screen):
     def action_local(self, step):
         """Tab / shift+tab: the next / previous control of the focused panel, wrapping inside it."""
         here, name = self.focused, self.panel_of(self.focused)
-        members = self.members(name) if name and self.menu_origin is None and self.renaming is None else []
+        members = self.members(name) if name and self.renaming is None else []
         if here in members:
             members[(members.index(here) + step) % len(members)].focus()
 
@@ -527,44 +559,6 @@ class ModelBuilderScreen(Screen):
         i, _, _ = self.field_of(getattr(self.focused, "id", None))
         if i is not None and 0 <= i + step < len(self.editing.fields):
             self.query(f"#mbf-{i + step}, #mbf-{i + step}-0").first().focus()
-
-    # --- tree actions -----------------------------------------------------------------------------------------------
-    def action_tree_menu(self):
-        """Tree Actions (a on the tab strip, or the Actions button): rename, duplicate, move, add, remove."""
-        menu = self.query_one(TreeMenu)
-        if menu.display:
-            return
-        self.menu_origin = self.focused or self.query_one(TreeTabs)
-        if isinstance(self.menu_origin, TreeTabs):  # removal belongs to Tree Selection only
-            menu.enable_option("remove")
-        else:
-            menu.disable_option("remove")
-        button = self.query_one(ActionsButton).region
-        menu.styles.offset = (max(0, button.right - 30), button.y + 1)
-        menu.display = True
-        menu.highlighted = 0
-        menu.focus()
-
-    def close_menu(self, restore=True):
-        menu = self.query_one(TreeMenu)
-        if not menu.display:
-            return
-        back, self.menu_origin = self.menu_origin, None
-        menu.display = False
-        if restore:
-            (back if back is not None and back.is_attached and back.display else self.query_one(TreeTabs)).focus()
-
-    ACTIONS = {"rename": "action_rename", "duplicate": "action_duplicate_tree", "add": "action_add_tree",
-               "remove": "action_remove_tree"}
-
-    def run_tree_action(self, cid):
-        """The same operations as the keys: the tab strip is focused first (a question in the footer needs its keys)."""
-        self.close_menu(restore=False)
-        self.query_one(TreeTabs).focus()
-        if cid in ("earlier", "later"):
-            self.action_move_tree(-1 if cid == "earlier" else 1)
-        else:
-            getattr(self, self.ACTIONS[cid])()
 
     # --- trees ------------------------------------------------------------------------------------------------------
     def switch_to(self, tree_id):
@@ -681,17 +675,19 @@ class ModelBuilderScreen(Screen):
         (back if back is not None and back.is_attached else self.query_one(TreeTabs)).focus()
 
 
-def preview(config, keys, width=0):
-    """(Rich text of `json.dumps(config, indent=2)`, first highlighted line): lines under the top-level `keys` on the
-    section tint (padded to `width` so the tint spans the panel), every other line muted."""
+def preview(config, keys, width=0, focus=None):
+    """(Rich text of `json.dumps(config, indent=2)`, line to scroll to): lines under the top-level `keys` on the
+    section tint (padded to `width` so the tint spans the panel), every other line muted; the line of the `focus`
+    path (a Review Batch issue's setting), when the config writes it, on the accent."""
     lines = components.json_lines(config)
+    at = components.path_line(lines, focus) if focus else None
     width = max([len(line) for line, _ in lines] + [width])
-    text, first = Text(no_wrap=True), None
+    text, first = Text(no_wrap=True), at
     for n, (line, key) in enumerate(lines):
         mine = key in keys
         first = n if mine and first is None else first
-        text.append(f"{line:<{width}}", f"{theme.color('text')} on {theme.color('section')}" if mine
-                    else theme.style("text-muted"))
+        text.append(f"{line:<{width}}", f"{theme.color('on-accent')} on {theme.color('accent')} bold" if n == at
+                    else f"{theme.color('text')} on {theme.color('section')}" if mine else theme.style("text-muted"))
         if n < len(lines) - 1:
             text.append("\n")
     return text, first

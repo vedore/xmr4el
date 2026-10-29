@@ -168,6 +168,16 @@ file were dirty before). Model Builder commit `55e9b45` = the first refinement o
 (`python -m xmr4el_tui`, `n`, `m`: esc levels, `[n]` tabs, `x` + `y`, Preview button, a footer question + enter/click);
 commit/push on OK; then Step 4 Review Batch.
 
+**2026-10-29 Step 4 Review Batch (user's pasted prompt; committed on `tui`, not pushed):** `review.py` (pure model:
+`Issue`, `validate`, `diff`, `plan`, `run_spec`), `screens/review_batch.py`, `screens/review_details.py`; draft:
+batch `name` / `rename_batch`, `Tree.seq`, `reference`; Model Builder: `Review Batch` button (no `r`, no Tree Actions menu),
+`ModelBuilderScreen(focus=Issue)` (Fix Issue: slot editor + field + JSON path line), Dataset Setup `fix=`;
+`App.open_builder/open_setup/open_review`. Docs tui.md §5.15. tests/tui/test_review_batch.py (35), full suite 376
+pass, ruff clean. Launch Batch disabled (Step 5 reads `review.plan` / `run_spec` / `validate`). Not built: choosing
+another reference tree (only removal changes it). NEXT: user tries it (`python -m xmr4el_tui`, `n`, `m`, `r`: reorder
+`[` `]`, `2` Differences, break a value in a tree to see Fix Issue, delete a dev file for the dataset issue);
+commit/push on OK; then Step 5 (detached batch coordinator).
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 
