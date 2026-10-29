@@ -5,6 +5,7 @@ split), a run is its directory name. Labels are display names, made unique among
 tree shows two lines (`tree_title`, then `detail`: training date and a short tree id that no other tree shares).
 """
 import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -75,6 +76,16 @@ def descriptor(run):
                                 f"D{run.depth}" if run.depth is not None else None) if p)
 
 
+BATCH_RUN = re.compile(r"\d{8}-(\d{6})-[0-9a-f]{12}_([0-9a-f]+)")
+
+
+def display_name(name):
+    """A batch run is named `<batch id>_<tree id>` (review.run_name): shown as `<tree id> · batch <time>`, so the part
+    that tells siblings apart comes first when the explorer is narrow."""
+    m = BATCH_RUN.fullmatch(name)
+    return f"{m.group(2)[:SHORT_ID]} · batch {m.group(1)}" if m else name
+
+
 def tree_title(node):
     """First line of a tree: name, then its descriptor."""
     return f"{node.label} · {node.descriptor}" if node.descriptor else node.label
@@ -88,7 +99,7 @@ def tree_node(t, key, shorts):
         ["eval running"] if any(r.kind == "eval" and state_word(r) in ACTIVE for r in t.used_by) else [])
     short = shorts[t.id] if t.id else Path(t.path).name
     started = t.trained_by.started if t.trained_by else None
-    return Node(key, "tree", t.trained_by.name if t.trained_by else Path(t.path).name,
+    return Node(key, "tree", display_name(t.trained_by.name) if t.trained_by else Path(t.path).name,
                 state_word(t.trained_by) if t.trained_by else None, " · ".join(notes), t, evals,
                 descriptor(t.trained_by), f"{started:%b %d} · {short}" if started else short, short)
 

@@ -157,6 +157,35 @@ def test_pubtator_in_a_txt_file_and_bounded_read(tmp_path):
     assert datasets.inspect(tmp_path, "big.pubtator") == (None, "ok")
 
 
+@pytest.mark.parametrize("text", [
+    PUB.replace("11|a|", "22|a|"),
+    PUB.replace("11\t0\t5", "22\t0\t5"),
+    PUB.replace("11\t0\t5", "11\t0\t500"),
+    PUB.replace("11\t0\t5", "11\t5\t0"),
+    PUB.replace("\tDisease\tD006331", ""),
+])
+def test_obviously_invalid_pubtator_is_not_ready(tmp_path, text):
+    write(tmp_path, "invalid.txt", text)
+    assert datasets.inspect(tmp_path, "invalid.txt")[0] == "invalid"
+
+
+def test_discovery_ignores_invalid_path_types(tmp_path):
+    spec(tmp_path, "bad", {"evals": [{"split": "dev", "test_path": 123}]})
+    assert datasets.discover(tmp_path) == []
+
+
+def test_replaced_input_with_same_size_and_mtime_is_rechecked(tmp_path):
+    import os
+
+    path = write(tmp_path, "input.txt")
+    assert datasets.inspect(tmp_path, "input.txt") == (None, "ok")
+    old = path.stat()
+    other = write(tmp_path, "replacement.txt", "x" * old.st_size)
+    os.utime(other, ns=(old.st_atime_ns, old.st_mtime_ns))
+    os.replace(other, path)
+    assert datasets.inspect(tmp_path, "input.txt")[0] == "invalid"
+
+
 # --- draft -------------------------------------------------------------------------------------------------------
 def test_draft_edit_confirm_discard(tmp_path):
     a = by_key(make_root(tmp_path))["datasets/A"]

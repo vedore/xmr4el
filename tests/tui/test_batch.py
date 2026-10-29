@@ -16,7 +16,7 @@ from xmr4el_tui.datasets import EvalInput, Selection
 
 REPO = Path(__file__).parents[2]
 FAKE = f'''
-import argparse, json, os, pathlib, signal, sys, time
+import argparse, hashlib, json, os, pathlib, signal, sys, time
 sys.path.insert(0, {str(REPO)!r})
 from xmr4el_tui import procinfo
 a = argparse.ArgumentParser()
@@ -29,6 +29,15 @@ if os.path.exists("fake_ctl.json"):  # tests that cannot put fake keys into a va
 mode, secs = cfg.get("mode", "ok"), cfg.get("seconds", 0.2)
 run = pathlib.Path(args.run_dir)
 run.mkdir(parents=True)
+if mode == "mutate_before_read":
+    with open(spec["train_path"], "a") as f:
+        f.write("changed before the runner captured its inputs")
+# Structural fixtures only: no scientific metrics or trained model are invented.
+(run / "spec.json").write_text(json.dumps(spec))
+(run / "model_config.json").write_text(json.dumps(cfg))
+paths = {{spec["train_path"], *(e["test_path"] for e in spec["evals"])}}
+(run / "provenance.json").write_text(json.dumps({{"inputs": {{
+    p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in paths}}}}))
 def status(state, **kw):
     (run / "status.json.tmp").write_text(json.dumps({{"status": state, "started": "2026-10-29T10:00:00", **procinfo.own_identity(), **kw}}))
     os.replace(run / "status.json.tmp", run / "status.json")
@@ -49,6 +58,12 @@ if mode == "mutate":
     with open(spec["train_path"], "a") as f:
         f.write("changed")
 signal.signal(signal.SIGTERM, signal.SIG_IGN)  # the run is over: a late stop must not rewrite its outcome
+tree = pathlib.Path("outputs/saved_trees") / ("synthetic_" + spec["name"])
+tree.mkdir(parents=True)
+(tree / "xmodel.pkl").write_bytes(b"synthetic fixture; never load")
+(run / "tree.json").write_text(json.dumps({{"tree_id": spec["name"], "xmodel_path": str(tree), "trained": True}}))
+for e in spec["evals"]:
+    (run / ("metrics_" + e["split"] + ".json")).write_text("{{}}")
 status("completed", finished="x"); log("end")
 if mode == "stop_after":  # the stop request arrives right after this tree, before the next one starts
     for p in pathlib.Path("outputs/batches").glob("*/coordinator.lock"):
@@ -114,9 +129,11 @@ def test_prepare_writes_the_immutable_plan(root):
     t1 = plan_json["trees"][0]
     assert json.loads((root / t1["config_path"]).read_text()) == {"mode": "ok"}
     assert t1["spec"] == review.run_spec(plan, plan.trees[0], t1["config_path"])
-    assert t1["spec"]["evals"] == [{"split": "dev", "test_path": "datasets/A/dev.pubtator"}]
+    assert t1["spec"]["evals"] == [{"split": "dev", "test_path": "datasets/A/dev.pubtator",
+                                    "train_path": "datasets/A/train.pubtator"}]
     st = batch.read_status(bdir)
     assert st["state"] == "preparing" and states(st) == ["pending", "pending"] and st["coordinator"] is None
+    assert st["dataset"] == "A"
     with pytest.raises(batch.BatchError):  # never overwritten
         batch.prepare(root, plan)
     assert json.loads((bdir / "batch.json").read_text()) == plan_json

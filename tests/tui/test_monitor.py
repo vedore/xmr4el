@@ -94,6 +94,20 @@ def text(widget):
     return str(widget.render())
 
 
+def test_log_update_before_mount_uses_latest_run(live):
+    run, _ = live
+
+    async def check(app, pilot, screen):
+        panel = LogPanel(screen.run, app.root)
+        panel.set_run(screen.run)  # scan can land between mount() and composition
+        await screen.mount(panel)
+        await pilot.pause()
+        assert panel.query_one(LogView) is not None
+        await panel.remove()
+
+    run_monitor(run.parents[2], check)
+
+
 def resources_text(screen):
     return text(screen.query_one("#resources-text"))
 

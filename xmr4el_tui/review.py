@@ -20,6 +20,7 @@ RUN_NAME = re.compile(r"[A-Za-z0-9_.-]+")          # what the runner accepts as 
 STAGE_NAMES = {"Feature construction": "Features"}
 STAGES = ("Features", "Hierarchy", "Matcher", "Search", "Other")
 MISSING = object()  # a key the configuration does not have (distinct from an explicit null)
+DF_PATHS = {components.path_of(s, f) for s in components.SLOTS for c in s.components for f in c.fields if f.kind == "df"}
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,8 @@ def diff(old, new):
     by path, never compared as text or by key order."""
     (a, la), (b, lb) = effective(old), effective(new)
     changes = [Change(stage_of(p), p, la.get(p) or lb[p], a.get(p, MISSING), b.get(p, MISSING))
-               for p in dict.fromkeys([*a, *b]) if not same(a.get(p, MISSING), b.get(p, MISSING))]
+               for p in dict.fromkeys([*a, *b]) if not (components.same if p in DF_PATHS else same)(
+                   a.get(p, MISSING), b.get(p, MISSING))]
     return sorted(changes, key=lambda c: STAGES.index(c.stage))  # stable: pipeline order inside a stage
 
 
@@ -214,6 +216,9 @@ def run_name(plan_, tree):
 
 def run_spec(plan_, tree, model_config_path):
     """The experiment runner's spec (scripts/run_experiment.py) for one tree: the shared training file and the enabled
-    evaluation splits; the model config file is the caller's to write from `tree.config`."""
+    evaluation splits; the model config file is the caller's to write from `tree.config`. Each evaluation's
+    `train_path` is the training file the tree is trained on (the mention strings it has seen), as in
+    configs/experiments/*.json; the draft has no per-evaluation override."""
     return {"name": run_name(plan_, tree), "model_config": model_config_path, "train_path": plan_.dataset.train,
-            "evals": [{"split": e.split, "test_path": e.path} for e in plan_.dataset.enabled()]}
+            "evals": [{"split": e.split, "test_path": e.path, "train_path": plan_.dataset.train}
+                      for e in plan_.dataset.enabled()]}

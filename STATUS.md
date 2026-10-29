@@ -6,6 +6,31 @@ Commands: `docs/results.md` § Commands.
 
 ## Resume here
 
+**2026-10-29 Step 6 audit and targeted repairs (working tree; not committed/pushed):** starting tree was clean at
+`18dfefd`. Report: `docs/audits/new_experiment_step6.md` (matrix, findings, reproductions, limits, manual checks).
+Fixed batch worker/handoff cleanup, persistence-error cleanup, stop-after-hashing race, completed-plan replay,
+fast-completion launch reporting, malformed status/lock errors, inherited test-runner override, output completeness
+and launch-input hash verification, non-UTF-8 failure logs, Batch Monitor log mounting/replacement races, DF
+count-versus-fraction dirty/diff semantics, malformed component kwargs and dataset discovery/sniff/cache gaps.
+Monitor now names its dataset; corrected minimum-leaf help and stale TUI docs. Scientific algorithms, metrics,
+`EVAL_PROTOCOL` and comparison rules unchanged. No biomedical training, downloads, GPU use or research-artifact edits.
+Verification: full suite **455 passed / 0 failed / 0 skipped**; final configuration subset **93 passed**; four newly
+added boundary regressions **4 passed** (459 collected cases total, 50 added); ruff and whitespace clean. Real
+synthetic processes verify sequential/continue-on-failure, lock contention, cancellation/worker cleanup, parent
+process exit, UI Leave Running and fresh-app reconnection. Recommendation: **Ready with limitations**.
+**2026-10-29 eval `train_path` (Section F item 4 closed):** `review.run_spec` now sets every enabled evaluation's
+`train_path` to the confirmed shared training file (what `configs/experiments/*.json` do; the draft has no per-eval
+override, none invented), so Review-batch evals get `strings`/seen-unseen, `hybrid`, `strings_sha256` and a
+provenance hash of the training file. Metrics, `EVAL_PROTOCOL`, `assess` unchanged. Tests: run_spec/plan asserts in
+`test_review_batch.py`, `test_batch.py`; `tests/test_run_experiment.py::test_review_batch_spec_records_seen_unseen_evidence`
+(real synthetic tfidf run + `comparison.read_facts`, no conflict). Dashboard: `tab`/`shift+tab` now cycle panels
+(Explorer uses arrows; ctrl+tab, `]`/`[` kept). Full suite 460 pass, ruff clean. Limit: batches launched before this
+change stay without strings evidence (re-evaluate); training file is the evaluated tree's, so a tree trained elsewhere
+still needs a hand-written spec.
+**NEXT:** manual terminal/SSH and Linux checks in the report; real workload smoke test remains the user's separate
+action. V1 intentionally does not recover or kill surviving runners after coordinator SIGKILL. Unsaved drafts are
+session-only; No commit/push made.
+
 **Branches (2026-10-22):** lasigeBioTM/XMR4EL `main` = vedore/xmr4el `main` = orphan release `8d2e213` (only upstream branch). `tui` = `8d2e213` + one commit whose tree = old `repeat` tip `f54ae3a` (STATUS, AGENTS, audits, diagnostics, PECOS/scispaCy artifacts, full results.md, all tests). Old `repeat`/`release`/old `main` deleted locally and on the fork; their history is only in `../xmr4el-old-history.bundle` (`git clone ../xmr4el-old-history.bundle` to inspect). NEXT: TUI work on `tui` (Plan H item 8: CLI/TUI); ship to `main` by copying kept files, not merging dev-only files.
 
 **TUI (branch `tui`; design `docs/design/tui.md`, code map `docs/design/tui_architecture.md`; Plan T dropped 2026-10-23).** Built: increment 1 (Runs, Run Overview/Log/Inputs, Compare; `tui` extra textual==8.2.8, CI/Docker `--extra tui`); increment 2 steps 1-5 (runner `-check`/`-run_dir`/bindings/exit 3, process identity + `stopped` + heartbeat, `events.jsonl` stages, liveness RUNNING/LOST/UNVERIFIED, Setup/Review/spawn in `xmr4el_tui/launch.py`); Setup rework after the user tried `n` (`517810c`: pickers for config/dataset/training file/split, arrow keys, ctrl+o spec picker, Trees screen `t` with `e` evaluate). pytest 150, ruff clean. Details per step: `git log` on `tui`.

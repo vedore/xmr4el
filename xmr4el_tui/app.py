@@ -64,7 +64,7 @@ class XMR4ELApp(App):
     CSS_PATH = "app.tcss"
     TITLE = "XMR4EL"
     BINDINGS = [Binding("question_mark", "help", "keys"), Binding("f1", "help", "keys", show=False),
-                Binding("n", "new_experiment", "new", show=False), Binding("ctrl+n", "notifications", "notifications"),
+                Binding("n", "new_experiment", "new", show=False), Binding("ctrl+n", "notifications", "notices"),
                 Binding("ctrl+c", "quit", "quit", show=False, priority=True),
                 Binding("escape", "escape", "cancel", show=False, priority=True)]
 

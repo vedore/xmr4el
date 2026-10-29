@@ -66,7 +66,28 @@ def write_atomic(path, obj):
 
 
 def read_status(batch_dir):
-    return read_dict(Path(batch_dir, "status.json"))
+    st = read_dict(Path(batch_dir, "status.json"))
+    if not st or not isinstance(st.get("state"), str) or st["state"] not in (*ACTIVE, *TERMINAL):
+        return None
+    if not all(isinstance(st.get(k), str) for k in ("batch_id", "name", "created", "updated")):
+        return None
+    if st.get("coordinator") is not None and not isinstance(st["coordinator"], dict):
+        return None
+    if not isinstance(st.get("trees"), list):
+        return None
+    for t in st["trees"]:
+        if not isinstance(t, dict) or not all(isinstance(t.get(k), str) for k in ("id", "name", "state")):
+            return None
+        if t["state"] not in TREE_WORDS or not all(k in t for k in ("run_id", "started", "finished", "exit_code", "error")):
+            return None
+        if any(t[k] is not None and not isinstance(t[k], str) for k in ("run_id", "started", "finished", "error")):
+            return None
+    if any(st.get(k) is not None and not isinstance(st[k], str) for k in ("created", "updated", "started", "finished", "current", "error")):
+        return None
+    ids = [t["id"] for t in st["trees"]]
+    if len(ids) != len(set(ids)) or st.get("current") is not None and st["current"] not in ids:
+        return None
+    return st
 
 
 def write_status(batch_dir, status):
@@ -163,12 +184,12 @@ def prepare(root, plan_):
     try:
         hashes = hash_inputs(root, input_paths(plan_))
         bdir.mkdir(parents=True)
-        (bdir / "configs").mkdir()
     except FileExistsError:
         raise BatchError(f"Batch directory {BATCHES_DIR / plan_.id} already exists.") from None
     except OSError as err:
         raise BatchError(f"Cannot prepare the batch: {err}") from err
     try:
+        (bdir / "configs").mkdir()
         trees = []
         for t in plan_.trees:
             rel = BATCHES_DIR / plan_.id / "configs" / f"{t.id}.json"
@@ -190,6 +211,7 @@ def prepare(root, plan_):
             f.write(text)
         write_status(bdir, {
             "v": 1, "batch_id": plan_.id, "name": plan_.name, "state": "preparing",
+            "dataset": f"{d.name} — {d.variant}" if d.variant else d.name,
             "plan_sha256": hashlib.sha256(text.encode()).hexdigest(), "coordinator": None, "current": None,
             "stop_requested": None, "created": created, "started": None, "finished": None, "error": None,
             "trees": [{"id": t["id"], "name": t["name"], "state": "pending", "run_id": None, "pid": None,
@@ -234,6 +256,8 @@ def start(root, bdir, runner=None):
                                                                      os.environ.get("PYTHONPATH")]))}
     if runner:
         env["XMR4EL_TEST_RUNNER"] = str(runner)
+    else:
+        env.pop("XMR4EL_TEST_RUNNER", None)
     try:
         with open(bdir / "coordinator.log", "a") as log:
             child = subprocess.Popen([sys.executable, "-m", "xmr4el_tui.coordinator", str(bdir.relative_to(root))],
@@ -245,10 +269,11 @@ def start(root, bdir, runner=None):
     deadline = time.monotonic() + START_TIMEOUT
     while True:
         st = read_status(bdir) or {}
+        if st.get("started") and (st.get("coordinator") or {}).get("pid") == child.pid:
+            return child  # a fast batch may already have finished before this first read
         if st.get("state") in TERMINAL:
+            child.wait(timeout=5)
             raise BatchError(f"The batch did not start: {st.get('error') or st['state']}")
-        if st.get("state") == "running" and (st.get("coordinator") or {}).get("pid") == child.pid:
-            return child
         if child.poll() is not None:
             tail = (Path(bdir, "coordinator.log").read_text().strip().splitlines() or ["no output"])[-1]
             fail(bdir, f"coordinator exited {child.returncode} at startup: {tail}")
@@ -268,11 +293,14 @@ def start(root, bdir, runner=None):
 def launch(root, plan_, runner=None):
     """Prepare and start a batch (a worker's job). One running batch at a time: another one's lock refuses it before
     anything is written. Returns (batch directory, coordinator Popen)."""
-    other = holder(root)
-    if other:
-        raise BatchError(f"Another batch is running ({other}). Stop it or wait for it to finish.")
-    bdir = prepare(root, plan_)
-    return bdir, start(root, bdir, runner)
+    try:
+        other = holder(root)
+        if other:
+            raise BatchError(f"Another batch is running ({other}). Stop it or wait for it to finish.")
+        bdir = prepare(root, plan_)
+        return bdir, start(root, bdir, runner)
+    except OSError as err:
+        raise BatchError(f"Cannot launch the batch: {err}") from err
 
 
 # --- discovery ----------------------------------------------------------------------------------------------------------
@@ -326,14 +354,17 @@ def info(batch_dir):
     if st is None or not isinstance(st.get("trees"), list) or not isinstance(st.get("state"), str):
         return Info(batch_dir.name, batch_dir, batch_dir.name, "unreadable", {}, "status.json missing or invalid")
     state = st["state"]
-    if state in ACTIVE and not alive(batch_dir):
-        try:
-            age = (datetime.now() - datetime.fromisoformat(st.get("updated") or st["created"])).total_seconds()
-        except (ValueError, KeyError, TypeError):
-            age = PREPARING_GRACE
-        if state != "preparing" or age > PREPARING_GRACE:  # a young preparing batch is still being started
-            st = mark_lost(batch_dir) or st
-            state = st["state"]
+    try:
+        if state in ACTIVE and not alive(batch_dir):
+            try:
+                age = (datetime.now() - datetime.fromisoformat(st.get("updated") or st["created"])).total_seconds()
+            except (ValueError, KeyError, TypeError):
+                age = PREPARING_GRACE
+            if state != "preparing" or age > PREPARING_GRACE:  # a young preparing batch is still being started
+                st = mark_lost(batch_dir) or st
+                state = st["state"]
+    except OSError as err:
+        return Info(batch_dir.name, batch_dir, st["name"], "unreadable", {}, f"Cannot inspect batch: {err}")
     if state == "running" and stop_requested(batch_dir):
         state = "stopping"
     return Info(batch_dir.name, batch_dir, str(st.get("name") or batch_dir.name), state, st)
@@ -357,7 +388,10 @@ def scan(root, cache=None):
         if hit and sig and hit[0] == sig and hit[1].state in TERMINAL:
             out.append(hit[1])
             continue
-        found = info(p)
+        try:
+            found = info(p)
+        except OSError as err:
+            found = Info(p.name, p, p.name, "unreadable", {}, f"Cannot inspect batch: {err}")
         cache[p.name] = (sig, found)
         out.append(found)
     for gone in set(cache) - {p.name for p in dirs}:

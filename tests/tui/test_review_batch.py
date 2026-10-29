@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from xmr4el_tui import review
+from xmr4el_tui import components, review
 from xmr4el_tui.datasets import EvalInput, Selection
 from xmr4el_tui.screens import review_details
 from xmr4el_tui.draft import ExperimentDraft
@@ -56,6 +56,17 @@ def messages(issues):
 def test_identical_and_reordered_configs_have_no_differences():
     shuffled = dict(reversed(list(BASE.items())))
     assert review.diff(BASE, copy.deepcopy(BASE)) == [] and review.diff(BASE, shuffled) == []
+
+
+@pytest.mark.parametrize("key", ["vectorizer_config", "context_vectorizer_config"])
+@pytest.mark.parametrize("threshold", ["min_df", "max_df"])
+def test_document_frequency_count_and_fraction_are_different(key, threshold):
+    path = (key, "kwargs", threshold)
+    count, fraction = tweaked(path, 1), tweaked(path, 1.0)
+    changes = review.diff(count, fraction)
+    assert [c.path for c in changes] == [path]
+    assert not any(i.severity == review.CAUTION for issues in review.tree_issues(drafted(count, fraction)).values()
+                   for i in issues)
 
 
 def test_numbers_nested_keys_lists_and_stage_grouping():
@@ -131,7 +142,7 @@ def test_plan_copies_the_draft_and_makes_runner_specs():
     assert p.trees[0].config["depth"] == 3  # the plan is a copy: later edits never reach it
     spec = review.run_spec(p, p.trees[0], "cfg.json")
     assert spec == {"name": f"{d.id}_{p.trees[0].id}", "model_config": "cfg.json", "train_path": SEL.train,
-                    "evals": [{"split": "dev", "test_path": "datasets/A/dev.pubtator"}]}
+                    "evals": [{"split": "dev", "test_path": "datasets/A/dev.pubtator", "train_path": SEL.train}]}
     assert review.RUN_NAME.fullmatch(spec["name"])
     with pytest.raises(ValueError):
         review.plan(ExperimentDraft())
@@ -141,6 +152,18 @@ def test_plan_copies_the_draft_and_makes_runner_specs():
 def test_valid_batch_has_no_issues(tmp_path):
     root = make_root(tmp_path)
     assert review.validate(root, drafted(BASE, tweaked(("depth",), 3))) == []  # .txt training file passes
+
+
+@pytest.mark.parametrize("value", [None, [], "invalid"])
+def test_malformed_component_kwargs_block_preflight(value):
+    for slot in components.SLOTS:
+        if slot.id == "search":
+            continue
+        cfg = tweaked((slot.key, "kwargs"), value)
+        draft = drafted(cfg)
+        issues = review.tree_issues(draft)[draft.trees[0].id]
+        assert any(i.slot == slot.id and i.severity == review.ERROR and "kwargs" in i.message for i in issues)
+        assert draft.trees[0].config[slot.key]["kwargs"] == value
 
 
 @pytest.mark.parametrize("sel, text", [
@@ -391,7 +414,7 @@ def test_invalid_tree_shows_issues_in_the_queue_and_launch_is_refused(tmp_path):
         assert "Cannot launch an invalid batch" in footer(app)
         await pilot.press("down")
         text = "\n".join(lines(screen))
-        assert "Invalid (abc)" in text and "Issue: Clusters per node: Whole number" in text and "[Fix Issue]" in text
+        assert "Invalid (abc)" in text and "Issue: Clusters per node: Whole number" in text and "[Fix\u00a0Issue]" in text
         assert not any("Issue:" in line for line in lines_for_tree(screen, app.draft.trees[0]))  # the other tree is clean
     run_review(make_root(tmp_path), go, configs=(BASE, bad))
 
@@ -597,3 +620,27 @@ def test_pick_up_carry_drop_and_cancel_reordering(tmp_path):
         await pilot.click("#rv-grab")
         assert screen.grab is None and str(screen.query_one("#rv-grab").label) == "Reorder"
     run_review(make_root(tmp_path), go, configs=(BASE, tweaked(("depth",), 3), tweaked(("depth",), 4)))
+
+
+def test_review_row_keeps_a_gap_after_a_long_label():
+    assert str(review_details.row("Max document frequency", "1.0", indent=4).text).startswith("    Max document frequency 1.0")
+
+
+def test_review_and_builder_controls_fit_in_80_columns(tmp_path):
+    from textual.widgets import Footer
+
+    def fits(screen, width=80):
+        keys = [k for k in screen.query("FooterKey") if k.display]
+        assert keys and all(k.region.right <= width for k in keys), [k.region for k in keys]
+        for b in screen.query("#rv-moves Button, #mb-buttons Button, #rv-launch"):
+            parent = b.parent.parent if b.parent.id == "mb-buttons" else b.parent
+            assert parent.region.contains_region(b.region), b.id
+        assert isinstance(screen.query_one(Footer), Footer)
+
+    async def go(app, pilot, screen):
+        await pilot.pause()
+        fits(screen)
+        app.screen.action_edit()
+        await pilot.pause()
+        fits(app.screen)
+    run_review(make_root(tmp_path), go, size=(80, 24))

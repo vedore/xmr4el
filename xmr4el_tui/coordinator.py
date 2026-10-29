@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import signal
-import subprocess
 import sys
 import time
 import traceback
@@ -20,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from xmr4el_tui import batch, procinfo, process, runs
+from xmr4el_tui.logs import LogTail
 
 POLL = 0.2          # seconds between checks while a runner runs
 GRACE = 30          # seconds between SIGTERM and SIGKILL of a stopped runner
@@ -58,7 +58,7 @@ class Coordinator:
             except OSError as err:
                 log(f"status.json not written (attempt {attempt}): {err}")
                 time.sleep(0.5)
-        raise SystemExit(1)
+        raise OSError("status.json could not be written after two attempts")
 
     def tree(self, tree_id):
         return next(t for t in self.status["trees"] if t["id"] == tree_id)
@@ -83,6 +83,9 @@ class Coordinator:
                 self.check_inputs()
             except Fatal as err:
                 reason = err
+                break
+            if self.stopping():  # hashing large inputs can outlast a Stop request
+                reason = Fatal("stopped", "Stop Batch requested")
                 break
             self.run_tree(spec)
         if reason is None and self.stopped:  # the stop ended the last tree
@@ -140,15 +143,15 @@ class Coordinator:
         self.save()
         code, killed = self.wait()
         self.child = None
-        self.classify(entry, run_id, code, killed)
+        self.classify(entry, run_id, code, killed, spec)
         self.save(current=None)
         log(f"tree {spec['id']} {entry['state']}" + (f": {entry['error']}" if entry["error"] else ""))
 
     def signal_group(self, sig):
         """Signal the runner's process group. The child is this process's own unreaped child that leads the group it
-        created, so the pid cannot be another process; the group is verified before each signal anyway."""
+        created with start_new_session, so the group id cannot be reused before we reap it."""
         try:
-            if os.getpgid(self.child.pid) == self.child.pid:
+            if self.child.returncode is None:  # getpgid on an exited leader fails on macOS even before wait()
                 os.killpg(self.child.pid, sig)
         except (ProcessLookupError, PermissionError):
             pass
@@ -156,7 +159,15 @@ class Coordinator:
     def wait(self):
         """Wait for the runner; on a stop request SIGTERM its group, SIGKILL after GRACE. -> (exit code, how killed)."""
         killed, since = None, 0.0
-        while (code := self.child.poll()) is None:
+        while True:
+            if killed is None:
+                code = self.child.poll()
+                if code is not None:
+                    return code, None
+            elif killed == "SIGKILL" or procinfo.identity(self.child.pid) is None:
+                # Keep the leader unreaped until its workers are killed: its PID/group cannot be reused.
+                self.signal_group(signal.SIGKILL)
+                return self.child.wait(), killed
             if self.stopping() and killed is None:
                 self.save(stop_requested=self.status["stop_requested"] or batch.now())
                 log(f"stop: SIGTERM to the runner's group (pid {self.child.pid})")
@@ -167,17 +178,30 @@ class Coordinator:
                 self.signal_group(signal.SIGKILL)
                 killed = "SIGKILL"
             time.sleep(POLL)
-        if killed:  # stragglers of the group (workers) do not outlive the stop
-            self.signal_group(signal.SIGKILL if killed == "SIGKILL" else signal.SIGTERM)
-        return code, killed
 
-    def classify(self, entry, run_id, code, killed):
+    def classify(self, entry, run_id, code, killed, spec):
         run = runs.read_run(self.root / runs.RUNS_DIR / run_id, self.root)
         if killed == "SIGKILL" and run.recorded == "running" and run.identity:
             log(f"recording the forced stop: {process.record_forced(run)}")
             run = runs.read_run(run.path, self.root)
         entry.update(exit_code=code, finished=batch.now())
         if code == 0 and run.recorded == "completed":
+            expected = ["spec.json", "model_config.json", "provenance.json", "tree.json",
+                        *(f"metrics_{e['split']}.json" for e in spec["spec"]["evals"])]
+            outputs = {name: runs.read_dict(run.path / name) for name in expected}
+            missing = [name for name, data in outputs.items() if data is None]
+            if not run.tree_here:
+                missing.append("saved tree xmodel.pkl")
+            if missing:
+                entry.update(state="failed", error="Missing or invalid runner outputs: " + ", ".join(missing))
+                return
+            recorded = outputs["provenance.json"].get("inputs")
+            changed = [p for p, sha in self.plan["inputs"].items()
+                       if not isinstance(recorded, dict) or recorded.get(p) != sha]
+            if changed:
+                error = "Runner inputs differ from the approved batch snapshot: " + ", ".join(changed)
+                entry.update(state="failed", error=error)
+                raise Fatal("blocked", error)
             entry.update(state="succeeded", error=None)
         elif killed or run.recorded == "stopped":
             self.stopped = bool(killed)
@@ -190,22 +214,19 @@ class Coordinator:
                          (f"; {tail}" if tail else ""))
 
     def console_tail(self, run_id):
-        try:
-            lines = (self.root / process.CONSOLE_DIR / f"{run_id}.log").read_text().strip().splitlines()
-        except OSError:
-            return ""
-        return lines[-1][:300] if lines else ""
+        lines, _ = LogTail(self.root / process.CONSOLE_DIR / f"{run_id}.log").read(final=True)
+        return lines[-1].text[:300] if lines else ""
 
     def abort(self, err):
         """Unexpected error: stop the runner (our child), cancel what has not run, record the batch failed."""
         log("coordinator error:\n" + "".join(traceback.format_exception(err)))
-        if self.child is not None and self.child.poll() is None:
+        if self.child is not None and self.child.returncode is None:
             self.signal_group(signal.SIGTERM)
-            try:
-                self.child.wait(GRACE)
-            except subprocess.TimeoutExpired:
-                self.signal_group(signal.SIGKILL)
-                self.child.wait()
+            deadline = time.monotonic() + GRACE
+            while procinfo.identity(self.child.pid) is not None and time.monotonic() < deadline:
+                time.sleep(POLL)
+            self.signal_group(signal.SIGKILL)
+            self.child.wait()
         for t in self.status["trees"]:
             if t["state"] == "running":
                 t.update(state="failed", finished=batch.now(), error=f"coordinator error: {err}")
@@ -224,11 +245,15 @@ def main(argv=None):
             log("another coordinator holds this batch; exiting without touching it")
             return 2
         held.append(mine)
+        status = batch.read_status(here)
+        if not status or status.get("state") != "preparing":
+            log("batch is not a fresh prepared plan; refusing to restart it")
+            return 2
         (root / batch.BATCHES_DIR).mkdir(parents=True, exist_ok=True)
         slot = batch.try_lock(root / batch.GLOBAL_LOCK)
-        status = batch.read_status(here)
         if slot is None:
-            batch.fail(here, f"Another batch is running ({batch.holder(root) or 'unknown'}).")
+            Coordinator(root, here, runner).finish(
+                Fatal("failed", f"Another batch is running ({batch.holder(root) or 'unknown'})."))
             return 2
         held.append(slot)
         os.ftruncate(slot, 0)

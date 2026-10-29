@@ -32,6 +32,7 @@ from xmr4el_tui.widgets.top_bar import TopBar
 
 ACTIVE_COLUMNS = (("run", "Run"), ("type", "Type"), ("model", "Model"), ("state", "State"), ("elapsed", "Elapsed"),
                   ("stage", "Stage"), ("started", "Started"), ("device", "Device"), ("id", "Run id"))
+NARROW = {"run": 16, "model": 12}  # the long names are cropped so State and Elapsed stay in view at 80 columns
 
 
 class ActiveRuns(Selectable, FullRow, DataTable):
@@ -52,18 +53,19 @@ class DetailsLoaded(Message):
 
 
 class DashboardScreen(Screen):
-    """Explorer | Description over Active runs. Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [)
-    cycle panels, ctrl+b hides / shows the explorer, < / > resize it, ctrl+r rescans."""
+    """Explorer | Description over Active runs. tab / shift+tab (also ctrl+tab, ctrl+shift+tab, ] and [)
+    cycle panels; hidden keys (in the ? panel): ctrl+b hides / shows the explorer, < / > resize it, ctrl+r rescans."""
     crumbs = ("Dashboard",)
-    BINDINGS = [Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
-                Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+    BINDINGS = [Binding("tab,ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False, priority=True),
+                Binding("shift+tab,ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False,
+                        priority=True),
                 Binding("ctrl+b", "toggle_explorer", "hide / show explorer", show=False),
                 Binding("less_than_sign", f"resize_explorer({-EXPLORER_STEP})", "narrower explorer", show=False),
                 Binding("greater_than_sign", f"resize_explorer({EXPLORER_STEP})", "wider explorer", show=False),
                 Binding("ctrl+r", "rescan", "rescan", show=False),
                 Binding("r", "results", "results"), Binding("b", "batches", "batches"),
-                Binding("n", "app.new_experiment", "new experiment"),
-                Binding("c", "app.resume_experiment", "resume experiment")]
+                Binding("n", "app.new_experiment", "new"),
+                Binding("c", "app.resume_experiment", "resume")]
 
     def check_action(self, action, parameters):
         """Resume Experiment is offered while an unfinished draft exists."""
@@ -84,7 +86,7 @@ class DashboardScreen(Screen):
             self.query_one(f"#{wid}").border_title = title
         table = self.query_one(ActiveRuns)
         for key, label in ACTIVE_COLUMNS:
-            table.add_column(label, key=key)
+            table.add_column(label, key=key, width=NARROW.get(key))
         self.active_ids, self.explorer_want = [], None  # None: EXPLORER_SHARE of the width
         self.loaded, self.detail_seq = (None, Details()), 0  # (explorer key, its Details), latest request
         self.set_left_width(None)

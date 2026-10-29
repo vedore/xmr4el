@@ -288,7 +288,7 @@ def test_center_opens_destinations_over_the_current_screen(tmp_path):
 
 # --- footer -------------------------------------------------------------------------------------------------------
 def test_footer_feedback_replaces_toasts_and_expires(tmp_path, monkeypatch):
-    monkeypatch.setattr(app_module, "FEEDBACK_SECONDS", 0.3)
+    monkeypatch.setattr(app_module, "FEEDBACK_SECONDS", 60)
 
     async def check(app, pilot):
         screen, tree = await open_results(app, pilot)
@@ -300,12 +300,15 @@ def test_footer_feedback_replaces_toasts_and_expires(tmp_path, monkeypatch):
             await cursor_to(pilot, tree, key)
             await pilot.press("space")
         assert "Maximum of 3 challengers" in footer_note(app), "newer feedback replaces older at once"
-        await pilot.pause(0.2)
+        old = app.note
         app.say("newer")
-        await pilot.pause(0.2)  # the replaced message's time is over: its timer cannot clear the newer one
+        app.clear_note(old)  # a queued callback from the replaced timer cannot clear the newer message
         assert "newer" in footer_note(app)
-        await pilot.pause(0.3)
+        monkeypatch.setattr(app_module, "FEEDBACK_SECONDS", 0.05)
+        app.say("expires")
+        await pilot.pause(0.2)
         assert footer_note(app) == "" and not app._notifications, "back to the shortcuts; nothing toasted"
+        monkeypatch.setattr(app_module, "FEEDBACK_SECONDS", 60)
         app.say("left behind")
         await pilot.press("escape")  # back to the Dashboard
         await pilot.pause()

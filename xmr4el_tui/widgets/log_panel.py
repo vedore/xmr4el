@@ -61,7 +61,8 @@ class LogPanel(Vertical):
     def set_run(self, run):
         """The run as the latest scan sees it; once finished, the next tick is the final read."""
         self.run = run
-        self.header()
+        if self.is_mounted:
+            self.header()
 
     # --- reading ---------------------------------------------------------------------------------------------
     def tick(self):

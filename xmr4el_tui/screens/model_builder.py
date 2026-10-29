@@ -67,7 +67,7 @@ class ModelBuilderScreen(Screen):
     tree N."""
     crumbs = ("Model Builder",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "apply", "apply"),
-                Binding("u", "discard", "discard changes"), Binding("f2", "rename", show=False),
+                Binding("u", "discard", "discard"), Binding("f2", "rename", show=False),
                 Binding("alt+left", "move_tree(-1)", show=False),
                 Binding("alt+right", "move_tree(1)", show=False),
                 Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False),
@@ -384,7 +384,8 @@ class ModelBuilderScreen(Screen):
 
     def dirty(self):
         ed = self.editing
-        return ed is not None and (bool(ed.errors) or ed.draft != components.part(self.tree.config, ed.slot))
+        return ed is not None and (bool(ed.errors) or not components.same(
+            ed.draft, components.part(self.tree.config, ed.slot)))
 
     def fill_preview(self, scroll=False):
         """Whole proposed configuration; the edited slot's keys (by JSON path) on the accent tint, the rest muted."""

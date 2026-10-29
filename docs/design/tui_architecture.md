@@ -1,8 +1,8 @@
 # XMR4EL TUI code architecture
 
-Status: implemented, Dashboard, Run monitor and Results (2026-10-28). Implements [tui.md](tui.md); section
-numbers `§n` refer to it. §1-§6 describe the current code; §7-§10 are the build history. New Experiment is
-planned: its key only says what it would open.
+Status: implemented, Dashboard, Run Monitor, Results, Dataset Setup, Model Builder, Review Batch and detached
+batch execution (2026-10-29). Implements [tui.md](tui.md); section numbers `§n` refer to it. §7-§10 are build
+history. Verification and remaining limits: [Step 6 audit](../audits/new_experiment_step6.md).
 
 ## 1. Rules
 
@@ -15,8 +15,8 @@ planned: its key only says what it would open.
 - Every file read goes through `runs` / `progress` / `logs` / `services/experiment_repository.py`; renderers in
   `screens/dashboard_details.py` and `screens/monitor_details.py` read no file. The UI thread reads no file either: scans and the selected
   item's Details run in thread workers.
-- Run directories are the only durable state. The app holds the last Snapshot and the Launches
-  (Popen handles of children it started); nothing else.
+- Durable state includes run directories, `outputs/batches/` plans/status/locks and the dataset registry
+  `outputs/tui/datasets.json`. The shared experiment draft and its navigation resume record are session memory.
 - Every file read tolerates missing or corrupt input, and fields of the wrong JSON type, and reports it as
   data (`Run.problems`, `Details.problems`, `Snapshot.problem`), never as an exception into the UI.
 - Imports at the top of each module.

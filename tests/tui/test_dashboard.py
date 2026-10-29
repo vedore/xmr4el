@@ -250,11 +250,11 @@ def test_keyboard(tmp_path):
         screen = app.screen
         assert isinstance(screen, DashboardScreen) and isinstance(app.focused, Explorer)
         assert explorer_key(app) == ("group", "models")
-        await pilot.press("tab")
+        await pilot.press("down")
         assert explorer_key(app) == ("dataset", "datasets/My Custom Dataset")
-        await pilot.press("tab", "shift+tab")
+        await pilot.press("down", "up")
         assert explorer_key(app) == ("dataset", "datasets/My Custom Dataset")
-        await pilot.press("tab")  # the tree: collapsed by default
+        await pilot.press("down")  # the tree: collapsed by default
         node = app.focused.cursor_node
         assert not node.is_expanded
         await pilot.press("right")
@@ -263,16 +263,20 @@ def test_keyboard(tmp_path):
         assert not node.is_expanded
         await pilot.press("left")
         assert explorer_key(app) == ("dataset", "datasets/My Custom Dataset"), "left on a collapsed node: parent"
-        await pilot.press("tab", "right", "tab", "tab", "tab")  # third eval: dev of alpha
+        await pilot.press("down", "right", "down", "down", "down")  # third eval: dev of alpha
         assert explorer_key(app) == ("eval", "2026-10-20_13-36-20_alpha", "dev")
         await pilot.press("enter")
         assert isinstance(app.focused, Description)
         assert screen.query_one(Description).text().startswith("dev · alpha\n")
-        await pilot.press("ctrl+tab")
+        await pilot.press("tab")
         assert app.focused.id == "active-runs"
-        await pilot.press("ctrl+tab")
+        await pilot.press("tab")
         assert isinstance(app.focused, Explorer)
-        await pilot.press("ctrl+shift+tab")
+        await pilot.press("tab")
+        assert isinstance(app.focused, Description)
+        await pilot.press("shift+tab", "shift+tab")
+        assert app.focused.id == "active-runs"
+        await pilot.press("ctrl+tab", "ctrl+shift+tab")
         assert app.focused.id == "active-runs"
         await pilot.press("left_square_bracket", "escape")
         assert isinstance(app.focused, Explorer), "] / [ fall back for terminals without ctrl+tab; esc: explorer"
@@ -600,7 +604,7 @@ def test_log_viewer_opens_searches_filters_and_returns(tmp_path):
 
     async def check(app, pilot):
         desc = app.screen.query_one(Description)
-        await pilot.press("tab", "tab", "right", "tab", "tab", "tab")  # the tree, expanded: dev of alpha
+        await pilot.press("down", "down", "right", "down", "down", "down")  # the tree, expanded: dev of alpha
         assert app.screen.query_one(Explorer).selected_key() == ("eval", "2026-10-20_13-36-20_alpha", "dev")
         await settle(app, pilot)
         await pilot.press("enter")

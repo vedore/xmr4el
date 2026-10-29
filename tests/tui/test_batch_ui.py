@@ -7,6 +7,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent))
 from test_batch import FAKE, wait_for  # noqa: E402
 from test_review_batch import Queue, footer, make_root, run_review, settle  # noqa: E402
@@ -48,6 +50,12 @@ def stop_all(root):
     assert wait_for(lambda: not any(i.active for i in batch.scan(root)), 40)
 
 
+@pytest.fixture(autouse=True)
+def clean_batch_processes(tmp_path):
+    yield
+    stop_all(tmp_path)
+
+
 async def until(pilot, cond, seconds=15):
     """Wait for `cond` while the app keeps running (a blocking sleep would starve its workers and messages)."""
     end = time.monotonic() + seconds
@@ -59,7 +67,7 @@ async def until(pilot, cond, seconds=15):
 
 
 async def launch(app, pilot):
-    await pilot.press("l")
+    await pilot.press("l", "l")  # the footer asks first
     assert await until(pilot, lambda: isinstance(app.screen, BatchMonitorScreen))
     await pilot.pause()
     return app.screen
@@ -72,6 +80,8 @@ def test_launch_starts_a_real_batch_and_opens_its_monitor(tmp_path, monkeypatch)
     async def go(app, pilot, screen):
         assert isinstance(screen, ReviewBatchScreen)
         before = [(t.id, t.name, t.config) for t in app.draft.trees]
+        await pilot.press("l")
+        assert "Launch 2 trees?" in footer(app) and not screen.launching
         await pilot.press("l")
         await pilot.press("l")  # a repeated press while preparing must not launch twice
         assert await until(pilot, lambda: isinstance(app.screen, BatchMonitorScreen))
@@ -96,7 +106,7 @@ def test_launch_is_reachable_by_tab_and_the_monitor_esc_goes_to_the_dashboard(tm
         assert app.focused is screen.query_one(Queue) or app.focused.id == "rv-queue"
         await pilot.press("tab")
         assert app.focused.id == "rv-launch"
-        await pilot.press("enter")
+        await pilot.press("enter", "l")  # Launch Batch asks; the footer's `l` confirms
         assert await until(pilot, lambda: isinstance(app.screen, BatchMonitorScreen))
         batch_id = app.screen.batch_id
         await pilot.press("escape")
@@ -166,7 +176,7 @@ def test_unapplied_edit_survives_monitor_esc_and_resume_restores_the_hierarchy(t
         assert [n for n in stack_names(app) if n != "Screen"] == ["DashboardScreen"]
         assert tree.config == before and [k for k, _ in app.draft.resume] == ["setup", "builder"]
         assert app.draft.confirmed is not None
-        assert app.screen.check_action("app.resume_experiment", ()) and "resume experiment" in str(
+        assert app.screen.check_action("app.resume_experiment", ()) and "resume" in str(
             [b.description for b in app.screen.BINDINGS if b.key == "c"])
         assert batch.info(batch.directory(root, batch_id)).state in ("running", "preparing")
         await pilot.press("c")  # Resume Experiment: the screens are rebuilt over the Dashboard
@@ -238,7 +248,7 @@ def test_a_failed_launch_keeps_the_review_screen_and_the_draft(tmp_path, monkeyp
 
     async def go(app, pilot, screen):
         trees = [t.id for t in app.draft.trees]
-        await pilot.press("l")
+        await pilot.press("l", "l")
         assert await until(pilot, lambda: "Batch not started" in footer(app), 10)
         assert app.screen is screen and "The coordinator did not start: boom" in footer(app)
         assert [t.id for t in app.draft.trees] == trees and not screen.launching
@@ -256,7 +266,7 @@ def test_a_second_batch_is_refused_while_one_runs(tmp_path, monkeypatch):
         app.go_to(screen, 0)
         await pilot.pause()
         app.draft.id = "other"
-        await pilot.press("l")
+        await pilot.press("l", "l")
         assert await until(pilot, lambda: "Another batch is running" in footer(app), 10)
         assert app.screen is screen and len(list((root / "outputs/batches").glob("2*"))) == 1
         stop_all(root)
@@ -282,6 +292,27 @@ def test_stop_batch_from_the_monitor(tmp_path, monkeypatch):
         assert await until(pilot, lambda: monitor.info.state == "stopped", 5)
         assert monitor.info.count("cancelled") == 2
         assert "STOPPED" in str(monitor.query_one("#bm-overview").render())
+    run_review(root, go)
+
+
+def test_monitor_replaces_logs_during_selection_and_scans(tmp_path, monkeypatch):
+    from xmr4el_tui.widgets.log_panel import LogPanel
+
+    root = make_root(tmp_path)
+    with_runner(root, monkeypatch, 60)
+
+    async def go(app, pilot, screen):
+        monitor = await launch(app, pilot)
+        assert await until(pilot, lambda: bool(app.snapshot.runs))
+        for _ in range(8):
+            app.rescan()
+            await pilot.press("down", "up")
+        await settle(app, pilot)
+        panels = list(monitor.query_one("#bm-logs").query(LogPanel))
+        assert len(panels) == 1 and panels[0].run.id == monitor.tree()["run_id"]
+        assert panels[0].query_one("#log-search") is not None
+        await pilot.press("escape")
+        assert isinstance(app.screen, DashboardScreen)
     run_review(root, go)
 
 
@@ -361,3 +392,28 @@ def test_batch_notifications_report_transitions_once():
     new = Notifications()
     new.observe_batches([], at)  # a batch that appears later reports its start
     assert new.observe_batches([info("running", {"t1": "running"})], at)[0].title == "Batch started"
+
+
+def test_quit_dialog_buttons_fit_in_80_columns(tmp_path):
+    from types import SimpleNamespace
+
+    async def go(app, pilot, screen):
+        app.push_screen(QuitDialog([SimpleNamespace(name="Experiment batch")]))
+        await pilot.pause()
+        box = app.screen.query_one("#stop-box").region
+        for button in app.screen.query(Button):
+            assert box.contains_region(button.region), button.id
+    run_review(make_root(tmp_path), go, size=(80, 24))
+
+
+def test_launch_confirmation_can_be_cancelled(tmp_path, monkeypatch):
+    root = make_root(tmp_path)
+    calls = with_runner(root, monkeypatch, 60)
+
+    async def go(app, pilot, screen):
+        await pilot.press("l")
+        assert "Launch 2 trees?" in footer(app)
+        await pilot.press("escape")
+        await pilot.press("l")  # asks again instead of launching
+        assert "Launch 2 trees?" in footer(app) and not calls and isinstance(app.screen, ReviewBatchScreen)
+    run_review(root, go)

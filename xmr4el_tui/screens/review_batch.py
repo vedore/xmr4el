@@ -52,8 +52,8 @@ class Queue(Rows):
     """Execution Queue: up / down or tab select a tree (nothing is edited), enter reviews its details, e edits it in the
     Model Builder, space picks it up to reorder: up / down then carry it, space drops it, esc puts everything back.
     alt+left / alt+right move the selected tree one place without picking it up."""
-    BINDINGS = [Binding("enter", "screen.focus_details", "review details"), Binding("e", "screen.edit", "edit tree"),
-                Binding("space", "screen.grab", "reorder / drop"),
+    BINDINGS = [Binding("enter", "screen.focus_details", "details"), Binding("e", "screen.edit", "edit"),
+                Binding("space", "screen.grab", "reorder"),
                 Binding("alt+left", "screen.move(-1)", show=False), Binding("alt+right", "screen.move(1)", show=False)]
 
     def action_cursor_up(self):
@@ -113,7 +113,7 @@ class ReviewBatchScreen(Screen):
     """Review mode: enter on the queue reads a tree's details, e edits it (the Model Builder says "Editing"). Tab moves
     between the panels; esc goes back one, from the queue to the Model Builder."""
     crumbs = ("Review Batch",)
-    BINDINGS = [Binding("escape", "back", "back"), Binding("f2", "rename_batch", "rename batch"),
+    BINDINGS = [Binding("escape", "back", "back"), Binding("f2", "rename_batch", "rename"),
                 Binding("l", "launch", "launch"),
                 Binding("alt+left", "move(-1)", show=False),
                 Binding("alt+right", "move(1)", show=False),
@@ -425,8 +425,8 @@ class ReviewBatchScreen(Screen):
             self.app.open_builder(issue)
 
     def action_launch(self):
-        """Launch Batch: refused while validating, preparing or invalid; otherwise a copy of the draft goes to the
-        launcher in a worker. Tree and batch-name issues are rechecked now, the dataset in the worker."""
+        """Launch Batch: refused while validating, preparing or invalid; otherwise the footer asks and a second `l` (or
+        click) sends a copy of the draft to the launcher in a worker. Tree and batch-name issues are rechecked now, the dataset in the worker."""
         if self.launching:
             self.app.say("A launch is already in progress.", "warning", self)
             return
@@ -440,6 +440,9 @@ class ReviewBatchScreen(Screen):
         elif found:
             self.app.say(f"Cannot launch an invalid batch: {len(found)} blocking issue{'s' * (len(found) != 1)}.",
                          "error", self)
+        elif not self.app.asked("l"):
+            n = len(self.draft.trees)
+            self.app.ask(f"Launch {n} tree{'s' * (n != 1)}?", "l", "launch")
         else:
             self.launching = True
             self.fill_head()

@@ -137,7 +137,8 @@ dictionary answers); the TUI compares evaluations only through these. An input f
 fails it before metrics are written.
 
 Browse saved trees, their evaluations and active runs in the terminal (optional `tui` extra; reads
-`outputs/runs/` and `outputs/saved_trees/` only, never loads a tree; writes nothing except when it cancels a run):
+run and tree metadata without loading a tree; New Experiment writes dataset registrations, batch snapshots
+and execution state, and launches the existing runner):
 
 ```bash
 uv sync --locked --extra tui
@@ -145,7 +146,7 @@ uv sync --locked --extra tui
 ```
 
 Dashboard: Explorer (Models > dataset > tree > evaluation, then runs without a saved tree), Description of
-the selected item, Active runs. `enter` describes, `]` / `[` (or `ctrl+tab`) cycle panels, `ctrl+b` hides the
+the selected item, Active runs. `enter` describes, `tab` / `shift+tab` (also `]` / `[`, `ctrl+tab`) cycle panels, `ctrl+b` hides the
 explorer, `<` / `>` resize it, `ctrl+r` rereads every run file, `?` lists the keys, `ctrl+c` twice quits.
 Mouse drag selects text and copies it. It rescans every 5 s. `View Logs` in the Description opens a run's log.
 

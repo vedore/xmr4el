@@ -287,6 +287,20 @@ def test_invalid_apply_commits_nothing_and_cancel_restores(tmp_path):
     run_builder(make_root(tmp_path), go)
 
 
+def test_document_frequency_type_change_requires_apply_or_discard(tmp_path):
+    async def go(app, pilot, screen):
+        await edit(pilot, screen, "char_tfidf")
+        original = screen.tree.config["vectorizer_config"]["kwargs"]["max_df"]
+        assert type(original) is float and original == 1.0
+        await type_into(pilot, screen, "max_df", "1")
+        assert screen.dirty(), "1 document and 100% of documents are different scientific settings"
+        await pilot.press("escape")
+        assert "Discard unapplied" in footer(app)
+        await pilot.press("u")
+        assert type(screen.tree.config["vectorizer_config"]["kwargs"]["max_df"]) is float
+    run_builder(make_root(tmp_path), go)
+
+
 def test_esc_with_unapplied_changes_asks(tmp_path):
     async def go(app, pilot, screen):
         tree = app.draft.trees[0]

@@ -870,7 +870,8 @@ enabled splits, tree count, "On tree failure: continue", readiness) over Executi
 
 ### 5.16 New Experiment: Batch execution (built 2026-10-29)
 
-Launch Batch (Review Batch, `l` or the button) starts a **detached coordinator**; the TUI never owns a run.
+Launch Batch (Review Batch, `l` or the button) first asks in the footer ("Launch N trees?", `l` confirms, esc
+cancels), then starts a **detached coordinator**; the TUI never owns a run.
 
 - **Launch.** Tree and name issues are rechecked, then a worker re-validates the dataset and calls `batch.launch`
   (`review.plan` copy of the draft, id = launch time + draft id). Hashing the inputs and starting the coordinator never
@@ -932,7 +933,7 @@ Launch Batch (Review Batch, `l` or the button) starts a **detached coordinator**
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
 | Everywhere | `ctrl+c` (also `ctrl+q`), then `ctrl+c` again / `esc` | Quit after the footer confirmation (no timer) / cancel. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
 | Everywhere | `ctrl+n` | Notification center (§4): `↑↓`, `enter` opens, `c` clears all, `esc` / `ctrl+n` closes. |
-| Dashboard | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[` where the terminal sends ctrl+tab as tab) | Next / previous panel: Explorer, Description, Active runs. |
+| Dashboard | `tab` / `shift+tab` (also `ctrl+tab` / `ctrl+shift+tab`, `]` / `[`); the Explorer moves with the arrows | Next / previous panel: Explorer, Description, Active runs. |
 | Explorer | `up` `down`, `tab` `shift+tab` | Previous / next visible item. Shared widget (Dashboard, Results): a tree is two rows, `name · descriptor` (features and depth of its training run's model_config, nothing invented) then `Oct 28 · a64127ef` (training date, short tree id: 8 characters, more where two ids share them; `explorer.short_ids`); a gap row above every later tree / dataset / group, none between evaluations; a click anywhere on an item's rows selects it. |
 | Explorer | `left` / `right` | Collapse, or go to the parent / expand. |
 | Explorer | `enter` | Describe the item and focus Description. |

@@ -44,7 +44,7 @@ class DatasetList(Rows):
 class ConfigRows(Rows):
     """The selected dataset's files: tab / shift+tab (or up / down) move between controls, enter activates (a file
     opens the picker), space selects a training variant or toggles an evaluation split. A click on [x] toggles."""
-    BINDINGS = [Binding("enter", "select", "choose file"), Binding("space", "screen.toggle", "toggle"),
+    BINDINGS = [Binding("enter", "select", "choose"), Binding("space", "screen.toggle", "toggle"),
                 Binding("tab", "step(1)", show=False), Binding("shift+tab", "step(-1)", show=False)]
 
     def action_step(self, step):
@@ -70,8 +70,8 @@ class ConfigRows(Rows):
 class DatasetSetupScreen(Screen):
     """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, ctrl+r rereads datasets."""
     crumbs = ("New Experiment",)
-    BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "confirm", "confirm dataset"),
-                Binding("u", "discard", "discard changes"), Binding("m", "builder", "model builder"),
+    BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "confirm", "confirm"),
+                Binding("u", "discard", "discard"), Binding("m", "builder", "builder"),
                 Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
                 Binding("ctrl+r", "reload", "reread datasets", show=False)]

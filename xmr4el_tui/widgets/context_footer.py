@@ -16,7 +16,7 @@ class ContextFooter(Horizontal):
 
     def compose(self):
         yield Static(id="footer-note")
-        yield Footer(show_command_palette=False)
+        yield Footer(show_command_palette=False, compact=True)
 
     def on_mount(self):
         self.update_state()

@@ -177,3 +177,9 @@ def test_same_minute_evaluations_get_distinct_labels(tmp_path):
     labels = [n.label for n, _ in build(tmp_path).values() if n.kind == "eval"]
     assert len(labels) == len(set(labels)) == 3
     assert "dev · ev · 2026-10-21_10-00-01_ev" in labels
+
+
+def test_batch_run_names_lead_with_the_tree_id():
+    from xmr4el_tui.explorer import display_name
+    assert display_name("20261029-155409-a131085991d5_486852d7") == "486852d7 · batch 155409"
+    assert display_name("bc5cdr_chemical") == "bc5cdr_chemical"

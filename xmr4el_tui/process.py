@@ -81,15 +81,29 @@ def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None, r
     with open(console / f"{run_id}.log", "x") as log:
         child = subprocess.Popen(runner_args(xmodel_path, *extra, runner=runner), cwd=root, stdin=subprocess.PIPE, stdout=log,
                                  stderr=subprocess.STDOUT, start_new_session=True, text=True)
-    ident = procinfo.identity(child.pid) or {}
-    with open(console / f"{run_id}.launch.json", "x") as f:
-        json.dump({"run_id": run_id, "run_dir": str(Path(root, RUNS_DIR, run_id).resolve()), "pid": child.pid,
-                   "start": ident.get("start"), "uid": ident.get("uid"), "runtime": procinfo.runtime()}, f)
     try:
-        child.stdin.write(json.dumps(spec))
-        child.stdin.close()
-    except BrokenPipeError:  # exited before reading: the console log says why
-        pass
+        ident = procinfo.identity(child.pid) or {}
+        with open(console / f"{run_id}.launch.json", "x") as f:
+            json.dump({"run_id": run_id, "run_dir": str(Path(root, RUNS_DIR, run_id).resolve()), "pid": child.pid,
+                       "start": ident.get("start"), "uid": ident.get("uid"), "runtime": procinfo.runtime()}, f)
+        try:
+            child.stdin.write(json.dumps(spec))
+            child.stdin.close()
+        except BrokenPipeError:  # exited before reading: the console log says why
+            pass
+    except Exception:
+        # The caller has no handle yet; do not leave a live runner behind on a failed handoff.
+        if child.poll() is None:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        child.wait()
+        try:
+            child.stdin.close()
+        except BrokenPipeError:
+            pass
+        raise
     return child
 
 

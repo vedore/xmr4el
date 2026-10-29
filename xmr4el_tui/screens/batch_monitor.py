@@ -54,6 +54,7 @@ def overview_text(info):
     index = {t["id"]: i + 1 for i, t in enumerate(trees)}
     muted = theme.style("text-muted")
     lines = [Text.assemble(("Batch    ", muted), (info.name, "bold")),
+             Text.assemble(("Dataset  ", muted), str(st.get("dataset") or fmt.DASH)),
              Text.assemble(("Status   ", muted), (word(info.state), theme.style(STYLE.get(info.state, "text"), "bold"))),
              Text.assemble(("Trees    ", muted), f"{len(trees)}   ",
                            ("Succeeded ", muted), f"{info.count('succeeded')}  ", ("Failed ", muted),
@@ -65,6 +66,8 @@ def overview_text(info):
              Text.assemble(("Elapsed  ", muted), duration(info))]
     if st.get("error"):
         lines.append(Text(st["error"], style=theme.style("error")))
+    if info.problem:
+        lines.append(Text(info.problem, style=theme.style("error")))
     if info.state == "stopping":
         lines.append(Text("Stop requested: waiting for the running tree to exit.", style=theme.style("warning")))
     return Text("\n").join(lines)
@@ -123,13 +126,13 @@ class BatchMonitorScreen(Screen):
                 yield Vertical(id="bm-logs")
         yield ContextFooter()
 
-    def on_mount(self):
+    async def on_mount(self):
         for wid, title in (("bm-overview", "Batch overview"), ("bm-queue", "Execution queue"),
                            ("bm-detail", "Selected tree"), ("bm-logs", "Live logs")):
             self.query_one(f"#{wid}").border_title = title
         trees = self.info.status.get("trees", [])
         self.selected = (self.info.current or next(iter(trees), {})).get("id")
-        self.fill()
+        await self.fill()
         self.query_one(Queue).focus()
         self.set_interval(POLL_SECONDS, self.tick)
 
@@ -143,14 +146,14 @@ class BatchMonitorScreen(Screen):
     def read(self):
         self.post_message(BatchRead(batch.info(batch.directory(self.app.root, self.batch_id))))
 
-    def on_batch_read(self, message):
+    async def on_batch_read(self, message):
         self.reading = False
         if message.info != self.info:
             self.info = message.info
-            self.fill()
+            await self.fill()
 
-    def on_runs_changed(self, _):
-        self.fill_detail()
+    async def on_runs_changed(self, _):
+        await self.fill_detail()
 
     # --- drawing -----------------------------------------------------------------------------------------------
     def tree(self):
@@ -159,7 +162,7 @@ class BatchMonitorScreen(Screen):
     def run_of(self, tree):
         return next((r for r in self.app.snapshot.runs if tree and r.id == tree["run_id"]), None)
 
-    def fill(self):
+    async def fill(self):
         self.query_one("#bm-overview", Static).update(overview_text(self.info))
         queue = self.query_one(Queue)
         trees = self.info.status.get("trees", [])
@@ -172,10 +175,10 @@ class BatchMonitorScreen(Screen):
             queue.highlighted = [t["id"] for t in trees].index(self.selected)
         self.call_after_refresh(queue.scroll_to, y=scroll, animate=False)
         self.query_one("#bm-stop", Button).disabled = self.info.state not in ("running", "preparing")
-        self.fill_detail()
+        await self.fill_detail()
         self.refresh_bindings()
 
-    def fill_detail(self):
+    async def fill_detail(self):
         tree = self.tree()
         if tree is None:
             self.query_one("#bm-detail", Static).update("No tree.")
@@ -190,20 +193,20 @@ class BatchMonitorScreen(Screen):
         if key != self.shown:
             self.shown = key
             box = self.query_one("#bm-logs")
-            box.remove_children()
+            await box.remove_children()
             if run is not None:
-                box.mount(LogPanel(run, self.app.root, named=False))
+                await box.mount(LogPanel(run, self.app.root, named=False))
             else:
-                box.mount(Static(Text("Nothing to show: this tree has not started." if not tree["run_id"] else
-                                      "Waiting for the run to appear.", style=theme.style("text-muted"))))
+                await box.mount(Static(Text("Nothing to show: this tree has not started." if not tree["run_id"] else
+                                            "Waiting for the run to appear.", style=theme.style("text-muted"))))
         elif run is not None:
             for panel in self.query_one("#bm-logs").query(LogPanel):
                 panel.set_run(run)
 
-    def on_option_list_option_highlighted(self, event):
+    async def on_option_list_option_highlighted(self, event):
         if event.option and event.option.id != self.selected:
             self.selected = event.option.id
-            self.fill_detail()
+            await self.fill_detail()
 
     # --- actions -----------------------------------------------------------------------------------------------
     def action_open_run(self):

@@ -40,7 +40,7 @@ def head(title):
 def issue_line(issue, indent=2):
     style = theme.style("error" if issue.severity == ERROR else "warning")
     text = Text.assemble((" " * indent + ("Issue: " if issue.severity == ERROR else "Caution: "), style),
-                         (issue.message, style), ("   [Fix Issue]", theme.style("accent")))
+                         (issue.message, style), ("   [Fix\u00a0Issue]", theme.style("accent")))
     return Line(text, issue.id)
 
 
@@ -61,7 +61,7 @@ def value_text(f, v):
 
 
 def row(label, value, valid=True, indent=2):
-    return Line(Text.assemble((" " * indent + f"{label:<{LABEL - indent}}", theme.style("text-muted")),
+    return Line(Text.assemble((" " * indent + f"{label:<{max(LABEL - indent, len(label) + 1)}}", theme.style("text-muted")),
                               (value, "" if valid else theme.style("error", "bold"))))
 
 

@@ -18,7 +18,9 @@ import pytest
 
 from xmr4el.eval import evaluate_tree
 from xmr4el.xmodel import XModel
-from xmr4el_tui import progress, runs
+from xmr4el_tui import progress, review, runs
+from xmr4el_tui.datasets import EvalInput, Selection
+from xmr4el_tui.services import comparison
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/run_experiment.py"
@@ -367,3 +369,30 @@ def test_input_changed_after_fingerprint_fails_eval(tmp_path, monkeypatch):
         eval_only(tmp_path, monkeypatch, mod, rewriting)
     assert not (tmp_path / "r/metrics_a.json").exists()
     assert json.loads((tmp_path / "r/status.json").read_text())["status"] == "failed"
+
+
+def test_review_batch_spec_records_seen_unseen_evidence(tmp_path):
+    """A Review Batch spec (shared training file as every evaluation's train_path) yields seen/unseen strings, the
+    strings hash and provenance of the training file, and Results reads it without a spec/metrics conflict."""
+    write_pubtator(tmp_path / "train.pubtator", 120, 0)
+    write_pubtator(tmp_path / "dev.pubtator", 40, 1)
+    write_pubtator(tmp_path / "test.pubtator", 40, 2)
+    (tmp_path / "cfg.json").write_text(json.dumps(CONFIG))
+    sel = Selection("d", "D", "", "train.pubtator", (EvalInput("dev", "dev.pubtator", True),
+                                                      EvalInput("test", "test.pubtator", False)))
+    spec = review.run_spec(review.Plan("b", "B", sel, ()), SimpleNamespace(id="t"), "cfg.json")
+    assert [e["train_path"] for e in spec["evals"]] == ["train.pubtator"] and len(spec["evals"]) == 1  # enabled only
+    (tmp_path / "spec.json").write_text(json.dumps(spec))
+    r = run(tmp_path, "-spec", "spec.json")
+    assert r.returncode == 0, r.stderr
+    (run_dir,) = (tmp_path / "outputs/runs").iterdir()
+    dev = json.loads((run_dir / "metrics_dev.json").read_text())
+    assert dev["train_path"] == "train.pubtator" and set(dev["strings"]) >= {"all", "unseen string"}
+    assert len(dev["strings_sha256"]) == 64 and "hybrid" in dev
+    prov = json.loads((run_dir / "provenance.json").read_text())["inputs"]
+    assert prov["train.pubtator"] == hashlib.sha256((tmp_path / "train.pubtator").read_bytes()).hexdigest()
+    (found,) = runs.scan(tmp_path)
+    (e,) = found.evals
+    assert e.train_path == "train.pubtator"
+    facts = comparison.read_facts(found, e, [found])
+    assert facts.conflict is None and facts.tree_train_sha == prov["train.pubtator"]

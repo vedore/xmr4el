@@ -195,7 +195,7 @@ SLOTS = (
         Field(("depth",), "Tree depth", "int", 1, low=1, top=True,
               help="Layers of the hierarchy: every layer but the last clusters labels and routes; the last scores labels individually. Training fails if a node cannot split into clusters of at least the minimum leaf size."),
         Field(("min_leaf_size",), "Minimum leaf size", "int", 20, low=0, top=True,
-              help="A node with this many labels or fewer is not split; clusters smaller than it are merged into the nearest valid cluster."),
+              help="Clusters smaller than this are merged into the nearest valid cluster. At an internal layer, a node unable to form two valid clusters makes training fail; lower depth or this minimum."),
         Field(("cut_half_cluster",), "Cut half cluster", "bool", False, top=True,
               help="Below the root the cluster count is halved per layer (layer 1: k // 2, layer 2: k // 4, ...), never under 2."),
         Field(("routing_features",), "Routing features", "bool", True, top=True,
@@ -269,6 +269,8 @@ def installed(config, slot_):
         return slot_.components[0] if part is None or isinstance(part, dict) else None
     if not isinstance(part, dict):
         return None
+    if "kwargs" in part and not isinstance(part["kwargs"], dict):
+        return None
     if slot_.id == "transformer" and isinstance(part.get("kwargs"), dict) and "model_name" in part["kwargs"]:
         return slot_.components[-1]  # kwargs.model_name overrides the type
     return next((c for c in slot_.components if c.type is not None and c.type == part.get("type")), None)
@@ -308,7 +310,13 @@ def assign(draft, origin, slot_, f, new):
 
 
 def same(a, b):
-    return type(a) is type(b) and a == b
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(same(x, y) for x, y in zip(a, b))
+    return a == b
 
 
 # --- text <-> value -----------------------------------------------------------------------------------------------
@@ -401,6 +409,8 @@ def slot_problems(config, slot_, component=None):
     comp = component or installed(config, slot_)
     if comp is None:
         got = config.get(slot_.key)
+        if isinstance(got, dict) and "kwargs" in got and not isinstance(got["kwargs"], dict):
+            return [(None, "Component kwargs must be a JSON object.")]
         what = got.get("type") if isinstance(got, dict) else got
         return [(None, f"No supported component ({'missing' if got is None else repr(what)}).")]
     out = [(f, err) for f in comp.fields + slot_.extras if (err := check(f, value(config, slot_, f)))]

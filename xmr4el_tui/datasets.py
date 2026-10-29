@@ -158,6 +158,7 @@ def discover(root):
                 continue
             train = e.get("train_path") if isinstance(e.get("train_path"), str) else top
             test, role = e.get("test_path"), split_role(e.get("split"))
+            test = test if isinstance(test, str) else None
             home = Path(train or test or ".").parent
             if train:
                 add(home, "train", train, f.name)
@@ -213,7 +214,7 @@ def register(root, selection):
 
 
 # --- checks -------------------------------------------------------------------------------------------------------
-_checked = {}  # (absolute path, mtime_ns, size) -> inspect result. ponytail: never pruned; a few entries per file
+_checked = {}  # path + stat identity -> inspect result. shortcut: unpruned; prune if long sessions inspect many edits
 
 
 def header(line):
@@ -225,7 +226,7 @@ def header(line):
 def inspect(root, path):
     """(None | "missing" | "invalid", message) from a stat and the first SAMPLE bytes: exists, is a readable text
     file, and reads as PubTator (title before abstract and annotations, tab-separated annotation lines). Not a full
-    parse: launch-time checks stay with the runner. Cached by modification time and size."""
+    parse: launch-time checks stay with the runner. Cached by file identity, change times and size."""
     p = resolve(root, path)
     try:
         st = p.stat()
@@ -235,7 +236,7 @@ def inspect(root, path):
         return "invalid", f"unreadable ({err.strerror})"
     if not p.is_file():
         return "invalid", "is not a file"
-    key = (str(p), st.st_mtime_ns, st.st_size)
+    key = (str(p), st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
     if key not in _checked:
         _checked[key] = sniff(p, st.st_size)
     return _checked[key]
@@ -260,6 +261,7 @@ def sniff(p, size):
         return "invalid", "is binary: not PubTator"
     lines = text.split("\n") if whole else text.split("\n")[:-1]  # the sample's last line may be cut
     title = annotations = 0
+    doc_id, title_text, abstract = None, "", ""
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip("\r")
         if not line.strip():
@@ -269,8 +271,21 @@ def sniff(p, size):
             return "invalid", f"is not PubTator (line {n} is not '<id>|t|<title>', '<id>|a|...' or a tab-separated " \
                               "annotation)"
         title += bool(h and h[1] == "t")
+        if h:
+            if h[1] == "t":
+                doc_id, title_text, abstract = h[0], line.split("|", 2)[2], ""
+            elif h[0] != doc_id:
+                return "invalid", f"is not PubTator (line {n}: abstract does not match the document title)"
+            else:
+                abstract = line.split("|", 2)[2]
+            continue
         parts = line.split("\t")
-        annotations += h is None and len(parts) >= 4 and parts[1].isdigit() and parts[2].isdigit()
+        if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+            length = len(title_text) + (1 + len(abstract) if abstract else 0)
+            if parts[0] != doc_id or not 0 <= int(parts[1]) < int(parts[2]) <= length:
+                return "invalid", f"is not PubTator (line {n}: annotation does not fit its document)"
+            # Like the loader, ignore annotations without a usable concept; they cannot make a file Ready.
+            annotations += len(parts) >= 6 and all(parts[5].split("|")) and parts[5] != "-1"
     if not title:
         return "invalid", "is not PubTator (no '<id>|t|<title>' line)"
     if whole and not annotations:
