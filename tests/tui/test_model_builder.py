@@ -234,6 +234,8 @@ def test_keyboard_grid_library_and_mouse(tmp_path):
         await pilot.press("ctrl+tab")
         assert app.focused is library
         await pilot.press("ctrl+tab")
+        assert app.focused is grid  # browsing: grid and library only
+        await pilot.press("tab")
         assert isinstance(app.focused, TreeTabs)
         await pilot.press("escape")
         assert isinstance(app.screen, DashboardScreen)
@@ -344,7 +346,7 @@ def test_tree_management_keys_and_draft_protection(tmp_path):
         assert dup.name == "Small k" and app.focused is tabs and not rename.display
         await pilot.press("shift+left")
         assert [t.id for t in app.draft.trees] == [dup.id, first.id] and app.draft.tree == dup.id
-        await pilot.press("a")
+        await pilot.press("n")
         added = app.draft.trees[-1]
         assert added.name == "Tree 2" and app.draft.tree == added.id
         await pilot.press("1")
@@ -359,9 +361,9 @@ def test_tree_management_keys_and_draft_protection(tmp_path):
         assert dup.config["clustering_config"]["kwargs"]["n_clusters"] == 128  # nothing leaked
         await pilot.press("delete")
         assert "Remove Tree 1?" in footer(app) and len(app.draft.trees) == 3
-        await pilot.press("delete")
+        await pilot.press("y")
         assert [t.name for t in app.draft.trees] == ["Small k", "Tree 2"] and app.draft.tree == added.id
-        await pilot.press("delete", "delete", "delete")
+        await pilot.press("delete", "y", "delete", "y")
         assert len(app.draft.trees) == 1 and "A batch needs at least one tree." in footer(app)
     run_builder(make_root(tmp_path), go)
 
@@ -408,7 +410,7 @@ def test_navigation_away_asks_and_dataset_setup_round_trip(tmp_path):
 def test_short_terminal_scrolls_the_grid(tmp_path):
     async def go(app, pilot, screen):
         grid = screen.query_one(PipelineGrid)
-        assert grid.layout_ == (1, 0, 0)
+        assert grid.layout_[0] == 1 and grid.level == "normal"
         await pilot.press("right", "right", "right")
         await pilot.pause()
         box = screen.query_one("#mb-grid-box")
@@ -416,5 +418,218 @@ def test_short_terminal_scrolls_the_grid(tmp_path):
         await edit(pilot, screen, "search")
         assert screen.query_one("#mb-attrs").size.width >= 20 and screen.query_one("#mb-json").size.width > 30
         top, bottom = (screen.query_one(q).outer_size.height for q in ("#mb-top", "#mb-bottom"))
-        assert abs(top / (top + bottom) - 0.35) < 0.06
+        assert abs(top / (top + bottom) - 0.45) < 0.06
     run_builder(make_root(tmp_path), go, size=(80, 24))
+
+
+# --- UX refinement: layout, focus, arrows, tree actions, help, zoom ---------------------------------------------------
+def test_every_exposed_field_has_help_a_json_path_and_constraints():
+    for s in components.SLOTS:
+        for c in s.components:
+            for f in c.fields + s.extras:
+                assert len(f.help) >= 20, (s.id, f.label)
+                path = components.json_path(s, f)
+                assert path == ".".join(components.path_of(s, f)) and path.split(".")[0] in s.keys
+                assert components.constraints(f).endswith(".")
+    assert components.json_path(components.slot("hierarchy"), field("hierarchy", "n_clusters")) == \
+        "clustering_config.kwargs.n_clusters"
+    assert components.json_path(components.slot("search"), field("search", "knn_beta")) == "predict_config.knn_beta"
+    assert components.json_path(components.slot("hierarchy"), field("hierarchy", "depth")) == "depth"
+
+
+def test_layout_45_55_with_40_60_editor_split(tmp_path):
+    async def go(app, pilot, screen):
+        top, bottom = (screen.query_one(q).outer_size.height for q in ("#mb-top", "#mb-bottom"))
+        assert abs(top / (top + bottom) - 0.45) < 0.04
+        await edit(pilot, screen, "hierarchy")
+        attrs, js = (screen.query_one(q).outer_size.width for q in ("#mb-attrs-panel", "#mb-json"))
+        assert abs(attrs / (attrs + js) - 0.40) < 0.03
+        assert screen.query_one("#mb-attrs").size.height >= 3 and screen.query_one("#mb-help").size.height >= 3
+    run_builder(make_root(tmp_path), go)
+
+
+def test_tab_stays_in_the_panel_and_ctrl_tab_cycles_panels(tmp_path):
+    async def go(app, pilot, screen):
+        grid, tabs = screen.query_one(PipelineGrid), screen.query_one(TreeTabs)
+        await pilot.press("tab")
+        assert app.focused is tabs
+        await pilot.press("tab")
+        assert app.focused is grid  # wraps inside the Model Builder panel, never leaves it
+        await pilot.press("shift+tab")
+        assert app.focused is tabs
+        await edit(pilot, screen, "hierarchy")
+        n = len(screen.editing.fields)
+        first = screen.query_one("#mbf-0")
+        assert app.focused is first
+        for _ in range(n + 4):  # fields, help, Apply, Cancel, then around
+            await pilot.press("tab")
+            assert screen.panel_of(app.focused) == "attrs"
+        assert app.focused is first or screen.panel_of(app.focused) == "attrs"
+        await pilot.press("shift+tab")
+        assert screen.panel_of(app.focused) == "attrs"
+        await pilot.press("ctrl+tab")
+        assert app.focused is screen.query_one(JsonPreview)
+        await pilot.press("tab")
+        assert app.focused is screen.query_one(JsonPreview)
+        await pilot.press("ctrl+tab")
+        assert app.focused is grid
+        await pilot.press("ctrl+tab")
+        assert screen.panel_of(app.focused) == "attrs" and app.focused is screen.last["attrs"]  # last focus kept
+        await pilot.press("ctrl+shift+tab")
+        assert app.focused is grid
+        await pilot.press("f6")
+        assert screen.panel_of(app.focused) == "attrs"
+        await pilot.press("shift+f6")
+        assert app.focused is grid
+    run_builder(make_root(tmp_path), go)
+
+
+def test_arrows_move_between_parameters_without_applying(tmp_path):
+    async def go(app, pilot, screen):
+        await edit(pilot, screen, "hierarchy")
+        tree = app.draft.trees[0]
+        before = copy.deepcopy(tree.config)
+        names = [f.label for f in screen.editing.fields]
+        assert app.focused is screen.query_one("#mbf-0")
+        await type_into(pilot, screen, "n_clusters", "16")
+        await pilot.press("down")
+        assert app.focused is screen.query_one("#mbf-1")
+        assert "Iteration limit" in str(screen.query_one("#mb-help-text").render())
+        await pilot.press("up", "up")
+        assert app.focused is screen.query_one("#mbf-0")
+        text = str(screen.query_one("#mb-help-text").render())
+        assert names[0] in text and "JSON path: clustering_config.kwargs.n_clusters" in text
+        assert screen.editing.draft["clustering_config"]["kwargs"]["n_clusters"] == 16  # draft kept
+        assert tree.config == before                                                   # nothing applied
+        await pilot.press("down", "down", "down", "down")  # onto the Tree depth input
+        assert screen.editing.fields[app.focused and screen.field_of(app.focused.id)[0]].label == "Tree depth"
+    run_builder(make_root(tmp_path), go)
+
+
+def test_dropdown_keeps_its_arrows_when_expanded(tmp_path):
+    from textual.widgets import Select
+
+    async def go(app, pilot, screen):
+        await edit(pilot, screen, "hierarchy")
+        i = next(i for i, f in enumerate(screen.editing.fields) if f.path[-1] == "cut_half_cluster")
+        select = screen.query_one(f"#mbf-{i}", Select)
+        select.focus()
+        await pilot.press("up")
+        assert app.focused is screen.query_one(f"#mbf-{i - 1}")  # collapsed: moves to the previous parameter
+        select.focus()
+        await pilot.press("enter")
+        assert select.expanded
+        was = select.value
+        await pilot.press("up", "enter")  # the open dropdown's own arrows pick the other option
+        assert select.value == 1 - was and not select.expanded
+        assert screen.editing.draft["cut_half_cluster"] is (select.value == 0)
+        select.focus()
+        await pilot.press("enter", "escape")
+        assert not select.expanded and screen.editing is not None  # esc closed the dropdown only
+    run_builder(make_root(tmp_path), go)
+
+
+def test_tree_actions_menu_by_keyboard_mouse_and_without_delete(tmp_path):
+    from xmr4el_tui.screens.model_builder import TreeMenu
+    from xmr4el_tui.widgets.pipeline_grid import ActionsButton
+
+    async def go(app, pilot, screen):
+        tabs, menu = screen.query_one(TreeTabs), screen.query_one(TreeMenu)
+        first = app.draft.trees[0]
+        tabs.focus()
+        await pilot.press("a")
+        assert menu.display and app.focused is menu
+        await pilot.press("escape")
+        assert not menu.display and app.focused is tabs
+        await pilot.press("a", "down", "enter")  # Duplicate tree
+        dup = app.draft.trees[1]
+        assert dup.name == "Tree 1 copy" and dup.config == first.config and dup.config is not first.config
+        await pilot.press("a", "down", "down", "enter")  # Move earlier
+        assert [t.id for t in app.draft.trees] == [dup.id, first.id]
+        await pilot.press("a", "down", "down", "down", "enter")  # Move later
+        assert [t.id for t in app.draft.trees] == [first.id, dup.id]
+        await pilot.click(ActionsButton)  # the mouse trigger opens the same menu
+        assert menu.display
+        await pilot.press("escape")
+        await pilot.press("a", "up", "enter")  # wraps to Remove tree: asks, y confirms
+        assert "Remove Tree 1 copy?" in footer(app) and len(app.draft.trees) == 2
+        await pilot.press("escape")
+        assert len(app.draft.trees) == 2
+        await pilot.press("a", "up", "enter", "y")
+        assert [t.id for t in app.draft.trees] == [first.id]
+        await pilot.press("a", "up", "enter")  # the last tree is protected
+        assert "A batch needs at least one tree." in footer(app) and len(app.draft.trees) == 1
+        await pilot.press("a", "enter")  # Rename tree
+        assert app.focused is screen.query_one("#mb-rename")
+    run_builder(make_root(tmp_path), go)
+
+
+def test_tree_actions_keep_the_editor_draft(tmp_path):
+    from xmr4el_tui.widgets.pipeline_grid import ActionsButton
+
+    async def go(app, pilot, screen):
+        await edit(pilot, screen, "hierarchy")
+        await type_into(pilot, screen, "n_clusters", "16")
+        await pilot.click(ActionsButton)
+        await pilot.press("down", "down", "down", "enter")  # Move later (single tree: nothing moves)
+        assert screen.editing is not None and screen.editing.draft["clustering_config"]["kwargs"]["n_clusters"] == 16
+        await pilot.click(ActionsButton)
+        await pilot.press("down", "enter")  # Duplicate asks first, nothing is applied or lost
+        assert "Discard unapplied changes to Hierarchy?" in footer(app) and len(app.draft.trees) == 1
+        await pilot.press("escape")
+        assert screen.editing is not None and screen.dirty()
+    run_builder(make_root(tmp_path), go)
+
+
+def ZoomBar_width(screen):
+    return screen.query_one("#mb-zoom").size.width
+
+
+def test_zoom_levels_fit_centering_and_independence_from_the_model(tmp_path):
+    from xmr4el_tui.widgets.pipeline_grid import GEOS, ZoomBar
+
+    async def go(app, pilot, screen):
+        grid, box = screen.query_one(PipelineGrid), screen.query_one("#mb-grid-box")
+        config = copy.deepcopy(app.draft.trees[0].config)
+        assert grid.zoom == "normal" and grid.level == "normal"
+        assert grid.margin_[0] == (box.scrollable_content_region.width - GEOS["normal"].width) // 2 > 0
+        await pilot.press("minus")
+        assert (grid.zoom, grid.level) == ("compact", "compact") and grid.styles.width.value == GEOS["compact"].width
+        await pilot.press("minus")
+        assert grid.level == "compact"  # the lowest level stays
+        await pilot.press("plus", "plus")
+        assert grid.level == "expanded" and grid.layout_[0] >= 1
+        await pilot.press("0")
+        assert grid.zoom == "fit" and grid.level == "expanded"  # 220 columns hold the expanded grid
+        for sid in components.BY_ID:  # every slot stays reachable at every level
+            assert sid in grid.regions
+        app.draft.slot = "hierarchy"
+        await pilot.click(ZoomBar, offset=(1, 0))  # mouse: zoom out
+        assert (grid.zoom, grid.level) == ("normal", "normal")
+        await pilot.click(ZoomBar, offset=(ZoomBar_width(screen) - 2, 0))  # mouse: Fit
+        assert grid.zoom == "fit"
+        assert app.draft.trees[0].config == config and screen.editing is None
+        assert app.draft.slot == "hierarchy"
+        # zoom survives a tree switch
+        screen.query_one(TreeTabs).focus()
+        await pilot.press("n")
+        assert len(app.draft.trees) == 2 and grid.zoom == "fit" == screen.query_one(ZoomBar).zoom
+    run_builder(make_root(tmp_path), go, size=(220, 50))
+
+
+def test_fit_adapts_to_the_width_and_every_level_keeps_all_slots(tmp_path):
+    from xmr4el_tui.widgets.pipeline_grid import GEOS
+
+    async def go(app, pilot, screen):
+        grid = screen.query_one(PipelineGrid)
+        grid.set_zoom("fit")
+        await pilot.pause()
+        assert grid.level == "compact"  # 100 columns: only the compact grid is readable, the rest scrolls
+        assert grid.margin_[0] == 0 and GEOS["compact"].width > screen.query_one("#mb-grid-box").size.width
+        for level in ("compact", "normal", "expanded"):
+            grid.set_zoom(level)
+            await pilot.pause()
+            assert set(grid.regions) == set(SLOT_KEYS) and all(r.width >= 1 and r.height >= 1 for r in grid.regions.values())
+            grid.cursor = "search"
+            grid.reveal()
+    run_builder(make_root(tmp_path), go, size=(100, 36))

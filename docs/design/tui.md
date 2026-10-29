@@ -777,8 +777,8 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 ```
 
 - Opened from Dataset Setup (`m`, or the `Model Builder` row) once a dataset is confirmed; crumb `Model Builder`;
-  `esc` from the grid returns to Dataset Setup (trees and positions are kept in `app.draft`). Model Builder 35 % /
-  lower panel 65 % of the rows between the navbar and the footer; the lower panel is the Component Library, or the
+  `esc` from the grid returns to Dataset Setup (trees and positions are kept in `app.draft`). Model Builder 45 % /
+  lower panel 55 % of the rows between the navbar and the footer; the lower panel is the Component Library, or the
   Component Editor (Attributes 40 % | JSON preview 60 %, each scrolling on its own) while a component is edited.
 - Hybrid recipe only (`features: "sapbert_char_context"`): eight slots, `components.SLOTS`: Transformer
   (`transformer_config`), Character TF-IDF (`vectorizer_config` + `abbrev_expansion`), Mention SVD
@@ -813,8 +813,10 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   (`Discard unapplied changes to Matcher?  u discard  esc cancel`); `esc` keeps editing (focus back in the field),
   `u` discards and continues. A clean editor closes at once. Nothing is applied by navigation.
 - Trees: tabs in execution order (`1 Tree 1`, a `!` when a slot needs attention), `Add tree`. Tab strip focused:
-  `left` / `right` switch, `shift+left` / `shift+right` reorder, `a` adds (from the template), `d` duplicates (applied
-  configuration only, new id, deep copy), `delete` removes (asks; the last tree stays); `F2` renames anywhere (1-40
+  `left` / `right` switch, `shift+left` / `shift+right` reorder, `a` opens Tree Actions (also the `Actions` button: Rename, Duplicate, Move earlier / later, Add, Remove; `up` `down`
+  `enter`, `esc` closes and returns to the tab strip), `n` adds (from the template), `d` duplicates (applied
+  configuration only, new id, deep copy), `delete` or the menu removes (the footer asks, `y` confirms; the last tree
+  stays; no function needs `delete`); `F2` renames anywhere (1-40
   printable characters, unique, case-insensitive); `1`-`9` show tree N. Stable ids (`Tree.id`) keep runs apart;
   names are display only.
 - Template of a new tree: the model config of an experiment spec that trains on the confirmed training file, else
@@ -872,7 +874,10 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Dataset Setup | `m` | Model Builder (§5.14) with the confirmed dataset. |
 | Model Builder | grid: arrows, `enter`, click; library: `up` `down`, `enter` / click; `esc` | Move between slots (branches) / open the slot's components; open the component's editor; editor -> library -> grid -> Dataset Setup. |
 | Model Builder | editor: `tab` `shift+tab`, `enter` (next field / Apply), `ctrl+s`, `u`, `esc`; preview `y` | Move between attributes; Apply; discard (asks); back to the library (asks with unapplied changes); copy the JSON. |
-| Model Builder | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`) | Tree tabs, grid, library (or attributes, preview). |
+| Model Builder | `tab` / `shift+tab` | Next / previous control inside the focused panel only (Model Builder: tabs, grid; attributes: fields, help, Apply, Cancel); wraps. |
+| Model Builder | `ctrl+tab` / `ctrl+shift+tab` (`F6` / `shift+F6` where the terminal sends ctrl+tab as tab) | Next / previous panel: Model Builder, then Library, or Attributes and JSON preview while editing; each panel keeps its last focus. Terminals without the kitty keyboard protocol (macOS Terminal.app, default iTerm2) cannot send ctrl+tab: use F6. |
+| Model Builder | attributes: `up` / `down`, `enter` | Previous / next parameter (nothing is applied; its help shows below the list: name, description, JSON path, constraints); `enter` in a text field moves on, on a collapsed dropdown opens it (its own arrows and `esc` then apply). |
+| Model Builder | grid: `+` / `-` / `0`, or the zoom bar | Compact / Normal / Expanded density, `0` = Fit to the viewport width (UI state only, kept across trees; the model is centred when it fits, scrolls when not). |
 | Model Builder | tabs: `left` / `right`, `shift+left` / `shift+right`, `a`, `d`, `delete`; `F2`, `1`-`9` | Switch / reorder trees, add, duplicate, remove (asks); rename; show tree N. |
 | File picker | `up` `down`, typing, `enter`, `esc` | Move; filter or type / paste a path; open the directory or choose the file; cancel. |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |

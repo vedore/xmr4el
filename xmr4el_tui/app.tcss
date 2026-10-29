@@ -477,19 +477,36 @@ NotificationCenter {
     background: $surface;
 }
 
-/* New Experiment, Model Builder (screens/model_builder.py): Model Builder 35 % over Library / Editor 65 % of the
+/* New Experiment, Model Builder (screens/model_builder.py): Model Builder 45 % over Library / Editor 55 % of the
    rows between the navbar and the footer */
+ModelBuilderScreen {
+    layers: base overlay;
+}
+
 #mb {
     height: 1fr;
 }
 
 #mb-top {
-    height: 35%;
+    height: 45%;
     min-height: 5;
 }
 
 #mb-bottom {
-    height: 1fr;
+    height: 55%;
+}
+
+#mb-menu {
+    layer: overlay;
+    width: 30;
+    height: 8;
+    border: round $border;
+    background: $surface;
+    padding: 0;
+}
+
+#mb-actions, #mb-zoom {
+    margin-left: 1;
 }
 
 #mb-tabs-row {
@@ -527,10 +544,28 @@ NotificationCenter {
     height: 1fr;
 }
 
-#mb-attrs {
+#mb-attrs-panel {
     width: 40%;
     height: 1fr;
+}
+
+#mb-attrs {
+    height: 1fr;
+    min-height: 3;
     padding: 0 1;
+}
+
+#mb-help {
+    height: 35%;
+    min-height: 4;
+    max-height: 9;
+    padding: 0 1;
+    border-top: solid $border-blurred;
+    color: $foreground-muted;
+}
+
+#mb-help-text {
+    height: auto;
 }
 
 #mb-json {
@@ -542,14 +577,14 @@ NotificationCenter {
     width: auto;
 }
 
-#mb-top, #mb-library, #mb-attrs, #mb-json {
+#mb-top, #mb-library, #mb-attrs-panel, #mb-json {
     background: $surface;
     border: round $border-blurred;
     border-title-color: $foreground-muted;
     border-subtitle-color: $foreground-muted;
 }
 
-#mb-top:focus-within, #mb-library:focus, #mb-attrs:focus-within, #mb-json:focus {
+#mb-top:focus-within, #mb-library:focus, #mb-attrs-panel:focus-within, #mb-json:focus {
     border: round $border;
     border-title-color: $accent;
     border-title-style: bold;
@@ -562,6 +597,11 @@ NotificationCenter {
 
 .mb-field {
     height: 1;
+}
+
+.mb-field:focus-within .mb-label {
+    color: $accent;
+    text-style: bold;
 }
 
 .mb-label {
@@ -596,14 +636,9 @@ NotificationCenter {
     color: $error;
 }
 
-#mb-help {
-    height: auto;
-    margin-top: 1;
-}
-
 #mb-buttons {
     height: 1;
-    margin-top: 1;
+    padding: 0 1;
 }
 
 #mb-buttons Button {

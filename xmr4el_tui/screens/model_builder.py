@@ -1,5 +1,5 @@
-"""New Experiment, step 2: Model Builder (tui.md §5.14). Model Builder 35 % (tree tabs, pipeline grid) over the
-Component Library or the Component Editor (Attributes 40 % | JSON preview 60 %) 65 %.
+"""New Experiment, step 2: Model Builder (tui.md §5.14). Model Builder 45 % (tree tabs, zoom, pipeline grid) over the
+Component Library or the Component Editor (Attributes 40 % | JSON preview 60 %) 55 %.
 
 Every tree's applied configuration lives in the app's draft (`app.draft.trees`). The editor works on a copy of
 the slot's keys (`Editing.draft`): typing never changes the tree; Apply validates the slot and replaces the tree's
@@ -15,14 +15,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, Input, Select, Static
+from textual.widgets import Button, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from xmr4el_tui import components, theme
 from xmr4el_tui.components import HYBRID
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.description import Rows
-from xmr4el_tui.widgets.pipeline_grid import BRANCHES, PipelineGrid, TreeTabs
+from xmr4el_tui.widgets.pipeline_grid import BRANCHES, ActionsButton, PipelineGrid, TreeTabs, ZoomBar
 from xmr4el_tui.widgets.top_bar import TopBar
 
 FEATURE_SLOTS = {sid for _, slots in BRANCHES for sid in slots}
@@ -50,18 +50,38 @@ class Library(Rows):
     BINDINGS = [Binding("enter", "select", "edit")]
 
 
+class AttrSelect(Select):
+    """A dropdown in the attribute list: collapsed, up / down move to the previous / next parameter (enter or space
+    opens it); expanded, its options take the arrows."""
+    BINDINGS = [Binding("up", "screen.field_step(-1)", show=False), Binding("down", "screen.field_step(1)", show=False)]
+
+
+class TreeMenu(OptionList):
+    """Tree Actions: closes (focus left to the screen's choice) when it loses focus."""
+
+    def on_blur(self):
+        self.screen.close_menu(restore=False)
+
+
+TREE_ACTIONS = (("rename", "Rename tree", "F2"), ("duplicate", "Duplicate tree", "d"), ("earlier", "Move earlier", ""),
+                ("later", "Move later", ""), ("add", "Add tree", "n"), ("remove", "Remove tree", "delete"))
+
+
 class JsonPreview(ScrollableContainer):
     """Read-only full configuration of the tree as Apply would commit it; scrolls on its own. y copies it."""
     BINDINGS = [Binding("y", "screen.copy_json", "copy JSON")]
 
 
 class ModelBuilderScreen(Screen):
-    """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, 1-9 show tree N."""
+    """Keys: tab / shift+tab move inside the focused panel, ctrl+tab / ctrl+shift+tab (or F6 / shift+F6, for terminals
+    that cannot send ctrl+tab) cycle the panels, up / down move between parameters, 1-9 show tree N."""
     crumbs = ("Model Builder",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "apply", "apply"),
-                Binding("u", "discard", "discard changes"), Binding("f2", "rename", "rename tree"),
-                Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
-                Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+                Binding("u", "discard", "discard changes"), Binding("f2", "rename", show=False),
+                Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False),
+                Binding("ctrl+tab,f6", "panel(1)", "next panel", key_display="ctrl+tab"),
+                Binding("ctrl+shift+tab,shift+f6", "panel(-1)", "previous panel", show=False),
+                Binding("up", "field_step(-1)", show=False), Binding("down", "field_step(1)", show=False),
                 *(Binding(str(i), f"tree({i - 1})", f"tree {i}", show=False) for i in range(1, 10))]
 
     def __init__(self):
@@ -70,6 +90,8 @@ class ModelBuilderScreen(Screen):
         self.pending = None      # what runs after the footer's discard (u)
         self.refocus = None      # control to focus again when that question is cancelled
         self.renaming = None     # focus to return to after renaming; None: not renaming
+        self.last = {}           # panel name -> the control last focused in it
+        self.menu_origin = None  # focus to return to when Tree Actions closes
 
     def compose(self) -> ComposeResult:
         yield TopBar(id="top")
@@ -77,21 +99,32 @@ class ModelBuilderScreen(Screen):
             with Vertical(id="mb-top"):
                 with Horizontal(id="mb-tabs-row"):
                     yield TreeTabs(id="mb-tabs")
+                    yield ActionsButton(id="mb-actions")
+                    yield ZoomBar(id="mb-zoom")
                     yield Input(id="mb-rename", placeholder="Tree name", compact=True)
                 with ScrollableContainer(id="mb-grid-box"):
                     yield PipelineGrid(id="mb-grid")
             with Vertical(id="mb-bottom"):
                 yield Library(id="mb-library")
                 with Horizontal(id="mb-editor"):
-                    yield VerticalScroll(id="mb-attrs")
+                    with Vertical(id="mb-attrs-panel"):
+                        yield VerticalScroll(id="mb-attrs")
+                        with VerticalScroll(id="mb-help"):
+                            yield Static(id="mb-help-text")
+                        with Horizontal(id="mb-buttons"):
+                            yield Button("Apply", id="mb-apply", compact=True)
+                            yield Button("Cancel", id="mb-cancel", compact=True)
                     with JsonPreview(id="mb-json"):
                         yield Static(id="mb-json-text")
+        yield TreeMenu(*(Option(Text.assemble(label, ("  " + key if key else "", theme.style("text-muted"))), id=cid)
+                         for cid, label, key in TREE_ACTIONS), id="mb-menu")
         yield ContextFooter()
 
     def on_mount(self):
         self.query_one("#mb-top").border_title = "Model Builder"
         self.query_one("#mb-rename").display = False
         self.query_one("#mb-editor").display = False
+        self.query_one("#mb-menu").display = False
         if not self.draft.trees:
             self.draft.add_tree(self.template())
         self.fill()
@@ -183,7 +216,9 @@ class ModelBuilderScreen(Screen):
             self.query_one(Library).focus()
 
     async def on_option_list_option_selected(self, event):
-        if event.option_list.id == "mb-library":
+        if event.option_list.id == "mb-menu":
+            self.run_tree_action(event.option.id)
+        elif event.option_list.id == "mb-library":
             slot = components.slot(self.draft.slot)
             await self.open_editor(next(c for c in slot.components if c.id == event.option.id))
 
@@ -205,16 +240,13 @@ class ModelBuilderScreen(Screen):
     async def build_fields(self):
         ed = self.editing
         box = self.query_one("#mb-attrs")
-        box.border_title = f"{ed.slot.name} · {ed.comp.name}"
+        self.query_one("#mb-attrs-panel").border_title = f"{ed.slot.name} · {ed.comp.name}"
         await box.remove_children()
         rows = [Static(ed.comp.description, classes="mb-desc")]
         for i, f in enumerate(ed.fields):
             v = components.get(ed.draft, components.path_of(ed.slot, f), f.default)
             rows.append(Horizontal(Static(f.label, classes="mb-label"), *self.control(i, f, v), classes="mb-field"))
             rows.append(Static("", id=f"mbe-{i}", classes="mb-error"))
-        rows += [Static("", id="mb-help"),
-                 Horizontal(Button("Apply", id="mb-apply", compact=True), Button("Cancel", id="mb-cancel", compact=True),
-                            id="mb-buttons")]
         await box.mount_all(rows)
         self.show_errors()
         self.query(".mb-control").first().focus()
@@ -228,7 +260,7 @@ class ModelBuilderScreen(Screen):
             choices = YES_NO if f.kind == "bool" else f.choices
             values = [c[1] for c in choices]
             known = v in values and (f.kind != "bool" or isinstance(v, bool))
-            return [Select([(label, j) for j, (label, _) in enumerate(choices)], id=f"mbf-{i}", compact=True,
+            return [AttrSelect([(label, j) for j, (label, _) in enumerate(choices)], id=f"mbf-{i}", compact=True,
                            value=values.index(v) if known else Select.BLANK, allow_blank=not known,
                            classes="mb-control")]
         return [Input(components.show(v), id=f"mbf-{i}", compact=True, classes="mb-control",
@@ -315,14 +347,29 @@ class ModelBuilderScreen(Screen):
     def on_descendant_focus(self, event):
         i, f, _ = self.field_of(getattr(event.widget, "id", None))
         if f is not None:
-            hint = f.help + (" " if f.help else "") + f"Default: {components.show(f.default) or 'none'}."
-            self.query_one("#mb-help", Static).update(Text(hint, theme.style("text-muted")))
+            self.fill_help(f)
+        name = self.panel_of(event.widget)
+        if name is not None and event.widget.id != "mb-rename":
+            self.last[name] = event.widget
+
+    def fill_help(self, f):
+        """The parameter's name, what it does in XMR4EL, its JSON path and accepted values (fixed-height, scrolls)."""
+        muted = theme.style("text-muted")
+        text = Text.assemble((f.label, "bold"), "\n", f.help, "\n", ("JSON path: ", muted),
+                             components.json_path(self.editing.slot, f), "\n", ("Constraints: ", muted),
+                             components.constraints(f))
+        self.query_one("#mb-help-text", Static).update(text)
+        self.query_one("#mb-help").scroll_home(animate=False)
 
     def on_input_submitted(self, event):
         if event.input.id == "mb-rename":
             self.finish_rename(event.value)
         elif event.input.id and event.input.id.startswith("mbf-"):
-            self.focus_next()
+            i, _, _ = self.field_of(event.input.id)
+            if i + 1 < len(self.editing.fields):
+                self.action_field_step(1)
+            else:
+                self.query_one("#mb-apply").focus()
 
     def on_button_pressed(self, event):
         if event.button.id == "mb-apply":
@@ -357,6 +404,7 @@ class ModelBuilderScreen(Screen):
         self.editing = None
         self.query_one("#mb-editor").display = False
         self.query_one("#mb-attrs").remove_children()
+        self.last.pop("attrs", None)
         self.query_one(Library).display = True
         self.fill()
         self.fill_library(keep)
@@ -411,7 +459,9 @@ class ModelBuilderScreen(Screen):
 
     def action_back(self):
         """Editor -> library (asks with unapplied changes) -> grid -> the previous screen (Dataset Setup)."""
-        if self.renaming is not None:
+        if self.query_one(TreeMenu).display:
+            self.close_menu()
+        elif self.renaming is not None:
             self.end_rename()
         elif self.editing is not None:
             self.guard(self.to_library)
@@ -427,22 +477,92 @@ class ModelBuilderScreen(Screen):
             self.app.say(f"Copied the configuration ({len(text)} characters)")
 
     # --- panels -----------------------------------------------------------------------------------------------------
-    def panels(self):
-        out = [self.query_one(TreeTabs), self.query_one(PipelineGrid)]
+    def containers(self):
+        """{panel name: its container}, in ctrl+tab order, for the panels that are visible now."""
+        out = {"top": self.query_one("#mb-top")}
         if self.editing is None:
-            return out + [self.query_one(Library)]
-        return out + [self.query_one("#mb-attrs"), self.query_one(JsonPreview)]
+            out["library"] = self.query_one(Library)
+        else:
+            out.update(attrs=self.query_one("#mb-attrs-panel"), json=self.query_one(JsonPreview))
+        return out
+
+    def panel_of(self, widget):
+        if widget is None:
+            return None
+        return next((n for n, box in self.containers().items() if box is widget or box in widget.ancestors), None)
+
+    def members(self, name):
+        """The controls Tab visits in a panel, in order: only focusable ones that are shown."""
+        if name == "top":
+            found = [self.query_one(TreeTabs), self.query_one(PipelineGrid)]
+        elif name == "library":
+            found = [self.query_one(Library)]
+        elif name == "attrs":
+            found = [*self.query(".mb-control"), self.query_one("#mb-help"), self.query_one("#mb-apply"),
+                     self.query_one("#mb-cancel")]
+        else:
+            found = [self.query_one(JsonPreview)]
+        return [w for w in found if w.display and w.visible and not w.disabled]
+
+    def action_local(self, step):
+        """Tab / shift+tab: the next / previous control of the focused panel, wrapping inside it."""
+        here, name = self.focused, self.panel_of(self.focused)
+        members = self.members(name) if name and self.menu_origin is None and self.renaming is None else []
+        if here in members:
+            members[(members.index(here) + step) % len(members)].focus()
 
     def action_panel(self, step):
-        panels = self.panels()
-        attrs = self.query_one("#mb-attrs")
-        here = next((p for p in panels if self.focused is p or (p is attrs and self.focused in p.walk_children())),
-                    None)
-        i = panels.index(here) if here is not None else -step
-        target = panels[(i + step) % len(panels)]
-        if target is attrs:
-            target = next(iter(self.query(".mb-control")), attrs)
+        """ctrl+tab / F6: the next / previous visible panel, at the control last focused in it."""
+        names = list(self.containers())
+        here = self.panel_of(self.focused)
+        if self.menu_origin is not None or self.renaming is not None or here is None:
+            return
+        name = names[(names.index(here) + step) % len(names)]
+        target = self.last.get(name)
+        members = self.members(name)
+        if target not in members:
+            target = self.query_one(PipelineGrid) if name == "top" else members[0]
         target.focus()
+
+    def action_field_step(self, step):
+        """up / down in the attribute list: the previous / next parameter (nothing is applied or edited)."""
+        i, _, _ = self.field_of(getattr(self.focused, "id", None))
+        if i is not None and 0 <= i + step < len(self.editing.fields):
+            self.query(f"#mbf-{i + step}, #mbf-{i + step}-0").first().focus()
+
+    # --- tree actions -----------------------------------------------------------------------------------------------
+    def action_tree_menu(self):
+        """Tree Actions (a on the tab strip, or the Actions button): rename, duplicate, move, add, remove."""
+        menu = self.query_one(TreeMenu)
+        if menu.display:
+            return
+        self.menu_origin = self.focused or self.query_one(TreeTabs)
+        button = self.query_one(ActionsButton).region
+        menu.styles.offset = (max(0, button.right - 30), button.y + 1)
+        menu.display = True
+        menu.highlighted = 0
+        menu.focus()
+
+    def close_menu(self, restore=True):
+        menu = self.query_one(TreeMenu)
+        if not menu.display:
+            return
+        back, self.menu_origin = self.menu_origin, None
+        menu.display = False
+        if restore:
+            (back if back is not None and back.is_attached and back.display else self.query_one(TreeTabs)).focus()
+
+    ACTIONS = {"rename": "action_rename", "duplicate": "action_duplicate_tree", "add": "action_add_tree",
+               "remove": "action_remove_tree"}
+
+    def run_tree_action(self, cid):
+        """The same operations as the keys: the tab strip is focused first (a question in the footer needs its keys)."""
+        self.close_menu(restore=False)
+        self.query_one(TreeTabs).focus()
+        if cid in ("earlier", "later"):
+            self.action_move_tree(-1 if cid == "earlier" else 1)
+        else:
+            getattr(self, self.ACTIONS[cid])()
 
     # --- trees ------------------------------------------------------------------------------------------------------
     def switch_to(self, tree_id):
@@ -482,7 +602,7 @@ class ModelBuilderScreen(Screen):
         tree = self.tree
         if len(self.draft.trees) == 1:
             self.app.say("A batch needs at least one tree.", "warning")
-        elif self.app.asked("delete"):
+        elif self.app.asked("y"):
             if self.editing is not None:
                 self.close_editor()
             self.draft.remove(tree.id)
@@ -491,7 +611,12 @@ class ModelBuilderScreen(Screen):
             self.app.say(f"{tree.name} removed")
         else:
             extra = " and its unapplied changes" if self.dirty() else ""
-            self.app.ask(f"Remove {tree.name}? Its configuration{extra} is discarded.", "delete", "remove")
+            self.app.ask(f"Remove {tree.name}? Its configuration{extra} is discarded.", "y", "remove")
+
+    def action_confirm_remove(self):
+        """y answers the footer's "Remove tree?" (no other effect: it never starts a removal)."""
+        if self.app.asking and self.app.asking[1] == "y":
+            self.action_remove_tree()
 
     def action_move_tree(self, step):
         if self.draft.move(self.tree.id, step):

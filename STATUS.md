@@ -149,6 +149,16 @@ tui_architecture.md; README. Tests: tests/tui/test_model_builder.py (17), test_f
 NEXT: user tries `python -m xmr4el_tui`, `n`, confirm, `m`; push only on the user's OK; then Step 4 Review Batch (runner
 `-check` per tree = model-level readiness; materialize model_config files there, not in the builder).
 
+**2026-10-29 Model Builder UX refinement (user's pasted prompt; not committed):** Model Builder 45 % / lower 55 %
+(`app.tcss`); Tab/Shift+Tab stay inside the focused panel (`action_local`, panels top = tabs + grid, library, attrs
+panel = fields + help + Apply/Cancel, json), ctrl+tab / ctrl+shift+tab and F6 / shift+F6 cycle visible panels at each
+panel's last focus (`] [` removed); up/down move between parameters (`action_field_step`, `AttrSelect` collapsed),
+help box under the list from `Field.help` + `components.json_path` / `constraints` (all fields have help, test);
+Tree Actions menu (`a`, `Actions` button; Rename/Duplicate/Move/Add/Remove; remove confirms with `y`, `n` adds, Delete
+optional); `pipeline_grid.py` `Geo` per zoom level (compact/normal/expanded/fit via `+ - 0` and `ZoomBar`), model
+centred by margins, `reveal` offset by them. tests/tui 184 pass, ruff clean; renders at 140x40 / 100x30 checked.
+Limit: ctrl+tab needs a terminal with the kitty keyboard protocol (F6 otherwise). NEXT: user tries it; commit/push on OK.
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

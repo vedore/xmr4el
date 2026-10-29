@@ -81,64 +81,81 @@ def kw(name, *args, **kwargs):
 # --- attributes ---------------------------------------------------------------------------------------------------
 TRANSFORMER_FIELDS = (
     kw("revision", "Revision", "text", None, empty="omit",
-       help="Hub branch, tag or commit; empty = main. Training pins it to the commit hash."),
+       help="Hub branch, tag or commit of the checkpoint; empty = main. Training pins it to the resolved commit hash."),
     kw("pooling", "Pooling", "choice", None, choices=(("checkpoint default", None), ("cls", "cls"), ("mean", "mean")),
-       help="Token pooling. Default: SapBERT cls, S-BioBert mean, any other checkpoint mean."),
+       help="How token vectors become one mention vector. Default: SapBERT cls, S-BioBert mean, any other checkpoint mean."),
     kw("max_seq_length", "Max sequence length", "int", None, low=1, empty="omit",
-       help="Tokens per mention; empty = checkpoint default (SapBERT 25, S-BioBert 75), capped at the model's."),
-    kw("batch_size", "Batch size", "int", 1000, low=0, help="Texts per forward pass; 0 = 400."),
+       help="Tokens kept per mention; empty = the checkpoint's own (SapBERT 25, S-BioBert 75), capped at the model's positions."),
+    kw("batch_size", "Batch size", "int", 1000, low=0,
+       help="Texts per forward pass during embedding inference: larger is faster and needs more memory; 0 = 400."),
     kw("max_oom_retries", "Out-of-memory retries", "int", 3, low=0,
        help="Times a batch is retried at a smaller size after the GPU runs out of memory."),
 )
 CUSTOM_FIELDS = (kw("model_name", "Model", "text", None,
-                    help="Hugging Face model id or local directory (required)."),) + TRANSFORMER_FIELDS
+                    help="Hugging Face model id or local directory of the encoder (required)."),) + TRANSFORMER_FIELDS
 TFIDF_FIELDS = (
     kw("analyzer", "Analyzer", "choice", "word",
        choices=(("word", "word"), ("char", "char"), ("char_wb", "char_wb")),
-       help="Tokens: words, character n-grams, or character n-grams inside word boundaries."),
-    kw("ngram_range", "N-gram range", "range", [1, 2], low=1, help="Smallest and largest n-gram (min <= max)."),
-    kw("sublinear_tf", "Sublinear TF", "bool", False, help="1 + log(tf) instead of tf."),
+       help="Tokens counted: words, character n-grams, or character n-grams inside word boundaries."),
+    kw("ngram_range", "N-gram range", "range", [1, 2], low=1,
+       help="Smallest and largest n-gram length (min <= max); characters for char analyzers, words for word."),
+    kw("sublinear_tf", "Sublinear TF", "bool", False, help="Replace the term count tf by 1 + log(tf)."),
     kw("max_df", "Max document frequency", "df", 0.98,
-       help="Ignore terms in more documents: 0.0-1.0 = share, a whole number = count."),
+       help="Ignore terms in more documents than this: 0.0-1.0 = share of documents, a whole number = count."),
     kw("min_df", "Min document frequency", "df", 0.0,
-       help="Ignore terms in fewer documents: 0.0-1.0 = share, a whole number = count."),
-    kw("max_features", "Max features", "int", None, low=1, empty="omit", help="Vocabulary cap; empty = no cap."),
+       help="Ignore terms in fewer documents than this: 0.0-1.0 = share of documents, a whole number = count."),
+    kw("max_features", "Max features", "int", None, low=1, empty="omit",
+       help="Vocabulary cap (most frequent terms kept); empty = no cap."),
     kw("stop_words", "Stop words", "choice", None, choices=(("none", None), ("english", "english")),
-       help="Words removed before counting (word analyzer only)."),
-    kw("norm", "Row norm", "choice", "l2", choices=(("l2", "l2"), ("l1", "l1"), ("none", None))),
-    kw("binary", "Binary TF", "bool", False, help="Term presence instead of counts."),
-    kw("use_idf", "Use IDF", "bool", True),
-    kw("smooth_idf", "Smooth IDF", "bool", True),
+       help="Words removed before counting; scikit-learn applies it to the word analyzer only."),
+    kw("norm", "Row norm", "choice", "l2", choices=(("l2", "l2"), ("l1", "l1"), ("none", None)),
+       help="Normalisation of each output row; none leaves the TF-IDF values unscaled."),
+    kw("binary", "Binary TF", "bool", False, help="Count term presence (1) instead of occurrences."),
+    kw("use_idf", "Use IDF", "bool", True, help="Weight terms by inverse document frequency; No = plain term frequency."),
+    kw("smooth_idf", "Smooth IDF", "bool", True,
+       help="Add one to every document frequency, as if one extra document held every term (avoids zero division)."),
 )
 SVD_FIELDS = (
     kw("n_components", "Components", "int", 1000, low=1,
        help="Output dimensions. Larger than the TF-IDF vocabulary: the SVD is skipped and the block kept sparse."),
-    kw("algorithm", "Algorithm", "choice", "randomized", choices=(("randomized", "randomized"), ("arpack", "arpack"))),
-    kw("n_iter", "Iterations", "int", 5, low=0, help="Randomized solver power iterations."),
-    kw("n_oversamples", "Oversamples", "int", 10, low=1, help="Randomized solver extra samples."),
+    kw("algorithm", "Algorithm", "choice", "randomized", choices=(("randomized", "randomized"), ("arpack", "arpack")),
+       help="SVD solver: randomized (fast, approximate) or arpack (exact, slower)."),
+    kw("n_iter", "Iterations", "int", 5, low=0, help="Power iterations of the randomized solver (more = more accurate)."),
+    kw("n_oversamples", "Oversamples", "int", 10, low=1,
+       help="Extra random vectors the randomized solver samples beyond the components."),
     kw("power_iteration_normalizer", "Power normalizer", "choice", "auto",
-       choices=(("auto", "auto"), ("QR", "QR"), ("LU", "LU"), ("none", "none"))),
-    kw("random_state", "Random seed", "int", 0, low=0, empty="null", help="Empty = unseeded (not repeatable)."),
-    kw("tol", "Tolerance", "float", 0.0, low=0, help="arpack tolerance; 0 = machine precision."),
+       choices=(("auto", "auto"), ("QR", "QR"), ("LU", "LU"), ("none", "none")),
+       help="Stabilises the randomized solver's power iterations; auto = none up to 2 iterations, else LU."),
+    kw("random_state", "Random seed", "int", 0, low=0, empty="null",
+       help="Seed of the randomized solver and arpack's start vector; empty = unseeded (not repeatable)."),
+    kw("tol", "Tolerance", "float", 0.0, low=0, help="arpack convergence tolerance; 0 = machine precision."),
 )
 KMEANS_FIELDS = (
-    kw("n_clusters", "Clusters per node", "int", 8, low=1),
-    kw("iter_limit", "Iteration limit", "int", 20, low=1),
-    kw("refine_iter", "Refine iterations", "int", 20, low=0),
-    kw("seed", "Seed", "int", 0, low=0),
+    kw("n_clusters", "Clusters per node", "int", 8, low=1,
+       help="Children each internal node splits its labels into (recursive 2-means, then balanced refinement: near-equal sizes). Halved per layer with Cut half cluster."),
+    kw("iter_limit", "Iteration limit", "int", 20, low=1,
+       help="Maximum iterations of each 2-means split; stops earlier once the split no longer changes."),
+    kw("refine_iter", "Refine iterations", "int", 20, low=0,
+       help="Rounds of joint balanced reassignment of all labels to the k centroids after the splits; 0 = none."),
+    kw("seed", "Seed", "int", 0, low=0, help="Seed of the initial centroids; the same seed repeats the clustering."),
 )
 LOGREG_FIELDS = (
-    kw("C", "C (inverse regularisation)", "float", 1.0, low=0, open_low=True),
-    kw("class_weight", "Class weight", "choice", "balanced", choices=(("balanced", "balanced"), ("none", None))),
+    kw("C", "C (inverse regularisation)", "float", 1.0, low=0, open_low=True,
+       help="Inverse L2 regularisation strength of each label's logistic regression: larger = weaker regularisation."),
+    kw("class_weight", "Class weight", "choice", "balanced", choices=(("balanced", "balanced"), ("none", None)),
+       help="balanced weights each label's positive and negative rows by class frequency; none weights them equally."),
     kw("tol", "Tolerance", "float", 0.001, low=0, open_low=True, help="Stop when max |gradient| <= tol."),
-    kw("max_iter", "Max iterations", "int", 500, low=1),
+    kw("max_iter", "Max iterations", "int", 500, low=1, help="Maximum L-BFGS iterations when solving a node's labels jointly."),
 )
 SEARCH_FIELDS = (
-    Field(("beam_size",), "Beam size", "int", 10, low=1, help="Clusters kept per level."),
-    Field(("topk",), "Top k", "int", 0, low=0, help="Labels returned; 0 = all scored."),
+    Field(("beam_size",), "Beam size", "int", 10, low=1,
+          help="Clusters kept at each level of the top-down beam search: larger = more recall, slower."),
+    Field(("topk",), "Top k", "int", 0, low=0,
+          help="Labels returned per mention; 0 = all scored (with kNN fusion all are ranked, then cut)."),
     Field(("knn_beta",), "kNN beta", "float", 0.0, low=0, high=100,
-          help="Mention-kNN fusion weight; 0 = off. Saved with the tree; evaluations can override it."),
-    Field(("leaf_candidates",), "Leaf candidates", "int", 100, low=1, help="Labels scored per reached leaf."),
+          help="Multiplies each candidate's score by exp(beta * knn), knn = max cosine of the mention to that label's training rows; 0 = off. Saved with the tree; evaluations can override it."),
+    Field(("leaf_candidates",), "Leaf candidates", "int", 100, low=1,
+          help="Labels each reached leaf contributes as candidates."),
 )
 
 MODEL_NAMES = {"sapbert": "cambridgeltl/SapBERT-from-PubMedBERT-fulltext",
@@ -170,17 +187,19 @@ SLOTS = (
     Slot("mention_svd", "Mention SVD", "Feature construction", "dimension_config", (SVD,)),
     Slot("context_tfidf", "Context TF-IDF", "Feature construction", "context_vectorizer_config", (TFIDF,), (
         Field(("context_window",), "Context window", "int", None, low=0, empty="null", top=True,
-              help="Words each side of the mention; empty = whole document."),)),
+              help="Words kept each side of the mention for the context block; empty = the whole document."),)),
     Slot("context_svd", "Context SVD", "Feature construction", "context_dimension_config", (SVD,)),
     Slot("hierarchy", "Hierarchy", "Hierarchy", "clustering_config", (
         Component("balancedkmeans", "Balanced KMeans", "Recursive balanced k-means over the PIFA label embeddings.",
                   "balancedkmeans", KMEANS_FIELDS, {"type": "balancedkmeans", "kwargs": {}}),), (
-        Field(("depth",), "Tree depth", "int", 1, low=1, top=True),
-        Field(("min_leaf_size",), "Minimum leaf size", "int", 20, low=0, top=True),
+        Field(("depth",), "Tree depth", "int", 1, low=1, top=True,
+              help="Layers of the hierarchy: every layer but the last clusters labels and routes; the last scores labels individually. Training fails if a node cannot split into clusters of at least the minimum leaf size."),
+        Field(("min_leaf_size",), "Minimum leaf size", "int", 20, low=0, top=True,
+              help="A node with this many labels or fewer is not split; clusters smaller than it are merged into the nearest valid cluster."),
         Field(("cut_half_cluster",), "Cut half cluster", "bool", False, top=True,
-              help="Below the root, split each cluster into half as many children."),
+              help="Below the root the cluster count is halved per layer (layer 1: k // 2, layer 2: k // 4, ...), never under 2."),
         Field(("routing_features",), "Routing features", "bool", True, top=True,
-              help="Append the parent's cluster scores to a node's matcher features."))),
+              help="Append the parent's cluster scores (this cluster's, their sum and their maximum) to a node's matcher features, in training and search."))),
     Slot("matcher", "Matcher", "Matcher", "matcher_config", (
         Component("jointlogisticregression", "Joint Logistic Regression",
                   "One-vs-rest L2 logistic regression per node, all labels solved jointly (torch L-BFGS).",
@@ -194,6 +213,34 @@ BY_ID = {s.id: s for s in SLOTS}
 
 def slot(sid):
     return BY_ID[sid]
+
+
+# --- help panel ---------------------------------------------------------------------------------------------------
+def json_path(slot_, f):
+    """The field's configuration key as dotted text ("clustering_config.kwargs.n_clusters")."""
+    return ".".join(path_of(slot_, f))
+
+
+def constraints(f):
+    """Accepted values of a field in words (from the same rules `check` applies), with its default."""
+    if f.kind == "bool":
+        rule = "Yes or No"
+    elif f.kind == "choice":
+        rule = "one of " + ", ".join(c[0] for c in f.choices)
+    elif f.kind == "range":
+        rule = f"two whole numbers >= {int(f.low)}, min <= max"
+    elif f.kind == "text":
+        rule = "text"
+    elif f.kind == "df":
+        rule = "0.0-1.0 (share) or a whole number >= 1 (count)"
+    else:
+        rule = ("whole number" if f.kind == "int" else "number") + bound(f)
+    if f.empty:
+        rule += "; empty = " + {"omit": "backend default", "null": "none"}[f.empty]
+    default = "none" if f.default is None else show(f.default) if f.kind != "bool" else "Yes" if f.default else "No"
+    if f.kind == "choice":
+        default = next((c[0] for c in f.choices if c[1] == f.default), default)
+    return f"{rule}. Default: {default}."
 
 
 # --- reading a configuration --------------------------------------------------------------------------------------

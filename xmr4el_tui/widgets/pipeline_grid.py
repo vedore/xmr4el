@@ -1,4 +1,6 @@
 """Model Builder widgets (tui.md §5.14): the horizontal pipeline grid and the tree tab strip."""
+from dataclasses import dataclass
+
 from rich.text import Text
 from textual.binding import Binding
 from textual.geometry import Region
@@ -10,13 +12,46 @@ from xmr4el_tui import components, theme
 BRANCHES = (("Transformer", ("transformer",)), ("Mention", ("char_tfidf", "mention_svd")),
             ("Context", ("context_tfidf", "context_svd")))
 RIGHT = ("hierarchy", "matcher", "search")
-LABEL, W, C, P = 12, 20, 2, 10  # branch label column, block width, connector, PIFA block width
-X0 = LABEL
-X1 = X0 + W + C
-XJ = X1 + W + 1           # where the three branches join
-XP = XJ + C + 1           # PIFA
-XR = [XP + P + C + i * (W + C) for i in range(len(RIGHT))]
-WIDTH = XR[-1] + W + 1
+LEVELS = ("compact", "normal", "expanded")
+
+
+@dataclass(frozen=True)
+class Geo:
+    """Cell geometry of one zoom level: branch label column, block width, connector, PIFA width, tallest block, rows
+    between branches. Zoom changes only this density, never the configuration."""
+    label: int
+    w: int
+    c: int
+    p: int
+    hmax: int
+    gap: int
+
+    @property
+    def x0(self):
+        return self.label
+
+    @property
+    def x1(self):
+        return self.x0 + self.w + self.c
+
+    @property
+    def xj(self):
+        return self.x1 + self.w + 1     # where the three branches join
+
+    @property
+    def xp(self):
+        return self.xj + self.c + 1     # PIFA
+
+    @property
+    def xr(self):
+        return [self.xp + self.p + self.c + i * (self.w + self.c) for i in range(len(RIGHT))]
+
+    @property
+    def width(self):
+        return self.xr[-1] + self.w + 1
+
+
+GEOS = {"compact": Geo(12, 18, 1, 6, 2, 0), "normal": Geo(12, 20, 2, 10, 3, 1), "expanded": Geo(12, 30, 4, 10, 3, 2)}
 
 
 def neighbor(sid, dx, dy, last_feature):
@@ -40,10 +75,12 @@ def neighbor(sid, dx, dy, last_feature):
     return RIGHT[i + 1] if i + 1 < len(RIGHT) else sid
 
 
-def fit(height):
-    """(block height, gap between branches, heading row) for `height` rows; the smallest layout scrolls."""
-    for h, gap, head in ((3, 1, 1), (3, 0, 1), (3, 0, 0), (2, 0, 1), (2, 0, 0), (1, 1, 1), (1, 1, 0), (1, 0, 0)):
-        if 3 * h + 2 * gap + head <= height:
+def fit(height, geo):
+    """(block height, gap between branches, heading row) for `height` rows at `geo`'s density; the smallest layout
+    scrolls."""
+    for h, gap, head in ((3, 2, 1), (3, 1, 1), (3, 0, 1), (3, 0, 0), (2, 0, 1), (2, 0, 0), (1, 1, 1), (1, 1, 0),
+                         (1, 0, 0)):
+        if h <= geo.hmax and gap <= geo.gap + (h == 1) and 3 * h + 2 * gap + head <= height:
             return h, gap, head
     return 1, 0, 0
 
@@ -79,17 +116,28 @@ def cut(text, width):
 
 class PipelineGrid(Widget, can_focus=True):
     """The tree's pipeline: one block per slot (name, installed component, short settings), the fixed PIFA step,
-    connectors. Arrows move the cursor (`neighbor`), enter opens the slot's components, a click selects a slot. The
-    screen owns the state; this draws `config` with the cursor on `cursor`."""
+    connectors. Arrows move the cursor (`neighbor`), enter opens the slot's components, a click selects a slot,
+    + / - / 0 zoom (density only: compact, normal, expanded, or fit to the viewport). The model is centred in the
+    scroll box when it fits and scrolls when it does not. The screen owns the model state; this draws `config`
+    with the cursor on `cursor`."""
     BINDINGS = [Binding("enter", "screen.library", "components"),
                 Binding("left", "move(-1, 0)", show=False), Binding("right", "move(1, 0)", show=False),
-                Binding("up", "move(0, -1)", show=False), Binding("down", "move(0, 1)", show=False)]
+                Binding("up", "move(0, -1)", show=False), Binding("down", "move(0, 1)", show=False),
+                Binding("plus,equals_sign", "zoom(1)", "zoom", key_display="+/-"),
+                Binding("minus", "zoom(-1)", show=False), Binding("0", "zoom_fit", "fit")]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.config, self.cursor, self.problems = {}, "transformer", {}
         self.regions = {}  # slot id -> Region on the grid
         self.layout_ = (1, 0, 0)
+        self.zoom = "normal"  # a level or "fit": UI state of this widget, never part of the model
+        self.level = "normal"  # the level drawn (the fitted one under "fit")
+        self.margin_ = (0, 0)  # (left, top) that centre the model in the scroll box
+
+    @property
+    def geo(self):
+        return GEOS[self.level]
 
     def show(self, config, cursor):
         self.config, self.cursor = config, cursor
@@ -99,16 +147,43 @@ class PipelineGrid(Widget, can_focus=True):
         self.call_after_refresh(self.reveal)
 
     def relayout(self):
-        """Block height from the room the scroll box gives; the grid scrolls when the terminal is shorter."""
-        box = self.parent.scrollable_content_region.height if self.parent else 0
-        self.layout_ = h, gap, head = fit(box)
-        self.styles.width = WIDTH
-        self.styles.height = head + 3 * h + 2 * gap
+        """Level, block height and centring from the room the scroll box gives (width first: a horizontal scrollbar
+        takes a row of the height)."""
+        box = self.parent.scrollable_content_region if self.parent else None
+        vw, vh = (box.width, box.height) if box else (0, 0)
+        self.level = next((n for n in reversed(LEVELS) if GEOS[n].width <= vw), "compact") if self.zoom == "fit" \
+            else self.zoom
+        g = self.geo
+        if g.width > vw and self.parent is not None and not self.parent.show_horizontal_scrollbar:
+            vh -= 1
+        self.layout_ = h, gap, head = fit(vh, g)
+        height = head + 3 * h + 2 * gap
+        self.margin_ = (max(0, (vw - g.width) // 2), max(0, (vh - height) // 2))
+        self.styles.width, self.styles.height = g.width, height
+        self.styles.margin = (self.margin_[1], 0, 0, self.margin_[0])
+        for bar in self.screen.query(ZoomBar):
+            bar.show(self.zoom, self.level)
+
+    def set_zoom(self, zoom):
+        self.zoom = zoom
+        self.relayout()
+        self.refresh()
+        self.call_after_refresh(self.reveal)
+
+    def action_zoom(self, step):
+        i = LEVELS.index(self.level) + step
+        if 0 <= i < len(LEVELS):
+            self.set_zoom(LEVELS[i])
+
+    def action_zoom_fit(self):
+        self.set_zoom("fit")
 
     def reveal(self):
         region = self.regions.get(self.cursor)
         if region is not None and self.parent is not None:
-            self.parent.scroll_to_region(region.grow((0, C, 0, LABEL if region.x == X0 else C)), animate=False)
+            g, (left, top) = self.geo, self.margin_
+            self.parent.scroll_to_region(region.grow((0, g.c, 0, g.label if region.x == g.x0 else g.c))
+                                         .translate((left, top)), animate=False)
 
     def on_focus(self):
         self.refresh()
@@ -126,38 +201,39 @@ class PipelineGrid(Widget, can_focus=True):
             self.screen.select_slot(hit)
 
     def render(self):
+        g = self.geo
         h, gap, head = self.layout_
-        canvas = Canvas(WIDTH, head + 3 * h + 2 * gap)
+        canvas = Canvas(g.width, head + 3 * h + 2 * gap)
         line, muted = theme.style("panel-border"), theme.style("text-muted")
         if head:
-            canvas.put(X0, 0, "Feature construction", theme.style("text-muted", "bold"))
+            canvas.put(g.x0, 0, "Feature construction", theme.style("text-muted", "bold"))
         tops = [head + b * (h + gap) for b in range(3)]
         mids = [t + h // 2 for t in tops]
         self.regions = {}
         for b, (label, slots) in enumerate(BRANCHES):
             canvas.put(0, mids[b], label, muted)
             for i, sid in enumerate(slots):
-                self.block(canvas, X0 if i == 0 else X1, tops[b], sid)
-            end = X0 + W if len(slots) == 1 else X1 + W
+                self.block(canvas, g.x0 if i == 0 else g.x1, tops[b], sid)
+            end = g.x0 + g.w if len(slots) == 1 else g.x1 + g.w
             if len(slots) == 2:
-                canvas.put(X0 + W, mids[b], "─" * C, line)
-            canvas.put(end, mids[b], "─" * (XJ - end), line)
+                canvas.put(g.x0 + g.w, mids[b], "─" * g.c, line)
+            canvas.put(end, mids[b], "─" * (g.xj - end), line)
         for y in range(mids[0], mids[2] + 1):
-            canvas.put(XJ, y, {mids[0]: "┐", mids[1]: "┼", mids[2]: "┘"}.get(y, "│"), line)
-        canvas.put(XJ + 1, mids[1], "─" * (XP - XJ - 1), line)
+            canvas.put(g.xj, y, {mids[0]: "┐", mids[1]: "┼", mids[2]: "┘"}.get(y, "│"), line)
+        canvas.put(g.xj + 1, mids[1], "─" * (g.xp - g.xj - 1), line)
         pifa = ["PIFA", "labels", "fixed"] if h >= 3 else ["PIFA", "fixed"][:h]
         for i in range(h):
-            canvas.put(XP, tops[1] + i, f" {pifa[i] if i < len(pifa) else '':<{P - 1}}",
+            canvas.put(g.xp, tops[1] + i, f" {pifa[i] if i < len(pifa) else '':<{g.p - 1}}",
                        f"italic {theme.color('text-muted')} on {theme.color('background')}")
-        canvas.put(XP + P, mids[1], "─" * C, line)
+        canvas.put(g.xp + g.p, mids[1], "─" * g.c, line)
         for i, sid in enumerate(RIGHT):
-            self.block(canvas, XR[i], tops[1], sid)
+            self.block(canvas, g.xr[i], tops[1], sid)
             if i + 1 < len(RIGHT):
-                canvas.put(XR[i] + W, mids[1], "─" * C, line)
+                canvas.put(g.xr[i] + g.w, mids[1], "─" * g.c, line)
         return canvas.text()
 
     def block(self, canvas, x, y, sid):
-        h = self.layout_[0]
+        h, w = self.layout_[0], self.geo.w
         slot = components.slot(sid)
         bad = sid in self.problems
         comp = components.component_label(self.config, slot)
@@ -171,7 +247,7 @@ class PipelineGrid(Widget, can_focus=True):
         else:
             base = f"{theme.color('text')} on {theme.color('block')}"
         for i in range(h):
-            text = f" {cut(lines[i], W - 2) if i < len(lines) else '':<{W - 1}}"
+            text = f" {cut(lines[i], w - 2) if i < len(lines) else '':<{w - 1}}"
             if sid != self.cursor and bad and i == len(lines) - 1:  # invalid: its last line in the error colour
                 style = f"{theme.color('error')} on {theme.color('block')}"
             elif sid != self.cursor and i:
@@ -180,7 +256,51 @@ class PipelineGrid(Widget, can_focus=True):
                 style = base
             style += " bold" if i == 0 else ""
             canvas.put(x, y + i, text, style)
-        self.regions[sid] = Region(x, y, W, h)
+        self.regions[sid] = Region(x, y, w, h)
+
+
+class ZoomBar(Widget):
+    """` -  Normal  +  Fit ` beside the tab strip: clicks zoom the grid; the keys + - 0 do the same on the grid."""
+    DEFAULT_CSS = "ZoomBar { width: 20; height: 1; }"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.zoom, self.level, self.spans = "normal", "normal", []
+
+    def show(self, zoom, level):
+        self.zoom, self.level = zoom, level
+        self.refresh()
+
+    def render(self):
+        accent, muted = theme.style("accent", "bold"), theme.style("text-muted")
+        fit = self.zoom == "fit"
+        parts = [(" - ", accent, "out"), (f" {self.level.capitalize():<8} ", muted, None), (" + ", accent, "in"),
+                 (" Fit ", f"{theme.color('on-accent')} on {theme.color('accent')} bold" if fit else accent, "fit")]
+        out, x, self.spans = Text(no_wrap=True), 0, []
+        for label, style, ref in parts:
+            out.append(label, style)
+            self.spans.append((x, x + len(label), ref))
+            x += len(label)
+        return out
+
+    def on_click(self, event):
+        hit = next((ref for x0, x1, ref in self.spans if x0 <= event.x < x1 and ref), None)
+        grid = self.screen.query_one(PipelineGrid)
+        if hit == "fit":
+            grid.action_zoom_fit()
+        elif hit:
+            grid.action_zoom(1 if hit == "in" else -1)
+
+
+class ActionsButton(Widget):
+    """The mouse trigger of the Tree Actions menu, beside the tab strip."""
+    DEFAULT_CSS = "ActionsButton { width: 11; height: 1; }"
+
+    def render(self):
+        return Text(" Actions ", theme.style("accent", "bold"))
+
+    def on_click(self):
+        self.screen.action_tree_menu()
 
 
 class TreeTabs(Widget, can_focus=True):
@@ -190,8 +310,9 @@ class TreeTabs(Widget, can_focus=True):
                 Binding("right", "screen.switch_tree(1)", show=False),
                 Binding("shift+left", "screen.move_tree(-1)", "move", key_display="shift+←→"),
                 Binding("shift+right", "screen.move_tree(1)", show=False),
-                Binding("a", "screen.add_tree", "add"), Binding("d", "screen.duplicate_tree", "duplicate"),
-                Binding("delete", "screen.remove_tree", "remove")]
+                Binding("a", "screen.tree_menu", "tree actions"), Binding("n", "screen.add_tree", show=False),
+                Binding("d", "screen.duplicate_tree", show=False), Binding("delete", "screen.remove_tree", show=False),
+                Binding("y", "screen.confirm_remove", show=False)]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
