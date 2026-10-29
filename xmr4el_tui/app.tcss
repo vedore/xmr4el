@@ -283,15 +283,20 @@ TopBar > .topbar--unseen {
     text-style: bold;
 }
 
-/* Contextual footer (widgets/context_footer.py): a note left of the keys; a confirmation replaces the keys */
+/* Contextual footer (widgets/context_footer.py): the keys, or a confirmation (warning tint) / feedback (accent tint)
+   over the whole bar in place of every key */
 ContextFooter {
     dock: bottom;
     height: 1;
     background: $footer-background;
 }
 
-ContextFooter.-confirm {
+ContextFooter.-confirm, ContextFooter.-confirm #footer-note {
     background: $xmr-confirm-row;
+}
+
+ContextFooter.-feedback, ContextFooter.-feedback #footer-note {
+    background: $xmr-feedback-row;
 }
 
 ContextFooter Footer {
@@ -300,17 +305,11 @@ ContextFooter Footer {
 }
 
 #footer-note {
-    width: auto;
-    max-width: 70%;
+    width: 1fr;
     height: 1;
+    padding: 0 1 0 0;
     text-wrap: nowrap;
     text-overflow: ellipsis;
-    background: $xmr-overlay;
-}
-
-ContextFooter.-confirm #footer-note {
-    max-width: 100%;
-    background: $xmr-confirm-row;
 }
 
 /* Toasts (lifecycle notifications only): top right under the navbar, over the screen; the severity tints only the
@@ -476,4 +475,138 @@ NotificationCenter {
     border: none;
     padding: 0;
     background: $surface;
+}
+
+/* New Experiment, Model Builder (screens/model_builder.py): Model Builder 35 % over Library / Editor 65 % of the
+   rows between the navbar and the footer */
+#mb {
+    height: 1fr;
+}
+
+#mb-top {
+    height: 35%;
+    min-height: 5;
+}
+
+#mb-bottom {
+    height: 1fr;
+}
+
+#mb-tabs-row {
+    height: 1;
+}
+
+#mb-tabs {
+    width: 1fr;
+    height: 1;
+}
+
+#mb-rename {
+    width: 32;
+    height: 1;
+    background: $xmr-cursor-row;
+}
+
+#mb-grid-box {
+    height: 1fr;
+    background: $surface;
+}
+
+#mb-library {
+    height: 1fr;
+    border: round $border-blurred;
+    padding: 0;
+    background: $surface;
+}
+
+#mb-library > .option-list--option {
+    padding: 0 1;
+}
+
+#mb-editor {
+    height: 1fr;
+}
+
+#mb-attrs {
+    width: 40%;
+    height: 1fr;
+    padding: 0 1;
+}
+
+#mb-json {
+    width: 1fr;
+    height: 1fr;
+}
+
+#mb-json-text {
+    width: auto;
+}
+
+#mb-top, #mb-library, #mb-attrs, #mb-json {
+    background: $surface;
+    border: round $border-blurred;
+    border-title-color: $foreground-muted;
+    border-subtitle-color: $foreground-muted;
+}
+
+#mb-top:focus-within, #mb-library:focus, #mb-attrs:focus-within, #mb-json:focus {
+    border: round $border;
+    border-title-color: $accent;
+    border-title-style: bold;
+}
+
+.mb-desc {
+    color: $foreground-muted;
+    margin-bottom: 1;
+}
+
+.mb-field {
+    height: 1;
+}
+
+.mb-label {
+    width: 45%;
+    max-width: 26;
+    min-width: 10;
+    color: $foreground-muted;
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
+}
+
+.mb-field Input, .mb-field Select {
+    width: 1fr;
+}
+
+.mb-field Input {
+    background: $xmr-overlay;
+}
+
+.mb-field Input:focus {
+    background: $xmr-cursor-row;
+}
+
+.mb-field Input.mb-range {
+    width: 8;
+    margin-right: 1;
+}
+
+.mb-error {
+    height: auto;
+    padding-left: 2;
+    color: $error;
+}
+
+#mb-help {
+    height: auto;
+    margin-top: 1;
+}
+
+#mb-buttons {
+    height: 1;
+    margin-top: 1;
+}
+
+#mb-buttons Button {
+    margin-right: 2;
+    min-width: 10;
 }

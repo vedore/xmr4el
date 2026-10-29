@@ -158,7 +158,9 @@ three other evaluations of the same test file (VERIFIED / CAUTION / INCOMPATIBLE
 recorded evidence allows them). New Experiment (`n`) starts with Dataset Setup: datasets recognized from
 `configs/experiments/*.json` and `datasets/`, or registered (saved in `outputs/tui/datasets.json`); `enter`
 configures one, the training file and Development / Test files can be changed with a file picker, `ctrl+s` confirms
-the dataset for the experiment (launching from New Experiment is planned).
+the dataset for the experiment; `m` then opens the Model Builder: one or more trees (tabs), each a hybrid
+pipeline of eight slots whose components are chosen and edited with a live JSON preview and applied with `ctrl+s`
+(launching from New Experiment is planned).
 
 ## Configuration
 

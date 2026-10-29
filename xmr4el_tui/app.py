@@ -181,8 +181,12 @@ class XMR4ELApp(App):
 
     # --- navbar and footer ----------------------------------------------------------------------------------------
     def go_to(self, screen, level):
-        """Back to breadcrumb `level` of `screen` (navbar click): the screens above it close as with esc."""
+        """Back to breadcrumb `level` of `screen` (navbar click): the screens above it close as with esc. A screen
+        holding unapplied changes (`leave_guard`) asks first; the navigation resumes if they are discarded."""
         while self.screen is not screen:
+            guard = getattr(self.screen, "leave_guard", None)
+            if guard is not None and guard(lambda: self.go_to(screen, level)):
+                return
             self.pop_screen()
         if level < len(screen.crumbs) - 1:
             screen.back_to_crumb(level)
@@ -293,6 +297,7 @@ class XMR4ELApp(App):
         if self.confirming is self.screen:  # cancelled: feedback given meanwhile is dropped too
             self.note = self.confirming = self.asking = None
             self.refresh_bars()
+            getattr(self.screen, "confirm_cancelled", lambda: None)()
         else:
             self.action_help()
 

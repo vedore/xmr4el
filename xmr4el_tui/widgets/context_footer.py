@@ -1,4 +1,4 @@
-"""Bottom bar: the screen's key bindings (Textual Footer) behind a note that shows the app's footer state."""
+"""Bottom bar: the screen's key bindings (Textual Footer), or the app's footer state over the whole bar."""
 from rich.text import Text
 from textual.containers import Horizontal
 from textual.widgets import Footer, Static
@@ -9,8 +9,10 @@ LABEL = {"information": "Notice", "warning": "Notice", "error": "Error"}
 
 
 class ContextFooter(Horizontal):
-    """Shortcuts; a feedback note left of them for a few seconds; a confirmation in place of them until answered.
-    The state lives on the app (XMR4ELApp.say / action_quit / ask): this only draws it for its own screen."""
+    """One state at a time, in this priority: a confirmation (until answered, warning tint) > feedback (a few
+    seconds, the feedback-row tint) > the shortcuts. Confirmation and feedback replace every shortcut and span the
+    whole bar. The state lives on the app (XMR4ELApp.say / action_quit / ask): this only draws it for its own
+    screen, so an expiring feedback timer never touches a confirmation (it only clears `app.note`)."""
 
     def compose(self):
         yield Static(id="footer-note")
@@ -33,5 +35,6 @@ class ContextFooter(Horizontal):
             text = Text.assemble((f" {LABEL.get(severity, 'Notice')} ", theme.chip(severity)), " ", message, " ")
         note.update(text if confirm or feedback else "")
         note.display = bool(confirm or feedback)
-        self.query_one(Footer).display = not confirm
+        self.query_one(Footer).display = not (confirm or feedback)
         self.set_class(confirm, "-confirm")
+        self.set_class(bool(feedback) and not confirm, "-feedback")

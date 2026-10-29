@@ -19,6 +19,7 @@ from textual.widgets.option_list import Option
 from xmr4el_tui import datasets, theme
 from xmr4el_tui.datasets import READY, SPLITS, Dataset, Selection
 from xmr4el_tui.screens.file_picker import FilePicker
+from xmr4el_tui.screens.model_builder import ModelBuilderScreen
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.description import Rows
 from xmr4el_tui.widgets.top_bar import TopBar
@@ -70,7 +71,7 @@ class DatasetSetupScreen(Screen):
     """Hidden keys (in the ? panel): ctrl+tab / ctrl+shift+tab (or ] / [) cycle panels, ctrl+r rereads datasets."""
     crumbs = ("New Experiment",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "confirm", "confirm dataset"),
-                Binding("u", "discard", "discard changes"),
+                Binding("u", "discard", "discard changes"), Binding("m", "builder", "model builder"),
                 Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
                 Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
                 Binding("ctrl+r", "reload", "reread datasets", show=False)]
@@ -221,7 +222,9 @@ class DatasetSetupScreen(Screen):
             opts.append(Option(self.file_row("[x]" if e.enabled else "[ ]", label, e.path, width), id=f"eval:{split}"))
             opts += errors(problems, split, width)
         opts += errors(problems, "evals", width)
-        opts += [blank(), Option(Text("  Confirm Dataset  ", theme.style("accent", "bold")), id="confirm")]
+        opts += [blank(), Option(Text("  Confirm Dataset  ", theme.style("accent", "bold")), id="confirm"),
+                 Option(Text("  Model Builder  ", theme.style("accent" if self.draft.confirmed else "text-muted")),
+                        id="builder")]
         box.set_options(opts)
         ids = [o.id for o in opts]
         if keep in ids:
@@ -286,6 +289,8 @@ class DatasetSetupScreen(Screen):
         d, sel = self.shown()
         if rid == "confirm":
             self.action_confirm()
+        elif rid == "builder":
+            self.action_builder()
         elif rid and rid.startswith("train:") and rid != "train:other":
             self.edit(replace_train(sel, self.variants[int(rid[6:])]))
         elif rid == "train:other":
@@ -341,7 +346,17 @@ class DatasetSetupScreen(Screen):
             self.reload()
         self.fill_list()
         self.fill_config()
-        self.app.say(f"Dataset confirmed: {sel.name}" + (f" — {sel.variant}" if sel.variant else ""), "success")
+        self.app.say(f"Dataset confirmed: {sel.name}" + (f" — {sel.variant}" if sel.variant else "") +
+                     ". m opens the Model Builder.", "success")
+
+    def action_builder(self):
+        """Model Builder (next step) over this screen; esc there comes back here. Needs a confirmed dataset."""
+        if self.draft.confirmed is None:
+            self.app.say("Confirm a dataset first (ctrl+s).", "warning")
+            return
+        if self.draft.edits:
+            self.app.say("Unconfirmed dataset changes are not used: the Model Builder uses the confirmed dataset.")
+        self.app.push_screen(ModelBuilderScreen())
 
     def go_to_problem(self, which):
         """Focus the control that corrects `which` (name field, training file, evaluation split)."""

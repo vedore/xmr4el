@@ -117,9 +117,12 @@ Notifications): a 52-column box under Notifications over the current screen (Mod
 comparison of the screen below unchanged); its list gets the rows the terminal leaves (whole box visible at 80x24);
 the selected row stays on its notice (and on screen) when newer ones arrive; opening marks all seen; `↑↓` `enter` /
 click opens, `c` / `Clear all` empties the history only, `esc` closes. (2) *Footer feedback*: replies to the user's actions (invalid Results target, maximum
-challengers, incompatible evaluation, missing run, copy, rescan) left of the shortcuts for 3.5 s; a newer one
-replaces it; it belongs to its screen (navigation drops it); never kept as a notification. (3) *Footer confirmation*:
-quit; replaces the shortcuts until answered; feedback and notifications never replace it. Comparison Caution stays
+challengers, incompatible evaluation, missing run, copy, rescan, dataset confirmed, component applied) for 3.5 s,
+over the whole footer in place of every shortcut, on the `feedback-row` tint (accent over surface, never the
+confirmation's); a newer one replaces it and an older timer cannot clear it; it belongs to its screen (navigation
+drops it); never kept as a notification. (3) *Footer confirmation*: quit, discard, remove; replaces the shortcuts
+until answered, on the `confirm-row` tint; feedback timers and notifications never replace it. One state at a time:
+confirmation > feedback > shortcuts (2026-10-29). Comparison Caution stays
 in Results.
 The right side is the same on every screen, so state is always in one place.
 
@@ -752,6 +755,76 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   but selectable. Starts in the current file's directory with it highlighted. `esc` cancels: mapping, focus and
   row unchanged. A file chosen for a split enables it. Paths are kept relative to the project root when inside it.
 
+### 5.14 New Experiment: Model Builder (built 2026-10-29)
+
+```text
+ Dashboard / New Experiment / Model Builder        XMR4EL                         Notifications
+
+╭ Model Builder ─────────────────────────────────────────────────────────────────────────────────╮
+│ 1 Tree 1  2 Small k   Add tree                                                                 │
+│             Feature construction                                                               │
+│ Transformer [Transformer       ]──────────────────────┐                                        │
+│ Mention     [Character TF-IDF  ]──[Mention SVD       ]┼──[PIFA ]──[Hierarchy ]──[Matcher ]──[Search ]
+│ Context     [Context TF-IDF    ]──[Context SVD       ]┘                                        │
+╰──────────────────────────────── NCBI Disease · Training: train_plus_ctd · Evaluation: dev ─────╯
+╭ Hierarchy · Balanced KMeans ─────╮╭ Configuration · Tree 1 ───────────────────────────────────────╮
+│ Clusters per node   128          ││   "clustering_config": {            (accent tint: this slot) │
+│ Iteration limit     20           ││     "type": "balancedkmeans", ...                             │
+│ Tree depth          2            ││   "depth": 2,                                                 │
+│ Cut half cluster    Yes        v ││   "matcher_config": {                       (muted: the rest) │
+│ Apply   Cancel                   │╰───────────────────────────────────────── unapplied changes ───╯
+╰──────────────────────────────────╯
+```
+
+- Opened from Dataset Setup (`m`, or the `Model Builder` row) once a dataset is confirmed; crumb `Model Builder`;
+  `esc` from the grid returns to Dataset Setup (trees and positions are kept in `app.draft`). Model Builder 35 % /
+  lower panel 65 % of the rows between the navbar and the footer; the lower panel is the Component Library, or the
+  Component Editor (Attributes 40 % | JSON preview 60 %, each scrolling on its own) while a component is edited.
+- Hybrid recipe only (`features: "sapbert_char_context"`): eight slots, `components.SLOTS`: Transformer
+  (`transformer_config`), Character TF-IDF (`vectorizer_config` + `abbrev_expansion`), Mention SVD
+  (`dimension_config`), Context TF-IDF (`context_vectorizer_config` + `context_window`), Context SVD
+  (`context_dimension_config`), Hierarchy (`clustering_config` + `depth`, `min_leaf_size`, `cut_half_cluster`,
+  `routing_features`), Matcher (`matcher_config`), Search (`predict_config`: the tree's default search, saved with
+  it; evaluations may override). PIFA is drawn as a fixed step, never selectable. `verbose` and unknown keys are
+  kept as they are, not edited.
+- Library = only what the backend loads: SapBERT, BioBERT, Sentence-T BioBERT (`MODEL_NAMES`), Custom Hugging Face
+  model (`kwargs.model_name`, no `type`); TF-IDF; Truncated SVD; Balanced KMeans; Joint Logistic Regression; Beam
+  search. The installed one says `installed`. Moving changes nothing; `enter` / click opens the editor: the
+  installed component with its applied settings, another one from its defaults (`{"type": ..., "kwargs": {}}`), the
+  slot's other keys kept.
+- Editor: one row per attribute (`components.*_FIELDS`, labels, types, ranges and defaults mirroring the backend;
+  `tests/test_tui_components.py` checks them against it). Text for numbers / paths / ids, Yes/No and enumerations
+  as selects, n-gram range as two numbers. A field the config leaves out shows the backend default and stays left
+  out unless set to something else; cleared optional fields are left out (`revision`, `max_seq_length`,
+  `max_features`) or null where null means something (`random_state` unseeded, `context_window` whole document).
+  Floats stay floats (`10` -> `10.0`); TF-IDF `max_df` / `min_df` keep the scikit-learn split (`1.0` share, `1`
+  count). Text that does not parse is an error under the field, never 0; the preview keeps the last valid value and
+  its border says `1 invalid field: last valid value shown`.
+- Draft / Apply: the editor works on a copy of the slot's keys; the tree is unchanged until Apply (`ctrl+s` or the
+  button): every field of the slot is checked (`components.slot_problems`), then the tree's configuration is
+  replaced in one assignment, the editor closes, the grid keeps the slot, the footer says `Hierarchy: Balanced KMeans
+  applied to Tree 1`. A problem: nothing applied, the first bad field focused, the footer names it. Cancel drops the
+  copy. Component validity only: launch readiness (paths, runner `-check`) is Review's (next step).
+- JSON preview: `json.dumps(config, indent=2)` of the tree with the copy merged in (the dict Apply commits). Lines
+  are owned by their top-level key (`components.json_lines`), so the slot's keys (all of them, e.g. `clustering_config`
+  and `depth`) get the `section` tint by path; the rest is muted. Opens scrolled to the section; read-only; `y` copies
+  it; mouse drag selects and copies as elsewhere.
+- Unapplied changes: `esc`, another slot, another tree, add / duplicate, a breadcrumb or `n` ask in the footer
+  (`Discard unapplied changes to Matcher?  u discard  esc cancel`); `esc` keeps editing (focus back in the field),
+  `u` discards and continues. A clean editor closes at once. Nothing is applied by navigation.
+- Trees: tabs in execution order (`1 Tree 1`, a `!` when a slot needs attention), `Add tree`. Tab strip focused:
+  `left` / `right` switch, `shift+left` / `shift+right` reorder, `a` adds (from the template), `d` duplicates (applied
+  configuration only, new id, deep copy), `delete` removes (asks; the last tree stays); `F2` renames anywhere (1-40
+  printable characters, unique, case-insensitive); `1`-`9` show tree N. Stable ids (`Tree.id`) keep runs apart;
+  names are display only.
+- Template of a new tree: the model config of an experiment spec that trains on the confirmed training file, else
+  `configs/xmr4el_base_config.json`; a `features: "tfidf"` config is refused with a footer note, never converted.
+  Changing the dataset never rewrites the trees.
+- Grid: blocks of name, installed component and short settings (3, 2 or 1 rows as the height allows; scrolls in both
+  directions at 80x24); the cursor block is accent when the grid is focused, dim accent otherwise; an invalid slot
+  says `needs attention` in the error colour. `left` / `right` follow a branch (a branch end goes on to Hierarchy,
+  Hierarchy goes back to the last feature slot), `up` / `down` change branch; `enter` opens the library.
+
 ## 6. View states
 
 | View | Empty | Loading | Error |
@@ -796,6 +869,11 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Everywhere | `n` | New Experiment: Dataset Setup (§5.13); shown in the Dashboard footer. Already open: back to it. |
 | Dataset Setup | Datasets: `up` `down`, `enter` / click; `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`); `esc` | Move (nothing changes) / configure the dataset; next / previous panel (Datasets, Name, configuration); back to the previous screen (unconfirmed edits stay in the draft). |
 | Dataset Setup | Configuration: `tab` `shift+tab` (or `up` `down`), `enter`, `space`, click on `[x]`, `ctrl+s`, `u`, `esc` | Move between controls; a file row opens the picker (training variant: selects it); select a training variant / toggle a split; toggle; Confirm Dataset; discard unconfirmed changes (asks); back to Datasets. `ctrl+r` rereads datasets. |
+| Dataset Setup | `m` | Model Builder (§5.14) with the confirmed dataset. |
+| Model Builder | grid: arrows, `enter`, click; library: `up` `down`, `enter` / click; `esc` | Move between slots (branches) / open the slot's components; open the component's editor; editor -> library -> grid -> Dataset Setup. |
+| Model Builder | editor: `tab` `shift+tab`, `enter` (next field / Apply), `ctrl+s`, `u`, `esc`; preview `y` | Move between attributes; Apply; discard (asks); back to the library (asks with unapplied changes); copy the JSON. |
+| Model Builder | `ctrl+tab` / `ctrl+shift+tab` (`]` / `[`) | Tree tabs, grid, library (or attributes, preview). |
+| Model Builder | tabs: `left` / `right`, `shift+left` / `shift+right`, `a`, `d`, `delete`; `F2`, `1`-`9` | Switch / reorder trees, add, duplicate, remove (asks); rename; show tree N. |
 | File picker | `up` `down`, typing, `enter`, `esc` | Move; filter or type / paste a path; open the directory or choose the file; cancel. |
 | Runs | `up` `down` `pgup` `pgdn` `home` `end` | Move. |
 | Runs | `enter` | Open run. |

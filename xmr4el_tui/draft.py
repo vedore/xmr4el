@@ -3,8 +3,23 @@
 One draft per TUI session, on the app (`app.draft`, memory only). Dataset Setup edits a `datasets.Selection` per
 dataset; nothing reaches `confirmed` until Confirm Dataset validates it. Later New Experiment screens read
 `draft.confirmed` (training file, enabled evaluation splits, format): every tree of the batch shares it.
+
+Model Builder (tui.md §5.14) keeps the batch's trees here: `trees` in execution order, each with a stable id, a
+display name and its one applied model configuration (a plain dict no other tree shares). Editor drafts never reach
+a tree: only Apply replaces its configuration (`apply`).
 """
+import copy
 import uuid
+from dataclasses import dataclass
+
+NAME_MAX = 40
+
+
+@dataclass
+class Tree:
+    id: str      # stable across rename and reorder; the safe identity for later run names and paths
+    name: str
+    config: dict  # the applied model configuration (components.ordered)
 
 
 class ExperimentDraft:
@@ -13,7 +28,10 @@ class ExperimentDraft:
         self.selected = None    # key of the dataset shown in Dataset Setup (being configured)
         self.edits = {}         # dataset key -> Selection that differs from its baseline, not confirmed
         self.confirmed = None   # datasets.Selection shared by every tree of the batch
-        self.trees = []         # tree configurations (Model Builder, next step); all use `confirmed`
+        self.trees = []         # Tree, in execution order; all use `confirmed`
+        self.tree = None        # id of the tree shown in the Model Builder
+        self.slot = "transformer"  # Model Builder slot under the cursor, and the last feature slot visited
+        self.feature_slot = "char_tfidf"
 
     def baseline(self, dataset):
         """What `dataset` shows without edits: its confirmed selection, else the recognized default."""
@@ -43,3 +61,78 @@ class ExperimentDraft:
         self.edits.pop(selection.key, None)
         self.confirmed = selection
         self.selected = selection.key
+
+    # --- trees (Model Builder) ------------------------------------------------------------------------------------
+    def current_tree(self):
+        return next((t for t in self.trees if t.id == self.tree), self.trees[0] if self.trees else None)
+
+    def index(self, tree_id):
+        return next(i for i, t in enumerate(self.trees) if t.id == tree_id)
+
+    def free_name(self, base):
+        taken = {t.name.casefold() for t in self.trees}
+        if base.casefold() not in taken:
+            return base
+        return next(n for i in range(2, len(taken) + 3) if (n := f"{base} {i}").casefold() not in taken)
+
+    def add_tree(self, config, after=None, name=None):
+        """New tree (own copy of `config`) after tree `after` (None: at the end); it becomes the shown tree."""
+        taken = {t.name.casefold() for t in self.trees}
+        name = self.free_name(name) if name else next(f"Tree {i}" for i in range(1, len(taken) + 2)
+                                                      if f"tree {i}" not in taken)
+        tree = Tree(uuid.uuid4().hex[:8], name, copy.deepcopy(config))
+        while any(t.id == tree.id for t in self.trees):
+            tree.id = uuid.uuid4().hex[:8]
+        at = self.index(after) + 1 if after is not None else len(self.trees)
+        self.trees.insert(at, tree)
+        self.tree = tree.id
+        return tree
+
+    def duplicate(self, tree_id):
+        """Copy of a tree's applied configuration (never an editor draft) under a new id, right after it."""
+        src = self.trees[self.index(tree_id)]
+        return self.add_tree(src.config, after=tree_id, name=f"{src.name} copy")
+
+    def remove(self, tree_id):
+        """Remove a tree; the last one stays (a batch has at least one). False when refused."""
+        if len(self.trees) <= 1:
+            return False
+        i = self.index(tree_id)
+        del self.trees[i]
+        if self.tree == tree_id:
+            self.tree = self.trees[min(i, len(self.trees) - 1)].id
+        return True
+
+    def move(self, tree_id, step):
+        """Earlier (-1) / later (+1) in the execution order; False at the end of the queue."""
+        i = self.index(tree_id)
+        j = i + step
+        if not 0 <= j < len(self.trees):
+            return False
+        self.trees[i], self.trees[j] = self.trees[j], self.trees[i]
+        return True
+
+    def name_problem(self, tree_id, name):
+        """Why `name` cannot name the tree, or None. Names are display only (ids keep runs apart), but must be one
+        printable line, unique (case-insensitive) and short enough for tables."""
+        name = name.strip()
+        if not name:
+            return "Name required."
+        if len(name) > NAME_MAX:
+            return f"At most {NAME_MAX} characters."
+        if not name.isprintable():
+            return "Printable characters only."
+        if any(t.id != tree_id and t.name.casefold() == name.casefold() for t in self.trees):
+            return f"Another tree is named {name!r}."
+        return None
+
+    def rename(self, tree_id, name):
+        """Rename (validated); returns the problem or None."""
+        problem = self.name_problem(tree_id, name)
+        if problem is None:
+            self.trees[self.index(tree_id)].name = name.strip()
+        return problem
+
+    def apply(self, tree_id, config):
+        """Replace the tree's applied configuration with a copy of `config` (the caller validated it)."""
+        self.trees[self.index(tree_id)].config = copy.deepcopy(config)

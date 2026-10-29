@@ -134,6 +134,21 @@ filter, typed/pasted path, esc cancels); footer confirmations generalized (`App.
 tests/tui/test_dataset_setup.py (20); full suite 288 pass, ruff clean; renders 140x40 / 80x24 checked. Not built:
 Model Builder, Review Batch, launching. NEXT: user tries `python -m xmr4el_tui`, `n`; then Step 3 (Model Builder) reads `app.draft.confirmed`.
 
+**2026-10-29 New Experiment step 3, Model Builder + full-width footer feedback (user's pasted prompt; committed on `tui`, not pushed):**
+Dataset Setup `m` (or its `Model Builder` row) pushes `screens/model_builder.py` (tree tabs + `widgets/pipeline_grid.py`
+grid 35 % | Library or Editor = Attributes 40 % + JSON preview 60 %). `components.py` (stdlib registry: 8 slots,
+components the backend loads, fields with backend defaults/ranges, parse/check/assign, `json_lines` by top-level key,
+`template` from the spec of the confirmed training file else base config, tfidf refused); `draft.py` `Tree` (id, name,
+config) + add/duplicate/remove/move/rename/apply. Editor = copy of the slot's keys; Apply validates and assigns once;
+esc/slot/tree/breadcrumb with unapplied changes ask in the footer (`u` discards; `App.go_to` `leave_guard`,
+`App.action_escape` `confirm_cancelled`). Footer: feedback now replaces all shortcuts over the whole bar on new token
+`feedback-row` (confirm > feedback > shortcuts). Tokens `block`, `section`. Docs tui.md §4, §5.14, keys;
+tui_architecture.md; README. Tests: tests/tui/test_model_builder.py (17), test_footer.py (3), tests/test_tui_components.py
+(20, backend cross-check + load_config round trip). Full suite 328 (one run had the timing-sensitive
+`test_footer_feedback_replaces_toasts_and_expires` fail under load; passes alone and in two tests/tui runs), ruff clean.
+NEXT: user tries `python -m xmr4el_tui`, `n`, confirm, `m`; push only on the user's OK; then Step 4 Review Batch (runner
+`-check` per tree = model-level readiness; materialize model_config files there, not in the builder).
+
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).
 

@@ -12,12 +12,12 @@ def mix(a, b, share):
     return "#" + "".join(f"{round(y + (x - y) * share):02X}" for x, y in zip(pa, pb))
 
 
-ACCENT, SURFACE = "#2CF5C5", "#1B2229"
+ACCENT, SURFACE, TEXT = "#2CF5C5", "#1B2229", "#F0F4F8"
 SUCCESS, WARNING, ERROR = "#7BD88F", "#F5C451", "#FF6B6B"
 DARK = {
     # application
     "background": "#101418", "surface": SURFACE, "panel": SURFACE,
-    "panel-border": "#3A4754", "text": "#F0F4F8", "text-muted": "#A5B4C3", "text-disabled": "#5C6B7A",
+    "panel-border": "#3A4754", "text": TEXT, "text-muted": "#A5B4C3", "text-disabled": "#5C6B7A",
     # selection and focus
     "accent": ACCENT,                                # focused panel border, selected rows, current area
     "on-accent": "#101418",                          # text on an accent background
@@ -41,6 +41,10 @@ DARK = {
     "tint-success": mix(SUCCESS, SURFACE, 0.3), "tint-error": mix(ERROR, SURFACE, 0.3),
     "tint-warning": mix(WARNING, SURFACE, 0.3), "tint-information": "#3A4754",
     "confirm-row": mix(WARNING, SURFACE, 0.15),    # footer while a confirmation waits
+    "feedback-row": mix(ACCENT, SURFACE, 0.22),    # footer while transient feedback shows (never confirm-row)
+    # Model Builder
+    "block": mix(TEXT, SURFACE, 0.07),             # a pipeline slot (grid) and an unselected tree tab
+    "section": mix(ACCENT, SURFACE, 0.14),         # JSON preview lines of the component being edited
 }
 TOKENS = DARK
 

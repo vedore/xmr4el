@@ -34,6 +34,8 @@ xmr4el_tui/
   logs.py          LogTail: incremental, bounded run.log reads (levels, torn lines, truncation); log_path
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
   theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
+  components.py    Model Builder registry (stdlib): slots, components, attribute fields (backend defaults and
+                   ranges), parse / check / assign, slot problems, summaries, JSON lines by top-level key, template
   process.py       -check, spawn, derived state, stop; Launches (owner of started children)
   explorer.py      explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels, tree
                    descriptor / detail / collision-safe short id, prune (search, Results filter)
@@ -56,6 +58,8 @@ xmr4el_tui/
     notification_center.py  NotificationCenter: ModalScreen box under the bell (history, open, clear all)
     results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
     results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
+    dataset_setup.py   DatasetSetupScreen (§5.13); file_picker.py FilePicker
+    model_builder.py   ModelBuilderScreen (§5.14): tree tabs + grid, Library, editor (Editing copy), preview()
   widgets/
     explorer.py    Explorer tree (resizable; items of 1-2 rows + gap rows over Tree lines; `/` search) + node
                    labels; ResultsExplorer (row states, beam chip, `i` click); one widget for both screens
@@ -63,7 +67,8 @@ xmr4el_tui/
     description.py Description (read-only OptionList rows)
     row_rendering.py  FullRow cursor and Selectable (mouse text selection) mixins
     top_bar.py     TopBar: navbar (breadcrumbs from the screen stack, centred title, bell)
-    context_footer.py  ContextFooter: Textual Footer + feedback / confirmation note (state on the App)
+    context_footer.py  ContextFooter: Textual Footer, or feedback / confirmation over the whole bar (state on the App)
+    pipeline_grid.py  PipelineGrid (Model Builder slots, branch navigation, click regions), TreeTabs
     log_view.py    LogView: virtual-rendered log lines, level filter, search highlight
     log_panel.py   LogPanel: one LogTail polled in a worker while active, header, search box (LogScreen and the
                    Run monitor's Live logs)
@@ -74,7 +79,9 @@ xmr4el_tui/
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
   test_runs.py  test_progress.py  test_logs.py  test_procinfo.py  test_process.py
-  test_dashboard.py  test_monitor.py  test_results.py  test_notifications.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_dashboard.py  test_monitor.py  test_results.py  test_notifications.py  test_dataset_setup.py
+  test_model_builder.py  test_footer.py  (Textual run_test + Pilot; importorskip("textual"))
+tests/test_tui_components.py  the builder registry against the backend (defaults, rejections, load_config round trip)
 ```
 
 Runner side (imports xmr4el, never imported by the TUI): `xmr4el/telemetry/events.py` (EventLog: the
@@ -207,7 +214,16 @@ macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 key, name, variant, train, evals (`EvalInput` split / path / enabled), format.
 
 **`draft.py`** (stdlib): `ExperimentDraft` on the app: `selected`, `edits` (per dataset key), `confirmed`
-(`Selection`), `trees` (next step). Later New Experiment screens read `app.draft.confirmed`.
+(`Selection`); Model Builder: `trees` (`Tree`: stable `id`, `name`, applied `config`, in execution order), `tree`
+(shown), `slot` / `feature_slot` (grid cursor); `add_tree`, `duplicate` (deep copy), `remove` (last stays), `move`,
+`rename` (`name_problem`), `apply` (one assignment of a validated config). Editor drafts never live here.
+
+**`components.py`** (stdlib; Model Builder, tui.md §5.14): `SLOTS` (id, grid name, config key, components, extra
+top-level fields), `Component` (type, fields, base config), `Field` (path, kind, backend default, range, empty =
+omit / null / required). `installed`, `part` / `merged` (slot keys out of / into a config), `assign` (left-out
+defaults stay out), `parse` / `check` / `coerce`, `slot_problems` / `problems`, `summary`, `json_lines` (each
+`json.dumps(indent=2)` line with its top-level key), `template(root, selection)`. Mirrors the backend without
+importing it; `tests/test_tui_components.py` (outside tests/tui) holds the two together.
 
 ## 5. UI modules
 
@@ -219,7 +235,9 @@ key, name, variant, train, evals (`EvalInput` split / path / enabled), format.
 
 | `ResultsScreen` | baseline + up to 3 challengers: summary, one metric group for all, inspection of one | `App.snapshot` (metrics); `comparison.read_facts` for every evaluation in a worker when the scan's runs change |
 
-| `DatasetSetupScreen` | New Experiment step 1: Datasets (`DatasetList`) and Dataset Configuration (`ConfigRows`, a `Rows` OptionList like Description); `FilePicker` pushed per file row | `datasets.discover` + registry on mount / `ctrl+r`; list statuses in a worker; `app.draft` |
+| `DatasetSetupScreen` | New Experiment step 1: Datasets (`DatasetList`) and Dataset Configuration (`ConfigRows`, a `Rows` OptionList like Description); `FilePicker` pushed per file row; `m` pushes the Model Builder | `datasets.discover` + registry on mount / `ctrl+r`; list statuses in a worker; `app.draft` |
+
+| `ModelBuilderScreen` | New Experiment step 2: `TreeTabs`, `PipelineGrid`, `Library` (a `Rows`), editor (`Editing`: slot, component, origin, working copy, parse errors) with Attributes and `JsonPreview`; `leave_guard` / `confirm_cancelled` hooks used by `App.go_to` / `App.action_escape` | `app.draft` (confirmed dataset, trees); `components.template` reads specs / base config on a new tree |
 
 `DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
 pushes the Run monitor. Footer confirmations other than quit: `App.ask(question, key, verb)` / `App.asked(key)`
