@@ -157,7 +157,16 @@ help box under the list from `Field.help` + `components.json_path` / `constraint
 Tree Actions menu (`a`, `Actions` button; Rename/Duplicate/Move/Add/Remove; remove confirms with `y`, `n` adds, Delete
 optional); `pipeline_grid.py` `Geo` per zoom level (compact/normal/expanded/fit via `+ - 0` and `ZoomBar`), model
 centred by margins, `reveal` offset by them. tests/tui 184 pass, ruff clean; renders at 140x40 / 100x30 checked.
-Limit: ctrl+tab needs a terminal with the kitty keyboard protocol (F6 otherwise). NEXT: user tries it; commit/push on OK.
+Follow-up (user): ctrl+tab / F6 removed from the Model Builder; esc hierarchy editor > library > grid > Tree Selection
+(`TreeTabs` highlight `cursor`, enter activates, `1`-`9` jump, tabs show `[n]`) > previous screen; tree actions target the
+highlight, Remove only from Tree Selection (`x`, menu entry disabled otherwise, `y` confirms); editor `Preview` button
+reaches the JSON panel by keyboard (esc returns). tests/tui/test_model_builder.py 28 pass. Later same day: `Add tree` is the last Tree Selection stop (enter creates the tree and opens its grid; add via `n` /
+menu / click does too; x, rename, duplicate, move say "Highlight a tree first." on it). Footer confirmations are modal
+(`App.on_event` + `confirm_allows`: only the question's key, esc, ctrl+c / ctrl+q pass; found by the user: enter left
+the question up while navigating). tests/tui 188 pass, ruff clean. All of this is UNCOMMITTED (CLAUDE.md and the audit
+file were dirty before). Model Builder commit `55e9b45` = the first refinement only. NEXT: user tries it
+(`python -m xmr4el_tui`, `n`, `m`: esc levels, `[n]` tabs, `x` + `y`, Preview button, a footer question + enter/click);
+commit/push on OK; then Step 4 Review Batch.
 
 **Open, not started (ask before):** Plan H items 5-7 (explicit device/threads, batches/compare, install check;
 `docs/audits/tool_readiness_audit.md` § F); code-quality audit #13 tie rule at `argpartition` (eval-only check).

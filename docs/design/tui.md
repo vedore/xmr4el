@@ -96,6 +96,10 @@ metric groups never change them. A click on an earlier crumb goes back to it (sc
 `Results` while inspecting closes the inspection); too long, they are cut on the left (`… / Inspect`). No host,
 counts or other summaries (they live in the panels).
 
+**Footer confirmations are modal (2026-10-29).** While a screen's footer asks (`App.ask`, or the quit question), `App.on_event`
+drops every key, paste and mouse press / release / click / scroll except the question's own key, `esc` and `ctrl+c` /
+`ctrl+q`; mouse moves pass. Nothing underneath can run or leave the question stale.
+
 **Three message layers (2026-10-28).** (1) *Notifications*: experiment lifecycle only, in memory for the session
 (`services/notifications.py`, 50 newest). The first scan records each run's state and notifies nothing; a run seen
 RUNNING / UNVERIFIED and later seen COMPLETED / FAILED / LOST / STOPPED, or a run started during the session (at or
@@ -813,10 +817,13 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
   (`Discard unapplied changes to Matcher?  u discard  esc cancel`); `esc` keeps editing (focus back in the field),
   `u` discards and continues. A clean editor closes at once. Nothing is applied by navigation.
 - Trees: tabs in execution order (`1 Tree 1`, a `!` when a slot needs attention), `Add tree`. Tab strip focused:
-  `left` / `right` switch, `shift+left` / `shift+right` reorder, `a` opens Tree Actions (also the `Actions` button: Rename, Duplicate, Move earlier / later, Add, Remove; `up` `down`
-  `enter`, `esc` closes and returns to the tab strip), `n` adds (from the template), `d` duplicates (applied
-  configuration only, new id, deep copy), `delete` or the menu removes (the footer asks, `y` confirms; the last tree
-  stays; no function needs `delete`); `F2` renames anywhere (1-40
+  `left` / `right` switch, `shift+left` / `shift+right` reorder, Tree Selection (`esc` from the grid; the tab strip is focused): `left` / `right` move the highlight only (nothing
+  switches or is discarded), `enter` shows the highlighted tree and goes to its grid (asks first with unapplied editor
+  changes), `1`-`9` jump to that tree (numbers `[n]` are shown on the tabs; later tabs have none), `a` opens Tree Actions
+  (also the `Actions` button: Rename, Duplicate, Move earlier / later, Add; Remove only when opened from Tree Selection),
+  `x` removes the highlighted tree (the footer asks, `y` confirms, `esc` cancels; the last tree stays; Tree Selection
+  stays on a surviving tree), `shift+left` / `shift+right` reorder it, `d` duplicates (applied configuration only,
+  new id, deep copy), `n` adds (from the template). Removal keys are inactive outside Tree Selection; `delete` still works there. `F2` renames anywhere (1-40
   printable characters, unique, case-insensitive); `1`-`9` show tree N. Stable ids (`Tree.id`) keep runs apart;
   names are display only.
 - Template of a new tree: the model config of an experiment spec that trains on the confirmed training file, else
@@ -875,7 +882,7 @@ Baseline row (Summary) and member rows (Explorer) are on the accent; the explore
 | Model Builder | grid: arrows, `enter`, click; library: `up` `down`, `enter` / click; `esc` | Move between slots (branches) / open the slot's components; open the component's editor; editor -> library -> grid -> Dataset Setup. |
 | Model Builder | editor: `tab` `shift+tab`, `enter` (next field / Apply), `ctrl+s`, `u`, `esc`; preview `y` | Move between attributes; Apply; discard (asks); back to the library (asks with unapplied changes); copy the JSON. |
 | Model Builder | `tab` / `shift+tab` | Next / previous control inside the focused panel only (Model Builder: tabs, grid; attributes: fields, help, Apply, Cancel); wraps. |
-| Model Builder | `ctrl+tab` / `ctrl+shift+tab` (`F6` / `shift+F6` where the terminal sends ctrl+tab as tab) | Next / previous panel: Model Builder, then Library, or Attributes and JSON preview while editing; each panel keeps its last focus. Terminals without the kitty keyboard protocol (macOS Terminal.app, default iTerm2) cannot send ctrl+tab: use F6. |
+| Model Builder | `enter` / `esc` | Levels: Tree Selection (tab strip) > grid > library > editor (attributes, `Preview` button for the JSON panel, Apply, Cancel). `enter` goes in, `esc` goes out (editor asks with unapplied changes; esc from Preview returns to the attributes; esc from Tree Selection leaves the screen). No panel-switching key (no ctrl+tab, no F6). |
 | Model Builder | attributes: `up` / `down`, `enter` | Previous / next parameter (nothing is applied; its help shows below the list: name, description, JSON path, constraints); `enter` in a text field moves on, on a collapsed dropdown opens it (its own arrows and `esc` then apply). |
 | Model Builder | grid: `+` / `-` / `0`, or the zoom bar | Compact / Normal / Expanded density, `0` = Fit to the viewport width (UI state only, kept across trees; the model is centred when it fits, scrolls when not). |
 | Model Builder | tabs: `left` / `right`, `shift+left` / `shift+right`, `a`, `d`, `delete`; `F2`, `1`-`9` | Switch / reorder trees, add, duplicate, remove (asks); rename; show tree N. |

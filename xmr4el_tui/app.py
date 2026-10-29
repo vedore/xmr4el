@@ -2,7 +2,7 @@
 import threading
 from datetime import datetime
 
-from textual import work
+from textual import events, work
 from textual.app import App
 from textual.binding import Binding
 from textual.message import Message
@@ -235,6 +235,21 @@ class XMR4ELApp(App):
             self.screen.dismiss()
         self.confirming, self.asking = self.screen, None
         self.refresh_bars()
+
+    async def on_event(self, event):
+        """A footer confirmation is modal: until it is answered only its key, esc and ctrl+c / ctrl+q reach the
+        screen; every other key, paste and mouse press, release, click or scroll is dropped (mouse moves pass)."""
+        if self.confirming is not None and self.screen_stack and self.confirming is self.screen_stack[-1] \
+                and isinstance(event, events.InputEvent) \
+                and not event.is_forwarded \
+                and not self.confirm_allows(event):
+            return
+        await super().on_event(event)
+
+    def confirm_allows(self, event):
+        if isinstance(event, events.Key):
+            return event.key in ("escape", "ctrl+c", "ctrl+q") or bool(self.asking and event.key == self.asking[1])
+        return isinstance(event, events.MouseMove)
 
     def ask(self, question, key, verb):
         """The quit convention for a screen's own action: the footer asks `question`; `key` again does it (the screen

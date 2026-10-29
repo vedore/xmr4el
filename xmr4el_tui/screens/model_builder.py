@@ -73,14 +73,13 @@ class JsonPreview(ScrollableContainer):
 
 
 class ModelBuilderScreen(Screen):
-    """Keys: tab / shift+tab move inside the focused panel, ctrl+tab / ctrl+shift+tab (or F6 / shift+F6, for terminals
-    that cannot send ctrl+tab) cycle the panels, up / down move between parameters, 1-9 show tree N."""
+    """Levels, each entered with enter and left with esc: Tree Selection (the tab strip) > grid > library > editor
+    (attributes, Preview). tab / shift+tab move inside the focused panel, up / down between parameters, 1-9 show
+    tree N."""
     crumbs = ("Model Builder",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "apply", "apply"),
                 Binding("u", "discard", "discard changes"), Binding("f2", "rename", show=False),
                 Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False),
-                Binding("ctrl+tab,f6", "panel(1)", "next panel", key_display="ctrl+tab"),
-                Binding("ctrl+shift+tab,shift+f6", "panel(-1)", "previous panel", show=False),
                 Binding("up", "field_step(-1)", show=False), Binding("down", "field_step(1)", show=False),
                 *(Binding(str(i), f"tree({i - 1})", f"tree {i}", show=False) for i in range(1, 10))]
 
@@ -90,7 +89,8 @@ class ModelBuilderScreen(Screen):
         self.pending = None      # what runs after the footer's discard (u)
         self.refocus = None      # control to focus again when that question is cancelled
         self.renaming = None     # focus to return to after renaming; None: not renaming
-        self.last = {}           # panel name -> the control last focused in it
+        self.attr_focus = None   # the attribute control last focused (where esc from the preview returns)
+        self.rename_id = None    # the tree being renamed
         self.menu_origin = None  # focus to return to when Tree Actions closes
 
     def compose(self) -> ComposeResult:
@@ -114,6 +114,7 @@ class ModelBuilderScreen(Screen):
                         with Horizontal(id="mb-buttons"):
                             yield Button("Apply", id="mb-apply", compact=True)
                             yield Button("Cancel", id="mb-cancel", compact=True)
+                            yield Button("Preview", id="mb-preview", compact=True)
                     with JsonPreview(id="mb-json"):
                         yield Static(id="mb-json-text")
         yield TreeMenu(*(Option(Text.assemble(label, ("  " + key if key else "", theme.style("text-muted"))), id=cid)
@@ -348,9 +349,8 @@ class ModelBuilderScreen(Screen):
         i, f, _ = self.field_of(getattr(event.widget, "id", None))
         if f is not None:
             self.fill_help(f)
-        name = self.panel_of(event.widget)
-        if name is not None and event.widget.id != "mb-rename":
-            self.last[name] = event.widget
+        if self.panel_of(event.widget) == "attrs":
+            self.attr_focus = event.widget
 
     def fill_help(self, f):
         """The parameter's name, what it does in XMR4EL, its JSON path and accepted values (fixed-height, scrolls)."""
@@ -372,6 +372,9 @@ class ModelBuilderScreen(Screen):
                 self.query_one("#mb-apply").focus()
 
     def on_button_pressed(self, event):
+        if event.button.id == "mb-preview":
+            self.query_one(JsonPreview).focus()
+            return
         if event.button.id == "mb-apply":
             self.action_apply()
         elif event.button.id == "mb-cancel":
@@ -404,7 +407,7 @@ class ModelBuilderScreen(Screen):
         self.editing = None
         self.query_one("#mb-editor").display = False
         self.query_one("#mb-attrs").remove_children()
-        self.last.pop("attrs", None)
+        self.attr_focus = None
         self.query_one(Library).display = True
         self.fill()
         self.fill_library(keep)
@@ -458,15 +461,23 @@ class ModelBuilderScreen(Screen):
         return True
 
     def action_back(self):
-        """Editor -> library (asks with unapplied changes) -> grid -> the previous screen (Dataset Setup)."""
+        """Preview -> attributes; editor -> library (asks with unapplied changes) -> grid -> Tree Selection -> the
+        previous screen (Dataset Setup)."""
         if self.query_one(TreeMenu).display:
             self.close_menu()
         elif self.renaming is not None:
             self.end_rename()
         elif self.editing is not None:
-            self.guard(self.to_library)
+            if self.focused is self.query_one(JsonPreview):
+                focus = self.attr_focus
+                (focus if focus is not None and focus.is_attached else self.query_one(".mb-control")).focus()
+            else:
+                self.guard(self.to_library)
         elif self.focused is self.query_one(Library):
             self.query_one(PipelineGrid).focus()
+        elif self.focused is self.query_one(PipelineGrid):
+            self.query_one(TreeTabs).cursor = self.tree.id  # Tree Selection
+            self.query_one(TreeTabs).focus()
         else:
             self.app.pop_screen()
 
@@ -499,7 +510,7 @@ class ModelBuilderScreen(Screen):
             found = [self.query_one(Library)]
         elif name == "attrs":
             found = [*self.query(".mb-control"), self.query_one("#mb-help"), self.query_one("#mb-apply"),
-                     self.query_one("#mb-cancel")]
+                     self.query_one("#mb-cancel"), self.query_one("#mb-preview")]
         else:
             found = [self.query_one(JsonPreview)]
         return [w for w in found if w.display and w.visible and not w.disabled]
@@ -510,19 +521,6 @@ class ModelBuilderScreen(Screen):
         members = self.members(name) if name and self.menu_origin is None and self.renaming is None else []
         if here in members:
             members[(members.index(here) + step) % len(members)].focus()
-
-    def action_panel(self, step):
-        """ctrl+tab / F6: the next / previous visible panel, at the control last focused in it."""
-        names = list(self.containers())
-        here = self.panel_of(self.focused)
-        if self.menu_origin is not None or self.renaming is not None or here is None:
-            return
-        name = names[(names.index(here) + step) % len(names)]
-        target = self.last.get(name)
-        members = self.members(name)
-        if target not in members:
-            target = self.query_one(PipelineGrid) if name == "top" else members[0]
-        target.focus()
 
     def action_field_step(self, step):
         """up / down in the attribute list: the previous / next parameter (nothing is applied or edited)."""
@@ -537,6 +535,10 @@ class ModelBuilderScreen(Screen):
         if menu.display:
             return
         self.menu_origin = self.focused or self.query_one(TreeTabs)
+        if isinstance(self.menu_origin, TreeTabs):  # removal belongs to Tree Selection only
+            menu.enable_option("remove")
+        else:
+            menu.disable_option("remove")
         button = self.query_one(ActionsButton).region
         menu.styles.offset = (max(0, button.right - 30), button.y + 1)
         menu.display = True
@@ -571,13 +573,27 @@ class ModelBuilderScreen(Screen):
 
     def show_tree(self, tree_id):
         self.draft.tree = tree_id
+        self.query_one(TreeTabs).cursor = tree_id
         self.fill()
 
-    def action_switch_tree(self, step):
-        ids = [t.id for t in self.draft.trees]
-        j = ids.index(self.tree.id) + step
-        if 0 <= j < len(ids):
-            self.switch_to(ids[j])
+    def activate_tree(self, tree_id):
+        """enter in Tree Selection: show the tree (asks first when the editor has unapplied changes) and go to its grid."""
+        def go():
+            if tree_id != self.tree.id:
+                self.show_tree(tree_id)
+            self.query_one(PipelineGrid).focus()
+        if tree_id == self.tree.id:
+            go()
+        else:
+            self.guard(go)
+
+    def target(self):
+        """The tree the tree actions apply to: the Tree Selection highlight (the shown tree outside it)."""
+        cursor = self.query_one(TreeTabs).cursor
+        if cursor == "add":
+            self.app.say("Highlight a tree first.", "warning")
+            return None
+        return next((t for t in self.draft.trees if t.id == cursor), self.tree)
 
     def action_tree(self, n):
         if n < len(self.draft.trees):
@@ -586,31 +602,43 @@ class ModelBuilderScreen(Screen):
     def action_add_tree(self):
         def add():
             tree = self.draft.add_tree(self.template())
+            self.query_one(TreeTabs).cursor = tree.id
             self.fill()
+            self.query_one(PipelineGrid).focus()
             self.app.say(f"{tree.name} added (position {self.draft.index(tree.id) + 1})")
         self.guard(add)
 
     def action_duplicate_tree(self):
+        src = self.target()
+        if src is None:
+            return
+
         def dup():
-            src = self.tree.name
-            tree = self.draft.duplicate(self.tree.id)
+            tree = self.draft.duplicate(src.id)
+            self.query_one(TreeTabs).cursor = tree.id
             self.fill()
-            self.app.say(f"{tree.name}: copy of {src}'s applied configuration")
+            self.app.say(f"{tree.name}: copy of {src.name}'s applied configuration")
         self.guard(dup)
 
     def action_remove_tree(self):
-        tree = self.tree
+        """x (Tree Selection) or the menu: asks, then removes the highlighted tree; Tree Selection stays."""
+        tree, tabs = self.target(), self.query_one(TreeTabs)
+        if tree is None:
+            return
         if len(self.draft.trees) == 1:
             self.app.say("A batch needs at least one tree.", "warning")
         elif self.app.asked("y"):
-            if self.editing is not None:
+            shown = tree.id == self.tree.id
+            if self.editing is not None and shown:
                 self.close_editor()
+            i = self.draft.index(tree.id)
             self.draft.remove(tree.id)
+            tabs.cursor = self.draft.trees[min(i, len(self.draft.trees) - 1)].id
             self.fill()
-            self.query_one(TreeTabs).focus()
+            tabs.focus()
             self.app.say(f"{tree.name} removed")
         else:
-            extra = " and its unapplied changes" if self.dirty() else ""
+            extra = " and its unapplied changes" if self.dirty() and tree.id == self.tree.id else ""
             self.app.ask(f"Remove {tree.name}? Its configuration{extra} is discarded.", "y", "remove")
 
     def action_confirm_remove(self):
@@ -619,27 +647,32 @@ class ModelBuilderScreen(Screen):
             self.action_remove_tree()
 
     def action_move_tree(self, step):
-        if self.draft.move(self.tree.id, step):
+        tree = self.target()
+        if tree is not None and self.draft.move(tree.id, step):
             self.query_one(TreeTabs).show(self.draft.trees, self.tree.id)
-            self.app.say(f"{self.tree.name}: position {self.draft.index(self.tree.id) + 1} of {len(self.draft.trees)}")
+            self.app.say(f"{tree.name}: position {self.draft.index(tree.id) + 1} of {len(self.draft.trees)}")
 
     def action_rename(self):
-        field_ = self.query_one("#mb-rename", Input)
+        field_, tree = self.query_one("#mb-rename", Input), self.target()
+        if tree is None:
+            return
+        self.rename_id = tree.id
         self.renaming = self.focused or self.query_one(TreeTabs)
-        field_.value = self.tree.name
+        field_.value = tree.name
         field_.display = True
         field_.focus()
 
     def finish_rename(self, name):
-        problem = self.draft.rename(self.tree.id, name)
+        problem = self.draft.rename(self.rename_id, name)
         if problem:
             self.app.say(f"Not renamed: {problem}", "error")
             return
+        renamed = self.draft.trees[self.draft.index(self.rename_id)].name
         self.end_rename()
         self.fill()
         if self.editing is not None:
             self.fill_preview()
-        self.app.say(f"Renamed to {self.tree.name}")
+        self.app.say(f"Renamed to {renamed}")
 
     def end_rename(self):
         self.renaming = None     # focus to return to after renaming; None: not renaming

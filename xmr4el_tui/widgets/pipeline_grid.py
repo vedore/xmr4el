@@ -124,7 +124,8 @@ class PipelineGrid(Widget, can_focus=True):
                 Binding("left", "move(-1, 0)", show=False), Binding("right", "move(1, 0)", show=False),
                 Binding("up", "move(0, -1)", show=False), Binding("down", "move(0, 1)", show=False),
                 Binding("plus,equals_sign", "zoom(1)", "zoom", key_display="+/-"),
-                Binding("minus", "zoom(-1)", show=False), Binding("0", "zoom_fit", "fit")]
+                Binding("minus", "zoom(-1)", show=False), Binding("0", "zoom_fit", "fit"),
+                Binding("1", "screen.tree(0)", "tree", key_display="1-9")]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -304,62 +305,97 @@ class ActionsButton(Widget):
 
 
 class TreeTabs(Widget, can_focus=True):
-    """The batch's trees in execution order (`1 Tree 1`, ...), then `Add tree`. left / right switch, shift+left /
-    shift+right reorder, a adds, d duplicates, delete removes, F2 renames (screen). A click on a tab switches."""
-    BINDINGS = [Binding("left", "screen.switch_tree(-1)", "tree", key_display="←→"),
-                Binding("right", "screen.switch_tree(1)", show=False),
-                Binding("shift+left", "screen.move_tree(-1)", "move", key_display="shift+←→"),
+    """The batch's trees in execution order (`[1] Tree 1`, ...), then `Add tree`. This is Tree Selection: left / right
+    move the highlight only (the shown tree and every draft stay), enter shows the highlighted tree and returns to
+    the grid (on `Add tree`: creates a tree and opens it), 1-9 jump to a tree, a opens Tree Actions, x removes the highlighted tree (asks), shift+left / right
+    reorder it, F2 renames. A click on a tab shows it. Tabs after the ninth have no number: arrows reach them."""
+    BINDINGS = [Binding("left", "cursor(-1)", "navigate", key_display="←→"),
+                Binding("right", "cursor(1)", show=False),
+                Binding("enter", "activate", "select"),
+                Binding("1", "screen.tree(0)", "jump to tree", key_display="1-9"),
+                Binding("a", "screen.tree_menu", "tree actions"), Binding("x", "screen.remove_tree", "remove tree"),
+                Binding("shift+left", "screen.move_tree(-1)", show=False),
                 Binding("shift+right", "screen.move_tree(1)", show=False),
-                Binding("a", "screen.tree_menu", "tree actions"), Binding("n", "screen.add_tree", show=False),
-                Binding("d", "screen.duplicate_tree", show=False), Binding("delete", "screen.remove_tree", show=False),
+                Binding("n", "screen.add_tree", show=False), Binding("d", "screen.duplicate_tree", show=False),
+                Binding("delete", "screen.remove_tree", show=False),
                 Binding("y", "screen.confirm_remove", show=False)]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.spans = []  # [(x0, x1, tree id or "add")]
-        self.trees, self.current, self.bad = [], None, set()
+        self.trees, self.current, self.cursor, self.bad = [], None, None, set()
 
     def show(self, trees, current):
         self.trees, self.current = list(trees), current
+        if self.cursor not in {t.id for t in trees} | {"add"}:
+            self.cursor = current
         self.bad = {t.id for t in trees if components.problems(t.config)}
         self.refresh()
+
+    def action_cursor(self, step):
+        ids = [t.id for t in self.trees] + ["add"]
+        j = ids.index(self.cursor) + step if self.cursor in ids else 0
+        if 0 <= j < len(ids):
+            self.cursor = ids[j]
+            self.refresh()
+
+    def action_activate(self):
+        if self.cursor == "add":
+            self.screen.action_add_tree()
+        else:
+            self.screen.activate_tree(self.cursor)
 
     def on_focus(self):
         self.refresh()
 
     def on_blur(self):
+        if not self.screen.query_one("#mb-menu").display and self.screen.renaming is None:
+            self.cursor = self.current  # leaving Tree Selection drops the highlight back on the shown tree
         self.refresh()
 
     def render(self):
         width = self.size.width or 80
+        accent, muted = theme.color("accent"), theme.color("text-muted")
         parts = []
         for i, t in enumerate(self.trees):
-            label = f" {i + 1} {t.name}{' !' if t.id in self.bad else ''} "
-            if t.id == self.current:
-                style = f"{theme.color('on-accent')} on {theme.color('accent')} bold" if self.has_focus else \
-                    f"{theme.color('text')} on {theme.color('cursor-blurred')} bold"
+            num = f"[{i + 1}]" if i < 9 else ""
+            name = f" {t.name}{' !' if t.id in self.bad else ''} "
+            if self.has_focus and t.id == self.cursor:
+                num_style = name_style = f"{theme.color('on-accent')} on {accent} bold"
+            elif t.id == self.current:
+                num_style = f"{accent} on {theme.color('cursor-blurred')} bold"
+                name_style = f"{theme.color('text')} on {theme.color('cursor-blurred')} bold"
             else:
-                style = f"{theme.color('text-muted')} on {theme.color('block')}"
-            parts.append((label, style, t.id))
-        parts.append((" Add tree ", theme.style("accent"), "add"))
-        here = next((i for i, p in enumerate(parts) if p[2] == self.current), 0)
-        start = 0  # drop tabs from the left until the current one fits
-        while start < here and sum(len(p[0]) + 1 for p in parts[start:here + 1]) + 2 > width:
+                num_style = f"{accent} on {theme.color('block')}"
+                name_style = f"{muted} on {theme.color('block')}"
+            parts.append(([(" " + num if num else " ", num_style), (name, name_style)], t.id))
+        add = f"{theme.color('on-accent')} on {accent} bold" if self.has_focus and self.cursor == "add" \
+            else theme.style("accent")
+        parts.append(([(" Add tree ", add)], "add"))
+        here = next((i for i, p in enumerate(parts) if p[1] == self.cursor), 0)
+        size = lambda p: sum(len(x) for x, _ in p[0]) + 1  # noqa: E731
+        start = 0  # drop tabs from the left until the highlighted one fits
+        while start < here and sum(size(p) for p in parts[start:here + 1]) + 2 > width:
             start += 1
         out, x, self.spans = Text(no_wrap=True, overflow="ellipsis"), 0, []
         if start:
             out.append("… ", theme.style("text-muted"))
             x = 2
-        for label, style, ref in parts[start:]:
-            out.append(label, style)
-            self.spans.append((x, x + len(label), ref))
+        for segments, ref in parts[start:]:
+            n = 0
+            for text, style in segments:
+                out.append(text, style)
+                n += len(text)
+            self.spans.append((x, x + n, ref))
             out.append(" ")
-            x += len(label) + 1
+            x += n + 1
         return out
 
     def on_click(self, event):
         hit = next((ref for x0, x1, ref in self.spans if x0 <= event.x < x1), None)
         if hit == "add":
+            self.cursor = "add"
             self.screen.action_add_tree()
         elif hit is not None:
+            self.cursor = hit
             self.screen.switch_to(hit)

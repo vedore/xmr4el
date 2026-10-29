@@ -231,12 +231,12 @@ def test_keyboard_grid_library_and_mouse(tmp_path):
         region = grid.regions["matcher"]
         await pilot.click(PipelineGrid, offset=(region.x + 2, region.y))
         assert app.draft.slot == "matcher" and [o.id for o in library.options] == ["jointlogisticregression"]
-        await pilot.press("ctrl+tab")
+        await pilot.press("enter")
         assert app.focused is library
-        await pilot.press("ctrl+tab")
-        assert app.focused is grid  # browsing: grid and library only
-        await pilot.press("tab")
-        assert isinstance(app.focused, TreeTabs)
+        await pilot.press("escape")
+        assert app.focused is grid
+        await pilot.press("escape")  # grid -> Tree Selection, not the previous screen
+        assert isinstance(app.focused, TreeTabs) and app.screen is screen
         await pilot.press("escape")
         assert isinstance(app.screen, DashboardScreen)
     run_builder(make_root(tmp_path), go)
@@ -354,12 +354,17 @@ def test_tree_management_keys_and_draft_protection(tmp_path):
         await edit(pilot, screen, "hierarchy")
         await type_into(pilot, screen, "n_clusters", "16")
         tabs.focus()
-        await pilot.press("right")  # another tree with unapplied changes: asks
+        await pilot.press("right")  # moves the highlight only: nothing asked, nothing switched
+        assert app.draft.tree == dup.id and screen.editing is not None and "Discard" not in footer(app)
+        await pilot.press("enter")  # another tree with unapplied changes: asks
         assert app.draft.tree == dup.id and "Discard unapplied changes to Hierarchy?" in footer(app)
         await pilot.press("u")
         assert app.draft.tree == first.id and screen.editing is None
         assert dup.config["clustering_config"]["kwargs"]["n_clusters"] == 128  # nothing leaked
-        await pilot.press("delete")
+        assert app.focused is screen.query_one(PipelineGrid)
+        await pilot.press("delete")  # not in Tree Selection: nothing
+        assert len(app.draft.trees) == 3 and "Remove" not in footer(app)
+        await pilot.press("escape", "delete")
         assert "Remove Tree 1?" in footer(app) and len(app.draft.trees) == 3
         await pilot.press("y")
         assert [t.name for t in app.draft.trees] == ["Small k", "Tree 2"] and app.draft.tree == added.id
@@ -448,7 +453,7 @@ def test_layout_45_55_with_40_60_editor_split(tmp_path):
     run_builder(make_root(tmp_path), go)
 
 
-def test_tab_stays_in_the_panel_and_ctrl_tab_cycles_panels(tmp_path):
+def test_tab_stays_in_the_panel_and_the_editor_is_reachable_without_ctrl_tab(tmp_path):
     async def go(app, pilot, screen):
         grid, tabs = screen.query_one(PipelineGrid), screen.query_one(TreeTabs)
         await pilot.press("tab")
@@ -457,30 +462,88 @@ def test_tab_stays_in_the_panel_and_ctrl_tab_cycles_panels(tmp_path):
         assert app.focused is grid  # wraps inside the Model Builder panel, never leaves it
         await pilot.press("shift+tab")
         assert app.focused is tabs
+        grid.focus()
+        await pilot.press("ctrl+tab", "f6")  # no longer bound
+        assert app.focused is grid
         await edit(pilot, screen, "hierarchy")
         n = len(screen.editing.fields)
-        first = screen.query_one("#mbf-0")
-        assert app.focused is first
-        for _ in range(n + 4):  # fields, help, Apply, Cancel, then around
+        for _ in range(n + 6):  # fields, help, Apply, Cancel, Preview, then around
             await pilot.press("tab")
             assert screen.panel_of(app.focused) == "attrs"
-        assert app.focused is first or screen.panel_of(app.focused) == "attrs"
         await pilot.press("shift+tab")
         assert screen.panel_of(app.focused) == "attrs"
-        await pilot.press("ctrl+tab")
+        screen.query_one("#mb-preview").focus()
+        await pilot.press("enter")  # Preview: the JSON panel by keyboard
         assert app.focused is screen.query_one(JsonPreview)
         await pilot.press("tab")
         assert app.focused is screen.query_one(JsonPreview)
-        await pilot.press("ctrl+tab")
-        assert app.focused is grid
-        await pilot.press("ctrl+tab")
-        assert screen.panel_of(app.focused) == "attrs" and app.focused is screen.last["attrs"]  # last focus kept
-        await pilot.press("ctrl+shift+tab")
-        assert app.focused is grid
-        await pilot.press("f6")
-        assert screen.panel_of(app.focused) == "attrs"
-        await pilot.press("shift+f6")
-        assert app.focused is grid
+        await pilot.press("escape")  # back to the attributes, the editor stays open
+        assert screen.panel_of(app.focused) == "attrs" and screen.editing is not None
+        for binding in screen.BINDINGS:
+            assert "ctrl+tab" not in binding.key and "f6" not in binding.key
+    run_builder(make_root(tmp_path), go)
+
+
+def test_tree_selection_levels_numbers_and_removal_only_there(tmp_path):
+    async def go(app, pilot, screen):
+        tabs, grid = screen.query_one(TreeTabs), screen.query_one(PipelineGrid)
+        first = app.draft.trees[0]
+        app.draft.add_tree(first.config)
+        app.draft.add_tree(first.config)
+        screen.fill()
+        t1, t2, t3 = app.draft.trees
+        app.draft.tree = t1.id
+        screen.fill()
+        text = str(tabs.render())
+        assert "[1] Tree 1" in text and "[2] Tree 2" in text and "[3] Tree 3" in text
+        await pilot.press("x", "delete")  # grid focused: removal keys are inactive
+        assert len(app.draft.trees) == 3 and not footer(app)
+        await pilot.press("escape")
+        assert app.focused is tabs and tabs.cursor == t1.id
+        await pilot.press("right", "right")
+        assert tabs.cursor == t3.id and app.draft.tree == t1.id  # highlight only
+        await pilot.press("right", "right")  # Add tree is the last stop; nothing beyond it
+        assert tabs.cursor == "add"
+        await pilot.press("left")
+        assert tabs.cursor == t3.id
+        await pilot.press("enter")
+        assert app.draft.tree == t3.id and app.focused is grid
+        await pilot.press("escape", "1")  # jump keeps Tree Selection
+        assert app.draft.tree == t1.id and app.focused is tabs
+        await pilot.press("shift+right")  # reorder the highlighted tree; numbers follow the positions
+        assert [t.id for t in app.draft.trees] == [t2.id, t1.id, t3.id]
+        assert str(tabs.render()).index("[2] Tree 1") < str(tabs.render()).index("[3] Tree 3")
+        await pilot.press("3")
+        assert app.draft.tree == t3.id
+        await pilot.press("left", "x")  # highlighted: t1 is under the cursor? the cursor follows the jump
+        assert "Remove" in footer(app) and len(app.draft.trees) == 3
+        await pilot.press("y")
+        assert len(app.draft.trees) == 2 and app.focused is tabs and tabs.cursor in {t.id for t in app.draft.trees}
+        assert "[2]" in str(tabs.render()) and "[3]" not in str(tabs.render())
+        await pilot.press("escape")  # still Tree Selection -> previous screen
+        assert isinstance(app.screen, DashboardScreen)
+    run_builder(make_root(tmp_path), go)
+
+
+def test_digits_type_into_inputs_and_removal_is_not_in_the_menu_from_the_grid(tmp_path):
+    from xmr4el_tui.screens.model_builder import TreeMenu
+    from xmr4el_tui.widgets.pipeline_grid import ActionsButton
+
+    async def go(app, pilot, screen):
+        app.draft.add_tree(app.draft.trees[0].config)
+        screen.fill()
+        await edit(pilot, screen, "hierarchy")
+        await type_into(pilot, screen, "n_clusters", "")
+        await pilot.press("2", "5")
+        assert screen.editing.draft["clustering_config"]["kwargs"]["n_clusters"] == 25
+        assert app.draft.tree == app.draft.trees[1].id  # unchanged: digits went to the input
+        await pilot.click(ActionsButton)
+        menu = screen.query_one(TreeMenu)
+        assert menu.display and menu.get_option("remove").disabled
+        await pilot.press("escape")
+        screen.query_one(TreeTabs).focus()
+        await pilot.press("a")
+        assert not menu.get_option("remove").disabled
     run_builder(make_root(tmp_path), go)
 
 
@@ -633,3 +696,44 @@ def test_fit_adapts_to_the_width_and_every_level_keeps_all_slots(tmp_path):
             grid.cursor = "search"
             grid.reveal()
     run_builder(make_root(tmp_path), go, size=(100, 36))
+
+
+def test_enter_on_add_tree_creates_a_tree_and_opens_its_builder(tmp_path):
+    async def go(app, pilot, screen):
+        tabs, grid = screen.query_one(TreeTabs), screen.query_one(PipelineGrid)
+        await pilot.press("escape", "right")
+        assert tabs.cursor == "add" and "Add tree" in str(tabs.render())
+        await pilot.press("x")  # nothing highlighted to remove
+        assert len(app.draft.trees) == 1 and "Highlight a tree first." in footer(app)
+        await pilot.press("enter")
+        assert len(app.draft.trees) == 2 and app.draft.tree == app.draft.trees[1].id and app.focused is grid
+        assert app.draft.trees[1].name == "Tree 2"
+    run_builder(make_root(tmp_path), go)
+
+
+def test_footer_confirmation_is_modal(tmp_path):
+    async def go(app, pilot, screen):
+        tabs = screen.query_one(TreeTabs)
+        app.draft.add_tree(app.draft.trees[0].config)
+        screen.fill()
+        await pilot.press("escape", "x")
+        question, cursor = app.asking, tabs.cursor
+        assert question and "Remove" in footer(app)
+        await pilot.press("left", "enter", "tab", "1", "a", "right")
+        from textual import events  # the driver's events reach App.on_event; pilot.click bypasses it
+        mouse = dict(widget=None, x=1, y=1, delta_x=0, delta_y=0, button=1, shift=False, meta=False, ctrl=False)
+        assert not app.confirm_allows(events.MouseDown(**mouse)) and not app.confirm_allows(events.MouseUp(**mouse))
+        assert not app.confirm_allows(events.MouseScrollDown(**mouse)) and app.confirm_allows(events.MouseMove(**mouse))
+        await app.on_event(events.MouseDown(**mouse))
+        await app.on_event(events.MouseUp(**mouse))
+        assert app.asking == question and tabs.cursor == cursor and app.focused is tabs and len(app.draft.trees) == 2
+        assert not screen.query_one("#mb-menu").display and "Remove" in footer(app)
+        await pilot.press("y")  # its own key answers it
+        assert app.asking is None and len(app.draft.trees) == 1
+        await pilot.press("ctrl+c")  # the quit question is modal too
+        assert app.confirming is screen and app.asking is None
+        await pilot.press("right", "enter", "a")
+        assert app.confirming is screen and not screen.query_one("#mb-menu").display
+        await pilot.press("escape")
+        assert app.confirming is None and isinstance(app.screen, ModelBuilderScreen)
+    run_builder(make_root(tmp_path), go)
