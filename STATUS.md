@@ -7,12 +7,10 @@ synthetic checks, pipeline observations `docs/pipeline.md`; commands `docs/resul
 
 ## Resume here
 
-Updated 2026-10-30. Branch `tui` (HEAD `8a384ca`), pushed to `origin/tui`. Untracked `CHANGES_TO_TUI.md` (user's
-request note, done). Uncommitted: `docs/design/tui.md` rewritten to built behaviour only (old Runs/Run/Setup/Compare
-design deleted, in git at `58cdffd`; screens renumbered §5.1 Dashboard … §5.7 Batch), `tui_architecture.md` layout /
-UI / process / tests updated and build history removed, `tui.md §` refs in code docstrings remapped. README: badges,
-mermaid pipeline diagram, TUI screenshots (`docs/images/tui_*.svg`, Textual `save_screenshot` with root `.`),
-Batch Monitor / Resume rows. Release README differs (rewritten): port the same four edits there by hand.
+Updated 2026-10-30. Branch `tui` (HEAD `b89cf23` + this STATUS commit), pushed to `origin/tui`. Untracked
+`CHANGES_TO_TUI.md` (user's request note, done). `b89cf23`: `docs/design/tui.md` rewritten to built behaviour only (old
+design in git at `58cdffd`; screens §5.1 Dashboard … §5.7 Batch), `tui_architecture.md` updated, docstring refs
+remapped; README badges, mermaid diagram, screenshots `docs/images/tui_*.svg` (Textual `save_screenshot`, root `.`).
 
 **Product state**
 - Backend (`xmr4el/`, `scripts/`): trains and evaluates XMR trees on local PubTator / grouped TSV. Unchanged by the TUI work
@@ -40,6 +38,9 @@ Batch Monitor / Resume rows. Release README differs (rewritten): port the same f
    docs/archive, docs/references, docs/results.md, run_*.sh, eq_/i1_/lc_/ncbi_eq_ specs, tiny config,
    pecos/scispacy dockerfiles+scripts, screen_leaf_scorer.py (needs pecos export) and the 2 pecos export tests.
    README rewritten for users. 469 passed, ruff clean. Later fixes: commit on `release`, push.
+   `f988702` (pushed): the same docs/README/docstring change; release drops the audits links and `58cdffd` refs
+   (not in its history). Release worktree: old scratch path (`git worktree list`); move it with
+   `git worktree remove <path> && git worktree add ../xmr4el-release release`.
 
 **Known limits**
 - Coordinator SIGKILL: surviving runners are not recovered or killed (V1).
