@@ -1,13 +1,13 @@
-"""New Experiment draft (tui.md §5.13): the dataset being configured and the one confirmed for the batch. Stdlib only.
+"""New Experiment draft (tui.md §5.4): the dataset being configured and the one confirmed for the batch. Stdlib only.
 
 One draft per TUI session, on the app (`app.draft`, memory only). Dataset Setup edits a `datasets.Selection` per
 dataset; nothing reaches `confirmed` until Confirm Dataset validates it. Later New Experiment screens read
 `draft.confirmed` (training file, enabled evaluation splits, format): every tree of the batch shares it.
 
-Review Batch (tui.md §5.15) adds the batch's own name (`name`, display only: `id` is the identity runs and paths use),
+Review Batch (tui.md §5.6) adds the batch's own name (`name`, display only: `id` is the identity runs and paths use),
 the execution order edits (`move`) and the configuration reference for Differences (`reference`).
 
-Model Builder (tui.md §5.14) keeps the batch's trees here: `trees` in execution order, each with a stable id, a
+Model Builder (tui.md §5.5) keeps the batch's trees here: `trees` in execution order, each with a stable id, a
 display name and its one applied model configuration (a plain dict no other tree shares). Editor drafts never reach
 a tree: only Apply replaces its configuration (`apply`).
 """

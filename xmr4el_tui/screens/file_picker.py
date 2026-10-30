@@ -1,4 +1,4 @@
-"""Local file picker (tui.md §5.13): a file on the machine running the TUI (over ssh / docker exec: the server's).
+"""Local file picker (tui.md §5.4): a file on the machine running the TUI (over ssh / docker exec: the server's).
 
 One path field over the entries of its directory. Typing filters them (the text after the last /); a typed or pasted
 path to a directory opens it, to a file chooses it. up / down move in the list, enter opens the directory or chooses

@@ -1,4 +1,4 @@
-"""Batch files and launch (tui.md §5.16). Stdlib only (the coordinator imports this without the tui extra).
+"""Batch files and launch (tui.md §5.7). Stdlib only (the coordinator imports this without the tui extra).
 
 A batch lives in outputs/batches/<batch_id>/: `batch.json` (the immutable plan, written once), `status.json` (mutable;
 only the coordinator writes it, atomically, except `mark_lost` for a dead coordinator), `stop` (empty file: the stop

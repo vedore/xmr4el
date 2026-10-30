@@ -1,4 +1,4 @@
-"""Run monitor (tui.md §5.11): Run overview over Pipeline | Resource monitor over Live logs, for one run (by run id).
+"""Run monitor (tui.md §5.2): Run overview over Pipeline | Resource monitor over Live logs, for one run (by run id).
 
 Read-only except Cancel Run, which goes through process.stop after a confirmation. Data: the app's scan (state,
 every RESCAN_SECONDS), events.jsonl (EventTail) and resources.json (reread only when changed) every POLL_SECONDS

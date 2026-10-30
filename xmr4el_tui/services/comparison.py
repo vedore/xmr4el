@@ -1,4 +1,4 @@
-"""Results comparison (tui.md §5.12, §11): what is known about each saved evaluation, how a challenger relates to the
+"""Results comparison (tui.md §5.3, §11): what is known about each saved evaluation, how a challenger relates to the
 baseline (VERIFIED / CAUTION / INCOMPATIBLE, with the reason), and the rows of the five analysis groups with the
 deltas the evidence allows. Stdlib only, no UI.
 

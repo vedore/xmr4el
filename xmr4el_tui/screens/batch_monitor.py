@@ -1,4 +1,4 @@
-"""Batch monitor and batch list (tui.md §5.16): a running or finished batch, read from its files.
+"""Batch monitor and batch list (tui.md §5.7): a running or finished batch, read from its files.
 
 Read-only except Stop Batch, which writes the stop request (`batch.request_stop`); the coordinator does the stopping.
 Nothing here owns a process: closing the TUI leaves the batch running. Left: batch overview + execution queue; right:

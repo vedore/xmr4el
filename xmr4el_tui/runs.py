@@ -1,4 +1,4 @@
-"""Read outputs/runs/<run-id>/ into Run records (tui.md §10 "Run browser data"). Stdlib only, no UI.
+"""Read outputs/runs/<run-id>/ into Run records (tui.md §10 "Run data"). Stdlib only, no UI.
 
 Every read tolerates missing or corrupt files and fields of the wrong JSON type: problems are recorded in
 `Run.problems`, never raised; a field of the wrong type reads as absent.

@@ -1,4 +1,4 @@
-"""Texts of the Results screen (tui.md §5.12): baseline line, Comparison Summary, Detailed Analysis cells, inspection.
+"""Texts of the Results screen (tui.md §5.3): baseline line, Comparison Summary, Detailed Analysis cells, inspection.
 No file reads and no comparability decisions: Facts and Compat come from services.comparison."""
 from rich.console import Group
 from rich.rule import Rule

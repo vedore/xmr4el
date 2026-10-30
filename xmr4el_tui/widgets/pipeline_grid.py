@@ -1,4 +1,4 @@
-"""Model Builder widgets (tui.md §5.14): the horizontal pipeline grid and the tree tab strip."""
+"""Model Builder widgets (tui.md §5.5): the horizontal pipeline grid and the tree tab strip."""
 from dataclasses import dataclass
 
 from rich.text import Text

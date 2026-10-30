@@ -1,4 +1,4 @@
-"""Model Builder registry (tui.md §5.14): the slots of the hybrid pipeline, the components each slot can load, the
+"""Model Builder registry (tui.md §5.5): the slots of the hybrid pipeline, the components each slot can load, the
 attributes each component takes, and the checks the builder applies to them. No UI. Stdlib only.
 
 The TUI never imports the backend, so the rules here mirror it: defaults are the backend's effective ones

@@ -1,4 +1,4 @@
-"""New Experiment, step 3: Review Batch (tui.md §5.15). A compact header (batch name, shared dataset, readiness) over
+"""New Experiment, step 3: Review Batch (tui.md §5.6). A compact header (batch name, shared dataset, readiness) over
 Execution Queue 30 % | Review Details 70 % (Overview, Differences).
 
 Read-only over the app's draft (`app.draft`): the one thing edited here is the batch name, and the one thing changed

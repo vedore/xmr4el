@@ -1,4 +1,4 @@
-"""New Experiment, step 1: Dataset Setup (tui.md §5.13). Datasets (30 %) | Dataset Configuration (70 %).
+"""New Experiment, step 1: Dataset Setup (tui.md §5.4). Datasets (30 %) | Dataset Configuration (70 %).
 
 Datasets lists what `datasets.discover` recognizes plus the user's registered datasets; moving the cursor changes
 nothing, enter (or a click) shows one in the configuration. Every change there is an edit kept in the app's draft

@@ -1,4 +1,4 @@
-"""Dashboard, the TUI's only screen: explorer of saved trees and their evaluations, read-only description, active runs.
+"""Dashboard, the home screen: explorer of saved trees and their evaluations, read-only description, active runs.
 
 Read-only: nothing here writes, moves or deletes a file. Data comes from the app's scan (outputs/runs/ and
 outputs/saved_trees/, every RESCAN_SECONDS in a worker thread); the explorer redraws only when what it shows changed.

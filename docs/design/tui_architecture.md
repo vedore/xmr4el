@@ -1,8 +1,8 @@
 # XMR4EL TUI code architecture
 
-Status: implemented, Dashboard, Run Monitor, Results, Dataset Setup, Model Builder, Review Batch and detached
-batch execution (2026-10-29). Implements [tui.md](tui.md); section numbers `§n` refer to it. §7-§10 are build
-history. Verification and remaining limits: [Step 6 audit](../audits/new_experiment_step6.md).
+Status (2026-10-30): implemented, Dashboard, Run Monitor, Results, Dataset Setup, Model Builder, Review Batch and
+detached batch execution. Implements [tui.md](tui.md); section numbers `§n` refer to it. Verification and remaining
+limits: [Step 6 audit](../audits/new_experiment_step6.md).
 
 ## 1. Rules
 
@@ -40,6 +40,12 @@ xmr4el_tui/
   process.py       spawn, rejection, derived state, stop
   explorer.py      explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels, tree
                    descriptor / detail / collision-safe short id, prune (search, Results filter)
+  datasets.py      Dataset Setup model: discover, inspect, validate, registry (§4)
+  draft.py         ExperimentDraft: confirmed dataset, trees, batch name, resume / launched (§4)
+  review.py        Review Batch model: Issue, validate, effective / diff, plan, run_spec
+  batch.py         batch files (batch.json, status.json, stop, locks), prepare / start / launch, scan, mark_lost,
+                   request_stop
+  coordinator.py   `python -m xmr4el_tui.coordinator <dir>`: detached, one tree at a time via process.spawn
   messages.py      RunsChanged (the app rescanned)
   app.py           App: serialized, coalesced scan worker every 5 s; Snapshot; global keys, theme
   services/
@@ -52,16 +58,18 @@ xmr4el_tui/
     dashboard_screen.py   DashboardScreen + ActiveRuns; Details loaded in a worker; open_run -> Run monitor
     dashboard_details.py  pure Rich texts: banner, metrics, tree / evaluation / run / group descriptions
     log_screen.py  LogScreen: fullscreen read-only log (View Logs): a LogPanel
-    monitor_screen.py     RunMonitorScreen (§5.11): telemetry worker (EventTail + resources.json when changed),
+    monitor_screen.py     RunMonitorScreen (§5.2): telemetry worker (EventTail + resources.json when changed),
                    stage selection -> resources, Cancel Run -> process.stop in a worker, layout / panel keys
     monitor_details.py    pure Rich texts: overview, stage rows, resource summaries (resources.json scopes)
-    stop_dialog.py StopDialog: Cancel Run confirmation (names the run id)
+    stop_dialog.py StopDialog (Cancel Run, names the run id), StopBatchDialog, QuitDialog (active batch)
     notification_center.py  NotificationCenter: ModalScreen box under the bell (history, open, clear all)
-    results_screen.py  ResultsScreen (§5.12): baseline + challengers, facts worker, inspection, group keys
+    results_screen.py  ResultsScreen (§5.3): baseline + challengers, facts worker, inspection, group keys
     results_details.py pure Rich texts: baseline line, summary, analysis cells, inspection
-    dataset_setup.py   DatasetSetupScreen (§5.13); file_picker.py FilePicker
-    batch_monitor.py   BatchMonitorScreen, BatchesScreen (§5.16): queue + selected tree's log, Stop Batch
-    model_builder.py   ModelBuilderScreen (§5.14): tree tabs + grid, Library, editor (Editing copy), preview()
+    dataset_setup.py   DatasetSetupScreen (§5.4); file_picker.py FilePicker
+    batch_monitor.py   BatchMonitorScreen, BatchesScreen (§5.7): queue + selected tree's log, Stop Batch
+    model_builder.py   ModelBuilderScreen (§5.5): tree tabs + grid, Library, editor (Editing copy), preview()
+    review_batch.py    ReviewBatchScreen (§5.6): header, Execution Queue, Review Details, Fix Issue, Launch Batch
+    review_details.py  pure Rich texts: a tree's Overview by stage, Differences against the reference
   widgets/
     explorer.py    Explorer tree (resizable; items of 1-2 rows + gap rows over Tree lines; `/` search) + node
                    labels; ResultsExplorer (row states, beam chip, `i` click); one widget for both screens
@@ -80,9 +88,10 @@ xmr4el_tui/
   app.tcss
 tests/tui/
   fake_runs.py     builder for run directories (shapes copied from real runs)
-  test_runs.py  test_progress.py  test_logs.py  test_procinfo.py  test_process.py
-  test_dashboard.py  test_monitor.py  test_results.py  test_notifications.py  test_dataset_setup.py
-  test_model_builder.py  test_footer.py  (Textual run_test + Pilot; importorskip("textual"))
+  test_runs.py  test_progress.py  test_logs.py  test_procinfo.py  test_process.py  test_batch.py
+  test_dashboard.py  test_explorer.py  test_monitor.py  test_results.py  test_notifications.py
+  test_dataset_setup.py  test_model_builder.py  test_review_batch.py  test_batch_ui.py  test_batch_audit.py
+  test_workflow_e2e.py  test_footer.py  (Textual run_test + Pilot; importorskip("textual"))
 tests/test_tui_components.py  the builder registry against the backend (defaults, rejections, load_config round trip)
 ```
 
@@ -194,7 +203,7 @@ unknown (§8).
 `pct(a, b)`, `marker(state, ascii)`. ASCII when `NO_COLOR` is set or the locale is not
 UTF-8 (§4).
 
-**`procinfo.py`** (stdlib only; increment 2):
+**`procinfo.py`** (stdlib only):
 
 ```python
 def identity(pid) -> dict | None     # uid, start token, runtime, pgid, sid; None if gone
@@ -206,7 +215,7 @@ Start token: Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart= -p <pid>`.
 Runtime: Linux `/proc/sys/kernel/random/boot_id` + `readlink /proc/self/ns/pid`;
 macOS `sysctl -n kern.boottime`. PGID/SID via `os.getpgid` / `os.getsid`.
 
-**`datasets.py`** (stdlib; Dataset Setup, tui.md §5.13): `discover(root)` -> `Dataset` (key = directory or
+**`datasets.py`** (stdlib; Dataset Setup, tui.md §5.4): `discover(root)` -> `Dataset` (key = directory or
 `local:<id>`, name, variant, `Candidate`s per role train / dev / test with their sources); `registered` / `register`
 (`outputs/tui/datasets.json`); `inspect(root, path)` (stat + 64 KiB PubTator sniff, cached by mtime/size);
 `validate(root, dataset, selection, taken)` -> `[(field, kind, message)]`; `status(problems)`. `Selection` (frozen):
@@ -217,7 +226,7 @@ key, name, variant, train, evals (`EvalInput` split / path / enabled), format.
 (shown), `slot` / `feature_slot` (grid cursor); `add_tree`, `duplicate` (deep copy), `remove` (last stays), `move`,
 `rename` (`name_problem`), `apply` (one assignment of a validated config). Editor drafts never live here.
 
-**`components.py`** (stdlib; Model Builder, tui.md §5.14): `SLOTS` (id, grid name, config key, components, extra
+**`components.py`** (stdlib; Model Builder, tui.md §5.5): `SLOTS` (id, grid name, config key, components, extra
 top-level fields), `Component` (type, fields, base config), `Field` (path, kind, backend default, range, empty =
 omit / null / required). `installed`, `part` / `merged` (slot keys out of / into a config), `assign` (left-out
 defaults stay out), `parse` / `check` / `coerce`, `slot_problems` / `problems`, `summary`, `json_lines` (each
@@ -228,101 +237,78 @@ importing it; `tests/test_tui_components.py` (outside tests/tui) holds the two t
 
 | Class | Shows | Reads |
 | --- | --- | --- |
-| `App` | help panel, theme; notifications (`Notifications.observe` per scan with the scan's start time, one toast at a time, `open_notice` pushes over the current screen after an incarnation check); footer state (`say`, quit confirmation); `go_to` (breadcrumb click) | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
+| `App` | help panel, theme; notifications (`Notifications.observe` / `observe_batches` per scan, one toast at a time, `open_notice` pushes over the current screen after an incarnation check); footer state (`say`, `ask` / `asked`, quit confirmation or `QuitDialog` with an active batch); `go_to` (breadcrumb click); New Experiment navigation (`action_new_experiment`, `open_setup` / `open_builder` / `open_review`, `remember_workflow`, `action_resume_experiment`, `batch_launched`) | `ExperimentRepository.snapshot` every 5 s in a worker -> `App.snapshot`, posts `RunsChanged` |
+| `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs and batches | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
 | `RunMonitorScreen` | one run by id: overview, pipeline, resources of the selected stage, live log | `App.snapshot` (state); `progress.EventTail` + resources.json (stat, reread on change) every 1 s in a worker while active, one read after it ends; provenance.json once; the log via `LogPanel` |
-| `DashboardScreen` | explorer (Models > dataset > tree > evaluation; Active, no saved tree yet; Runs without a tree), description of the selected item, active runs | `App.snapshot`; `explorer.build`; `ExperimentRepository.details` of the selected item in a worker (xmodel.json, no pickle) |
-
 | `ResultsScreen` | baseline + up to 3 challengers: summary, one metric group for all, inspection of one | `App.snapshot` (metrics); `comparison.read_facts` for every evaluation in a worker when the scan's runs change |
-
-| `DatasetSetupScreen` | New Experiment step 1: Datasets (`DatasetList`) and Dataset Configuration (`ConfigRows`, a `Rows` OptionList like Description); `FilePicker` pushed per file row; `m` pushes the Model Builder | `datasets.discover` + registry on mount / `ctrl+r`; list statuses in a worker; `app.draft` |
-
+| `DatasetSetupScreen` | New Experiment step 1: Datasets (`DatasetList`) and Dataset Configuration (`ConfigRows`, a `Rows` OptionList like Description); `FilePicker` pushed per file row; `m` opens the Model Builder | `datasets.discover` + registry on mount / `ctrl+r`; list statuses in a worker; `app.draft` |
 | `ModelBuilderScreen` | New Experiment step 2: `TreeTabs`, `PipelineGrid`, `Library` (a `Rows`), editor (`Editing`: slot, component, origin, working copy, parse errors) with Attributes and `JsonPreview`; `leave_guard` / `confirm_cancelled` hooks used by `App.go_to` / `App.action_escape` | `app.draft` (confirmed dataset, trees); `components.template` reads specs / base config on a new tree |
+| `ReviewBatchScreen` | New Experiment step 3: header, Execution Queue, Review Details (Overview / Differences), Fix Issue, Launch Batch | `review.validate` (dataset part in a worker); `batch.launch` in a worker |
+| `BatchMonitorScreen`, `BatchesScreen` | one batch: overview, execution queue, selected tree, its run's log; every batch | the batch's status.json every 1 s; run state from `App.snapshot` (`batch.scan` in the app's scan) |
 
 `DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
 pushes the Run monitor. Footer confirmations other than quit: `App.ask(question, key, verb)` / `App.asked(key)`
-(the same key again confirms, `esc` cancels, `ctrl+c` replaces it with the quit question). Used by Dataset Setup:
-`runs.datasets/split_files/training_files` (via `datasets.discover`). Launching goes through `batch.prepare/start` and the coordinator (`process.spawn/rejection`).
+(the same key again confirms, `esc` cancels, `ctrl+c` replaces it with the quit question). The New Experiment
+screens never import one another: they open each other through the App. Launching goes through `batch.launch`
+(prepare, start) and the coordinator (`process.spawn` / `rejection`).
 
-Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
-scroll and marks by run `id` (§7).
+Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection and scroll by run `id`.
 
-## 6. Process side (`process.py`, increment 2)
+## 6. Process side (`process.py`)
 
 ```python
-def spawn(root, spec, run_dir, xmodel_path, config_sha, tree_id) -> Popen  # + .console/<id>.launch.json
+def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None, runner=RUNNER) -> Popen
+                                              # + .console/<id>.log and .console/<id>.launch.json
+def rejection(root, run_id) -> dict | None    # the exit-3 binding-rejection JSON line in the console log
 def owned(run, rec) -> bool                   # the launch record matches run id, run dir and identity
 def derived_state(run, here) -> Live          # RUNNING | LOST | UNVERIFIED; stoppable only when the live
                                               # process leads its group and session (the recorded flag is no
                                               # proof) and owned() (a TUI launched it)
 def stop(run, force=False) -> str             # re-verifies identity first (§9); returns outcome
+def record_forced(run)                        # a verified SIGKILL: status.json -> stopped, forced
 ```
 
 - `spawn`: argument list, `cwd=root`, `start_new_session=True`, stdin = spec JSON,
   stdout/stderr = `outputs/runs/.console/<run-id>.log`, created exclusively (a reused run id raises
-  `FileExistsError` before anything starts). The coordinator owns the Popen; the run's state always comes from files.
-- Exit code 3 + the JSON line in the console log -> `BindingRejected` -> Setup (§10).
+  `FileExistsError` before anything starts). Called only by the coordinator, which owns the Popen; the run's state
+  always comes from files.
+- Exit code 3 + the JSON line in the console log -> `rejection` -> the coordinator records the tree `failed`
+  (`not started: <error>`).
 
 ## 7. Changes outside the package
 
-| Increment | File | Change |
-| --- | --- | --- |
-| 1 | `xmr4el/eval.py` `evaluate_tree` | `population_sha256` (sha256 of the JSON list of `[row position, gold label]` kept by the vocabulary filter) and `preprocessing` (`context_window`, `abbrev_expansion`) in the metrics. No metric value changes. |
-| Results audit | `xmr4el/eval.py` `evaluate_tree` | `eval_protocol` (`EVAL_PROTOCOL`), `strings_sha256`; `acc@1_all = 0` when no row is in vocabulary; empty string groups store `null` rates (§3a). |
-| Results audit | `scripts/run_experiment.py` | `check_inputs`: re-hash the training file after loading and each eval's files after evaluating; a change fails the run before metrics are written. |
-| 1 | `pyproject.toml` | package discovery `xmr4el_tui*`, `[project.optional-dependencies] tui = ["textual==<pinned>"]`, `[project.scripts] xmr4el-tui`, package data `*.tcss`; `uv.lock`. |
-| 1 | `xmr4el.dockerfile` | `--extra tui` in the dependency sync. |
-| 1 | `.github/workflows/ci.yml` | `uv sync --locked --extra tui`; ruff over `xmr4el_tui`. |
-| 2 | `scripts/run_experiment.py` | `-check`, `-spec -`, `-run_dir`, `-model_config_sha256`, `-tree_id`, exit 3; config captured once; identity in `status.json` (`procinfo.own_identity`); `stopped`; heartbeat thread; `events.jsonl` handler. |
-| 2 | `xmr4el/xmodel.py`, `hierarchy/tree.py`, `features/encoder.py`, `features/transformers.py` | `extra={"event": ...}` on the stage log calls (wording unchanged); encoder part events; throttled transformer ticks on `xmr4el.progress`. |
-
-Increment 2 library edits touch training code paths only through logging `extra=`;
-no numeric change, no retrain.
+| File | Change |
+| --- | --- |
+| `xmr4el/eval.py` `evaluate_tree` | `population_sha256` (sha256 of the JSON list of `[row position, gold label]` kept by the vocabulary filter), `preprocessing` (`context_window`, `abbrev_expansion`), `eval_protocol` (`EVAL_PROTOCOL`), `strings_sha256`; `acc@1_all = 0` when no row is in vocabulary; empty string groups store `null` rates (§3a). |
+| `scripts/run_experiment.py` | `-check`, `-spec -`, `-run_dir`, `-model_config_sha256`, `-tree_id`, exit 3; config captured once; identity in `status.json` (`procinfo.own_identity`); `stopped`; heartbeat thread; `events.jsonl` handler; `check_inputs` (re-hash the training file after loading and each eval's files after evaluating; a change fails the run before metrics are written). |
+| `xmr4el/xmodel.py`, `hierarchy/tree.py`, `features/encoder.py`, `features/transformers.py` | `extra={"event": ...}` on the stage log calls (wording unchanged); encoder part events; throttled transformer ticks on `xmr4el.progress`. Logging only: no numeric change, no retrain. |
+| `pyproject.toml` | package discovery `xmr4el_tui*`, `[project.optional-dependencies] tui = ["textual==<pinned>"]`, `[project.scripts] xmr4el-tui`, package data `*.tcss`; `uv.lock`. |
+| `xmr4el.dockerfile` | `--extra tui` in the dependency sync. |
+| `.github/workflows/ci.yml` | `uv sync --locked --extra tui`; ruff over `xmr4el_tui`. |
 
 ## 8. Tests
 
 - `fake_runs.make_run(root, name, *, kind, status, metrics, tree_id, tree_here,
   events, identity, corrupt=())` writes a run directory with the real file shapes.
-- Pure modules: every state in §4, the §11 matrix (hash / derived / unknown /
-  different), events with a torn last line.
-- Screens: Textual `run_test(size=(80, 24))` + Pilot for §7 keys, focus restore,
-  column dropping at 60 columns, `NO_COLOR`.
+- Pure modules: every state in tui.md §4, the §11 matrix (hash / derived / unknown / different), events with a
+  torn last line.
+- Screens: Textual `run_test(size=(80, 24))` + Pilot for tui.md §7 keys, focus restore, `NO_COLOR`.
 - `evaluate_tree`: population hash equal for the same file and tree, different when
   the vocabulary drops a different row; existing metric values unchanged; `strings_sha256` follows the
   effective dictionary; zero-sample metrics (`tests/test_eval.py`).
 - Comparison evidence (§3a): `tests/tui/test_results.py` (protocol, strings, conflicts, malformed evidence,
   provenance-only reload, vanished baseline / inspection, 80x24 Generalization rows); search mounting and
   same-minute labels in `tests/tui/test_explorer.py`; input re-check in `tests/test_run_experiment.py`.
-- Runner (increment 2): extends `tests/test_run_experiment.py` (synthetic TF-IDF spec,
-  subprocess, `cwd=tmp`).
+- New Experiment: `test_dataset_setup.py`, `test_model_builder.py`, `test_review_batch.py`; the builder registry
+  against the backend in `tests/test_tui_components.py`.
+- Batches: `test_batch.py` (coordinator through the `XMR4EL_TEST_RUNNER` seam: sequential, continue on failure,
+  integrity, stop, locks, lost), `test_batch_ui.py` (launch, monitor, Stop Batch, a launch ends the experiment),
+  `test_batch_audit.py`, `test_workflow_e2e.py`.
+- Runner: `tests/test_run_experiment.py` (synthetic TF-IDF spec, subprocess, `cwd=tmp`).
 
-## 9. Increment 1 build order
+Check: `.venv/bin/python -m pytest -q && uvx ruff check xmr4el xmr4el_tui scripts tests`.
 
-One commit each on `tui`:
-
-1. `evaluate_tree` population hash + preprocessing, test.
-2. Packaging: `pyproject.toml`, `uv.lock`, empty `xmr4el_tui` with `__main__`,
-   Dockerfile, CI. Check: wheel install outside the checkout imports it.
-3. `fmt.py`, `runs.py`, `progress.py` (old runs: empty) + tests (the two-run `compare.py` was later replaced by `services/comparison.py`).
-4. `RunsScreen` + `RunScreen` (Overview from metrics, Log, Inputs) + screen tests.
-5. `CompareScreen` + tests.
-
-Check per commit: `.venv/bin/python -m pytest -q && uvx ruff check xmr4el xmr4el_tui scripts tests`.
-Manual check after 4: `.venv/bin/python -m xmr4el_tui` on the real `outputs/runs/`.
-
-### Increment 2 build order
-
-One commit each on `tui`:
-
-1. Runner: `-check`, `-run_dir`, `-model_config_sha256`, `-tree_id`, exit 3; model config read once. Done.
-2. `procinfo.py`; identity in `status.json`, `stopped` on SIGTERM/Ctrl+C, `heartbeat`. Done (`error` = `SIGTERM` / `SIGINT`).
-3. `events.jsonl` handler; `extra={"event": ...}` on the stage log calls, encoder parts, transformer ticks. Done (`xmr4el.progress(**event)` for part/tick/runner events; the runner emits load, save, eval).
-4. `process.py` (`check`, `spawn`, `derived_state`, `stop`); Runs/Run show RUNNING/LOST from it. Done (`Run.live` = `process.Live`, set by the app's scan for recorded-running runs; `rejection` reads the exit-3 line).
-5. Setup + Review screens, spawn (§5.5-5.7). Done (`launch.py`; Runs `n` new, Runs/Run `e` evaluate tree; `d` duplicate left to increment 3; a superseded `-check` runs to its end, its result dropped by revision).
-6. Stop modal (§5.9).
-
-## 10. Decisions
+## 9. Decisions
 
 - User 2026-10-23: Textual is the `tui` extra, pinned to the version `uv` resolves.
-- User 2026-10-23: CI installs the extra (`uv sync --locked --extra tui`), so screen
-  tests run on every push. Change `ci.yml` in step 2 with the extra itself; earlier
-  it would fail on an unknown extra.
+- User 2026-10-23: CI installs the extra (`uv sync --locked --extra tui`), so screen tests run on every push.

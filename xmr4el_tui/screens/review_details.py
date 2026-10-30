@@ -1,4 +1,4 @@
-"""Review Batch, Review Details texts (tui.md §5.15): Overview of one tree's applied configuration by model stage, and
+"""Review Batch, Review Details texts (tui.md §5.6): Overview of one tree's applied configuration by model stage, and
 its Differences from the configuration reference. Pure: Rich text lines, no widgets."""
 from dataclasses import dataclass
 

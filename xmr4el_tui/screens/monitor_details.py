@@ -1,4 +1,4 @@
-"""Texts of the Run monitor (tui.md §5.11): overview, stage rows, resource summaries. No file reads: the data comes
+"""Texts of the Run monitor (tui.md §5.2): overview, stage rows, resource summaries. No file reads: the data comes
 from the scan's Run, the stage list (progress.stages) and resources.json as the runner wrote it."""
 from datetime import datetime
 from pathlib import Path

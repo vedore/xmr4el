@@ -1,4 +1,4 @@
-"""Dataset Setup model (tui.md §5.13): logical datasets recognized from configs/experiments/*.json, dataset directories
+"""Dataset Setup model (tui.md §5.4): logical datasets recognized from configs/experiments/*.json, dataset directories
 under datasets/ and the user's registered datasets; cheap, bounded file checks; validation of one selection. No UI.
 Stdlib only.
 

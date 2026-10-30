@@ -1,4 +1,4 @@
-"""Process side of the TUI (tui.md §9, §10): -check in a child, spawn a run, liveness of recorded-running runs, stop.
+"""Process side of the TUI (tui.md §9, §10): spawn a run (for the batch coordinator), liveness of recorded-running runs, stop.
 Stdlib only. A run's state always comes from its files plus a live identity check, never from a Popen handle.
 """
 import json

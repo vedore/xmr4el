@@ -7,8 +7,12 @@ synthetic checks, pipeline observations `docs/pipeline.md`; commands `docs/resul
 
 ## Resume here
 
-Updated 2026-10-30. Branch `tui` (HEAD `3033827`). **Working tree has uncommitted changes**: code-quality review
-fixes F1-F5 and doc edits. Nothing pushed.
+Updated 2026-10-30. Branch `tui` (HEAD `8a384ca`), pushed to `origin/tui`. Untracked `CHANGES_TO_TUI.md` (user's
+request note, done). Uncommitted: `docs/design/tui.md` rewritten to built behaviour only (old Runs/Run/Setup/Compare
+design deleted, in git at `58cdffd`; screens renumbered §5.1 Dashboard … §5.7 Batch), `tui_architecture.md` layout /
+UI / process / tests updated and build history removed, `tui.md §` refs in code docstrings remapped. README: badges,
+mermaid pipeline diagram, TUI screenshots (`docs/images/tui_*.svg`, Textual `save_screenshot` with root `.`),
+Batch Monitor / Resume rows. Release README differs (rewritten): port the same four edits there by hand.
 
 **Product state**
 - Backend (`xmr4el/`, `scripts/`): trains and evaluates XMR trees on local PubTator / grouped TSV. Unchanged by the TUI work
@@ -19,7 +23,7 @@ fixes F1-F5 and doc edits. Nothing pushed.
   components and failed since the first commit; fixed 2026-10-30, `tests/features` 19 pass; full suite not rerun after the fix).
   No real-corpus training was run for the TUI work.
 
-**Uncommitted fixes (report `docs/audits/code_quality_architecture_review_2026-10-30.md`)**
+**Committed fixes (report `docs/audits/code_quality_architecture_review_2026-10-30.md`)**
 - F1 `HierarchicalMLModel.train` resolves `BalancedKMeans.DEFAULTS` before halving: omitted `kwargs`, `{}` and explicit
   `n_clusters=8` train the same hierarchy. Trees trained earlier with omitted defaults differ: retrain.
 - F2 Review `fix()` refused while a tree is carried. F3 `app.open_review` returns to the Review below instead of stacking.
@@ -29,10 +33,13 @@ fixes F1-F5 and doc edits. Nothing pushed.
   Batch Monitor opens over the Dashboard, `n` starts a new draft (`draft.launched`). tests/tui 315 pass.
 
 **NEXT (in order)**
-1. User: commit/push `tui` (agent never pushes without OK).
-2. User: manual terminal/SSH and Linux checks in `docs/audits/new_experiment_step6.md`; one real batch via the TUI
+1. User: manual terminal/SSH and Linux checks in `docs/audits/new_experiment_step6.md`; one real batch via the TUI
    (`configs/xmr4el_tiny_config.json`, `datasets/ncbi_tiny`; build recipe in `README.md`).
-3. Ship to `main` by copying kept files, not merging dev-only files (branch layout: `main` = orphan release `8d2e213`).
+2. Release PR open: lasigeBioTM/XMR4EL#1, branch `release` (`21bd5e5` on `8d2e213`, pushed to origin). Built in a
+   scratch worktree by copying kept files from `tui`. Dropped: AGENTS/CLAUDE/STATUS/CHANGES_TO_TUI, docs/audits,
+   docs/archive, docs/references, docs/results.md, run_*.sh, eq_/i1_/lc_/ncbi_eq_ specs, tiny config,
+   pecos/scispacy dockerfiles+scripts, screen_leaf_scorer.py (needs pecos export) and the 2 pecos export tests.
+   README rewritten for users. 469 passed, ruff clean. Later fixes: commit on `release`, push.
 
 **Known limits**
 - Coordinator SIGKILL: surviving runners are not recovered or killed (V1).

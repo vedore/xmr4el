@@ -1,4 +1,4 @@
-"""Review Batch model (tui.md §5.15): the checks run on the experiment draft before launch, the configuration
+"""Review Batch model (tui.md §5.6): the checks run on the experiment draft before launch, the configuration
 differences between trees, and the plan Step 5's launcher reads. No UI, stdlib only.
 
 Everything reuses the existing rules: a tree's model configuration is checked by `components.problems` (the Model

@@ -1,4 +1,4 @@
-"""New Experiment, step 2: Model Builder (tui.md §5.14). Model Builder 45 % (tree tabs, zoom, pipeline grid) over the
+"""New Experiment, step 2: Model Builder (tui.md §5.5). Model Builder 45 % (tree tabs, zoom, pipeline grid) over the
 Component Library or the Component Editor (Attributes 40 % | JSON preview 60 %) 55 %.
 
 Every tree's applied configuration lives in the app's draft (`app.draft.trees`). The editor works on a copy of

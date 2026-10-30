@@ -1,4 +1,4 @@
-"""Results (tui.md §5.12): Current Baseline over the explorer | Comparison Summary over Detailed Analysis.
+"""Results (tui.md §5.3): Current Baseline over the explorer | Comparison Summary over Detailed Analysis.
 
 One screen, one layout: zero to three challengers next to a fixed baseline (an evaluation chosen on the Dashboard).
 The explorer lists the baseline and the evaluations it can be compared with (Show incompatible lists the rest too).

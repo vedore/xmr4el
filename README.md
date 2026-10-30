@@ -1,5 +1,9 @@
 # XMR4EL
 
+[![CI](https://github.com/lasigeBioTM/XMR4EL/actions/workflows/ci.yml/badge.svg)](https://github.com/lasigeBioTM/XMR4EL/actions/workflows/ci.yml)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Extreme multi-label ranking (XMR) for biomedical entity linking. XMR4EL links a mention, given with its
 document context, to a concept ID from a large label space (MeSH, OMIM, UMLS CUIs, ...). It clusters the
 labels into a tree, trains a matcher per tree node, and searches the tree with a beam at prediction time.
@@ -19,6 +23,15 @@ mentions; prediction takes mentions you supply.
 **What it does not do:** mention detection, UMLS or knowledge-base lookups, document-level linking, serving.
 
 ## How it works
+
+```mermaid
+flowchart LR
+    A["PubTator / TSV<br/>mention + context"] --> B["Encode<br/>SapBERT · char TF-IDF · context TF-IDF"]
+    B --> C["PIFA<br/>label embeddings"]
+    C --> D["Balanced k-means<br/>label tree"]
+    D --> E["Matcher per node<br/>logistic regression"]
+    E --> F["Beam search<br/>ranked concept IDs"]
+```
 
 1. **Read** PubTator annotations (or grouped TSV texts). Each annotation becomes `mention [SEP] context`
    with its concept ID as the label.
@@ -158,12 +171,20 @@ uv sync --locked --extra tui
 .venv/bin/python -m xmr4el_tui            # or xmr4el-tui; --root <repo> when started elsewhere
 ```
 
+![Dashboard: trees by dataset, the selected tree's description, active runs](docs/images/tui_dashboard.svg)
+
+![Results: a baseline against three challengers; Δ — marks deltas the recorded evidence does not allow](docs/images/tui_results.svg)
+
+*Screenshots from small test batches; the values are not benchmark results (see `docs/results.md`).*
+
 | Screen | Opened by | Purpose |
 |---|---|---|
 | Dashboard | start | Explorer (Models > dataset > tree > evaluation, then runs without a tree), Description of the selection, Active runs. Rescans every 5 s. `View Logs` opens a run's log. |
 | Run Monitor | `enter` on an active run, `right` in Description | Overview, Pipeline stages, Resources, Live logs. Cancel Run (`s`) sends SIGTERM after confirmation, only to runs this TUI launched. Runs started from a shell are monitor-only. |
 | Results | `r`, or `left` in Description, on an evaluation with metrics | Compares it (baseline) with up to three evaluations of the same test file: VERIFIED / CAUTION / INCOMPATIBLE; deltas only where recorded evidence allows. |
-| New Experiment | `n` | Dataset Setup (confirm dataset, files) -> Model Builder (`m`; one or more trees, eight pipeline slots, live JSON preview, `ctrl+s` applies) -> Review Batch (validation, queue) -> Launch Batch (detached coordinator, `xmr4el_tui/batch.py`, `coordinator.py`; one running batch at a time). |
+| New Experiment | `n` | Dataset Setup (confirm dataset, files) -> Model Builder (`m`; one or more trees, eight pipeline slots, live JSON preview, `ctrl+s` applies) -> Review Batch (validation, queue) -> Launch Batch (detached coordinator, `xmr4el_tui/batch.py`, `coordinator.py`; one running batch at a time). A launch ends the experiment: `n` then starts a new one. |
+| Batch Monitor | opens at launch; `enter` on a batch in Active runs; `b` -> Batches | Execution queue, the selected tree's state and live log, Stop Batch (`s`). `enter` opens a tree's run in the Run Monitor. |
+| Resume | `c` | Reopens an unfinished New Experiment as it was left (unapplied editor changes included). |
 
 Keys: `?` lists them; `tab` / `shift+tab` cycle panels; `ctrl+b` hides the explorer, `<` / `>` resize it;
 `ctrl+r` rereads every run file; `ctrl+c` twice quits; mouse drag selects and copies text. Screen-by-screen

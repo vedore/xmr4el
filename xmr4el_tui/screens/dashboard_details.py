@@ -1,4 +1,4 @@
-"""Description texts of the Dashboard (tui.md §5.3, §5.4): one Rich Text per explorer item. No file reads: the
+"""Description texts of the Dashboard (tui.md §5.1): one Rich Text per explorer item. No file reads: the
 data comes from the scan's Snapshot and the repository's Details of the item."""
 import re
 from datetime import datetime
