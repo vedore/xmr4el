@@ -16,7 +16,7 @@ from fake_runs import bad_fields_run, make_run, patch_json  # noqa: E402
 from rich.text import Text  # noqa: E402
 from textual.selection import Selection  # noqa: E402
 from textual.widgets import DataTable  # noqa: E402
-from xmr4el_tui import explorer, process, runs  # noqa: E402
+from xmr4el_tui import explorer, process, runs, theme  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
 from xmr4el_tui.screens.dashboard_details import banner_text, eval_text, run_text, tree_text  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import ActiveRuns, DashboardScreen  # noqa: E402
@@ -418,7 +418,7 @@ def test_empty_workspace_help_rescan_quit_style(tmp_path):
         await pilot.press("ctrl+c")  # first press asks in the footer
         await pilot.pause()
         assert app.is_running and "Quit XMR4EL?" in footer_note(app)
-        assert app.theme == "xmr4el" and "Theme" not in [c.title for c in app.get_system_commands(app.screen)]
+        assert app.theme == "xmr4el-notebook" and "Theme" not in [c.title for c in app.get_system_commands(app.screen)]
     run_app(tmp_path / "empty", empty, size=(60, 20))
 
 
@@ -492,9 +492,10 @@ def test_branch_guides_stay_lit(tmp_path):
         await goto(pilot, app, ("tree", TREE))
         await pilot.press("right")
         sibling = tree.row_of(tree.cursor_node.children[1]) - int(tree.scroll_offset.y)  # second evaluation
-        assert "#2cf5c5" in colours(tree.render_line(sibling)), "on the tree: its evaluations' guides lit"
+        accent = theme.color("accent").lower()
+        assert accent in colours(tree.render_line(sibling)), "on the tree: its evaluations' guides lit"
         await pilot.press("down")  # on the first evaluation (a leaf): the branch stays lit
-        assert "#2cf5c5" in colours(tree.render_line(sibling))
+        assert accent in colours(tree.render_line(sibling))
         await pilot.press("left")  # back on the tree (expanded): its own children lit
         assert explorer_key(app) == ("tree", TREE) and tree.lit is None
         await pilot.press("left")  # collapsed: its dataset's branch is lit
@@ -512,7 +513,7 @@ def test_full_row_selection_and_description_rows(tmp_path):
         top = tree.row_of(tree.cursor_node) - int(tree.scroll_offset.y)
         below = tree.row_of(tree.cursor_node.children[0]) - int(tree.scroll_offset.y)
         focused = bg(tree.render_line(top))
-        assert focused == "#2cf5c5", "focused cursor: accent across the whole row"
+        assert focused == theme.color("accent").lower(), "focused cursor: accent across the whole row"
         assert bg(tree.render_line(top + 1)) == focused, "both rows of the tree item"
         assert bg(tree.render_line(below)) != focused
         await pilot.press("enter")
@@ -527,7 +528,8 @@ def test_full_row_selection_and_description_rows(tmp_path):
         assert desc.keys[desc.highlighted] == "Dataset"
         await goto_row(pilot, desc, "Run state")  # COMPLETED is green elsewhere; on the cursor row one colour
         line = desc.highlighted - int(desc.scroll_offset.y)
-        assert {seg.style.color.triplet.hex for seg in desc.render_line(line) if seg.text.strip()} == {"#101418"}
+        on_accent = theme.color("on-accent").lower()
+        assert {seg.style.color.triplet.hex for seg in desc.render_line(line) if seg.text.strip()} == {on_accent}
         await pilot.press("home", "down")
         seen = [desc.highlighted]
         for _ in rows[2:]:

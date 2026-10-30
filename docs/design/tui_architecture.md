@@ -16,7 +16,8 @@ limits: [Step 6 audit](../audits/new_experiment_step6.md).
   `screens/dashboard_details.py` and `screens/monitor_details.py` read no file. Dashboard scans, the selected item's Details and Results reads run in
   thread workers. Dataset Setup (discovery, confirmation) and the file picker still list and stat files on the UI
   thread; the 64 KiB dataset sniff is bounded, a full parse belongs to the runner.
-- Durable state includes run directories, `outputs/batches/` plans/status/locks and the dataset registry
+- Durable state includes run directories, `outputs/batches/` plans/status/locks, the palette setting
+  `outputs/tui/settings.json` and the dataset registry
   `outputs/tui/datasets.json`. The shared experiment draft and its navigation resume record are session memory.
 - Every file read tolerates missing or corrupt input, and fields of the wrong JSON type, and reports it as
   data (`Run.problems`, `Details.problems`, `Snapshot.problem`), never as an exception into the UI.
@@ -34,7 +35,9 @@ xmr4el_tui/
   progress.py      events.jsonl -> stage list; current_stage(run, events), last_stage_event(events)
   logs.py          LogTail: incremental, bounded run.log reads (levels, torn lines, truncation); log_path
   fmt.py           durations, timestamps, metrics, counts, stage markers, state colours
-  theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
+  theme.py         the only colour values: BRANDS -> build -> PALETTES (semantic tokens), TOKENS + use (active
+                   palette, switched in place), Lazy style tables, load / save (settings.json), beam_color,
+                   $xmr-* CSS variables
   components.py    Model Builder registry (stdlib): slots, components, attribute fields (backend defaults and
                    ranges), parse / check / assign, slot problems, summaries, JSON lines by top-level key, template
   process.py       spawn, rejection, derived state, stop

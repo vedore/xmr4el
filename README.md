@@ -24,14 +24,7 @@ mentions; prediction takes mentions you supply.
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["PubTator / TSV<br/>mention + context"] --> B["Encode<br/>SapBERT · char TF-IDF · context TF-IDF"]
-    B --> C["PIFA<br/>label embeddings"]
-    C --> D["Balanced k-means<br/>label tree"]
-    D --> E["Matcher per node<br/>logistic regression"]
-    E --> F["Beam search<br/>ranked concept IDs"]
-```
+![XMR4EL pipeline: read a mention with its context, encode it, embed the labels, cluster them into a tree with a matcher per node, predict by beam search](docs/images/pipeline.svg)
 
 1. **Read** PubTator annotations (or grouped TSV texts). Each annotation becomes `mention [SEP] context`
    with its concept ID as the label.
@@ -187,7 +180,8 @@ uv sync --locked --extra tui
 | Resume | `c` | Reopens an unfinished New Experiment as it was left (unapplied editor changes included). |
 
 Keys: `?` lists them; `tab` / `shift+tab` cycle panels; `ctrl+b` hides the explorer, `<` / `>` resize it;
-`ctrl+r` rereads every run file; `ctrl+c` twice quits; mouse drag selects and copies text. Screen-by-screen
+`ctrl+r` rereads every run file; `ctrl+p` on the Dashboard -> `Palette: …` switches colours (Notebook, Notebook light,
+Classic; kept in `outputs/tui/settings.json`); `ctrl+c` twice quits; mouse drag selects and copies text. Screen-by-screen
 contract: `docs/design/tui.md`; modules: `docs/design/tui_architecture.md`.
 
 ## Configuration

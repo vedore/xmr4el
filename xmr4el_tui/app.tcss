@@ -1,4 +1,4 @@
-/* One style for every screen; only theme variables (app.THEME), so a later theme needs no CSS change. */
+/* Every screen uses only theme variables (app.THEMES, one per palette), so a palette needs no CSS change. */
 
 Screen {
     background: $background;

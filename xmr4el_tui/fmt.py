@@ -5,12 +5,13 @@ import os
 import re
 import sys
 
-from xmr4el_tui.theme import style
+from xmr4el_tui.theme import Lazy, style
 
 DASH = "—"
 MARKERS = {"done": "+", "current": ">", "pending": "·", "failed": "x"}  # plain text, no symbol glyphs
-STATE_STYLE = {"RUNNING": style("info", "bold"), "UNVERIFIED": style("warning"), "LOST": style("error"),
-               "COMPLETED": style("success"), "FAILED": style("error"), "STOPPED": style("warning"), "UNKNOWN": ""}
+STATE_STYLE = Lazy(lambda: {"RUNNING": style("info", "bold"), "UNVERIFIED": style("warning"), "LOST": style("error"),
+                             "COMPLETED": style("success"), "FAILED": style("error"), "STOPPED": style("warning"),
+                             "UNKNOWN": ""})
 STATE_SHORT = {"RUNNING": "RUN", "UNVERIFIED": "UNVER", "LOST": "LOST", "COMPLETED": "DONE", "FAILED": "FAIL",
                "STOPPED": "STOP", "UNKNOWN": "?"}
 ASCII_MARKERS = {"done": "ok", "current": ">>", "pending": "..", "failed": "xx"}

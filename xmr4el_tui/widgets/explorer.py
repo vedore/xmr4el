@@ -166,6 +166,14 @@ class Explorer(DragRightBorder, Selectable, FullRow, Tree):
         """Row text of explorer.Node `node`."""
         return node_label(node)
 
+    def restyle(self):
+        """Relabel every row (Results: from marks / compat; any explorer: after a palette switch). No rebuild: cursor,
+        expansion and scroll stay."""
+        for key, tree_node in self.nodes.items():
+            tree_node.set_label(self.label(self.index[key][0]))
+        self._line_cache.clear()
+        self.refresh()
+
     def detail(self, node):
         """Second row of explorer.Node `node` (a tree's date and short id)."""
         return Text(node.detail, style=style("text-muted"))
@@ -280,12 +288,6 @@ class ResultsExplorer(Explorer):
 
     def label(self, node):
         return results_label(node, self.marks.get(node.key), self.compat)
-
-    def restyle(self):
-        """Relabel every row from marks / compat (no rebuild: cursor, expansion and scroll stay)."""
-        for key, tree_node in self.nodes.items():
-            tree_node.set_label(self.label(self.index[key][0]))
-        self.refresh()
 
     def render_label(self, node, base_style, style):
         """The label as built: row colours are painted over the whole row by paint_row, so Tree's cursor style must

@@ -10,7 +10,7 @@ from xmr4el_tui.fmt import STATE_STYLE
 from xmr4el_tui.runs import as_dict, elapsed, state_word
 from xmr4el_tui.screens.dashboard_details import banner_text
 from xmr4el_tui.services.experiment_repository import Activity
-from xmr4el_tui.theme import style
+from xmr4el_tui.theme import Lazy, style
 
 NA = "N/A"
 RUN_ROW = ("run",)  # the Pipeline row of the whole run
@@ -19,8 +19,8 @@ STAGE_NAMES = {"load": "Load data", "encode": "Encode features", "labels": "Labe
 PART_NAMES = {"mention_tfidf": "mention TF-IDF → SVD", "context_tfidf": "context TF-IDF → SVD",
               "transformer": "transformer", "assemble": "assemble features", "data": "load data",
               "predict": "prediction", "metrics": "metrics", "write": "write results"}
-STAGE_STYLE = {"done": style("success"), "current": style("info", "bold"), "pending": "dim",
-               "failed": style("error"), "stopped": style("warning")}
+STAGE_STYLE = Lazy(lambda: {"done": style("success"), "current": style("info", "bold"), "pending": "dim",
+                             "failed": style("error"), "stopped": style("warning")})
 STAGE_WORD = {"done": "completed", "current": "running", "pending": "pending", "failed": "failed",
               "stopped": "stopped"}
 

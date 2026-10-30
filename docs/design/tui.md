@@ -16,7 +16,7 @@ An experiment workbench over `outputs/runs/` and `outputs/batches/`:
   Batch Monitor.
 
 The TUI reads run and batch files and launches a detached coordinator that runs `scripts/run_experiment.py`; it
-holds no training or evaluation logic. Files are the only durable state (plus the dataset registry), so a run or
+holds no training or evaluation logic. Files are the only durable state (plus the dataset registry and the palette setting), so a run or
 batch outlives the TUI that started it and any TUI can show it.
 
 ## 2. Where it runs
@@ -165,16 +165,28 @@ STOP, `?` (`fmt.STATE_SHORT`, same colours). Headers and details use the full wo
 **Stage markers.** Plain text (no symbol glyphs): `+` done, `>` current, `·` pending, `x` failed.
 ASCII (`NO_COLOR` or a non-UTF-8 locale): `ok`, `>>`, `..`, `xx`.
 
-**Style.** One high-contrast theme `xmr4el`; no theme picker (the palette's
-Theme command is removed). Every colour is a semantic token in `xmr4el_tui/theme.py` (`DARK`, the only file with
-hex values; a test enforces it): application (background `#101418`, surface `#1B2229`, panel border, text
-`#F0F4F8` / muted `#A5B4C3` / disabled), selection (accent `#2CF5C5`, `on-accent`, `cursor-row` = 40 % accent over
-surface, `focus-outline`), status (success, warning, error, info, unknown, `warning-on-accent` for Caution on a
-selected row), comparison (baseline / member rows, delta) and the beam palette. `app.THEME` maps them to Textual's
-variables and exposes every token as `$xmr-<token>` in app.tcss; Python Rich styles use `theme.color` /
-`theme.style`. A later theme = another dict with the same keys assigned to `theme.TOKENS`. The cursor row is
+**Style.** XMR4EL's palette is five brand colours, paper `#FAF6EE`, ink `#2B2A28`, terracotta `#B8492A`, steel
+blue `#3F6E8C`, olive `#7A8F4E` (the README figure uses them as they are), plus two status-only colours, ochre
+`#E2B35A` (warning) and rose `#E9707F` (error, never the accent's hue). `xmr4el_tui/theme.py` is the only file with
+hex values (a test enforces it). A palette is a row of `theme.BRANDS` (paper, ink, accent, info, success, warning,
+error, dark or light); `theme.build` derives every semantic token from it: application (background, surface, panel
+border, text / muted / disabled), selection (accent, `on-accent`, `cursor-row` = 40 % accent over surface,
+`focus-outline`), status (success, warning, error, info, unknown, `warning-on-accent`), comparison (baseline / member
+rows, delta), the beam chips. Dark palettes put text in paper on an ink surface, light ones the reverse; each hue is
+mixed toward the text colour by the smallest step that reaches WCAG AA (4.5:1) on the surface, so every palette is
+readable by construction (`tests/tui/test_palette.py`). Palettes: **Notebook** (default, dark), **Notebook light**,
+**Classic** (the first teal look). `app.THEMES` registers one Textual theme per palette (Textual's own themes are not
+offered) and exposes every token as `$xmr-<token>` in app.tcss; Python Rich styles use `theme.color` /
+`theme.style`, and style tables are `theme.Lazy`, read at each use.
+
+**Changing the palette.** On the Dashboard, `ctrl+p` lists `Palette: <name>`. Choosing one switches every colour at
+once (`App.set_palette`: `theme.use` swaps `theme.TOKENS` in place, the Textual theme changes, the Dashboard redraws
+and its explorer is relabelled in place) and keeps the choice in `outputs/tui/settings.json` (`{"palette": name}`,
+other keys kept; read at start, a missing / unreadable / unknown value means the default). Not offered above the
+Dashboard: open screens keep the colours they were built with, so the switch happens where nothing else is open.
+A new palette = one more `BRANDS` row. The cursor row is
 painted across the whole row (explorer guides, every table column, the padding after them); a blurred panel keeps
-a dim accent cursor (selected, not focused); the cursor row of Description is one colour (a green COMPLETED
+a dim accent cursor (selected, not focused); the cursor row of Description is one colour (an olive COMPLETED
 would vanish on the accent); explorer guides of the cursor's branch stay accent (on a leaf or a collapsed node,
 its parent's branch); the focused panel has the accent border and title. Status colours
 stay semantic (`fmt.STATE_STYLE`). Textual honours `NO_COLOR`; that is the monochrome mode.
@@ -224,7 +236,8 @@ No animation except the encoding progress bar.
 - Footer: `r` Results with the selected evaluation as baseline (a tree with one evaluation with metrics: that
   one; several: the tree opens to choose), `b` Batches, `n` New Experiment, `c` Resume (only while an unfinished
   draft exists).
-- Read-only: nothing here writes, moves or deletes a file. Without `outputs/runs/` the group description says
+- Read-only: nothing here writes, moves or deletes a file (a palette switch, §4, writes only
+  `outputs/tui/settings.json`). Without `outputs/runs/` the group description says
   `outputs/runs/ not found under <root>. Start in the repository or pass --root.`
 
 ### 5.2 Run Monitor
@@ -598,7 +611,7 @@ Each screen's empty, loading and error states are in its section (§5).
 | Where | Key | Action |
 | --- | --- | --- |
 | Everywhere | `?` (`F1` inside text fields) | Help for this screen and the focused field. |
-| Everywhere | `ctrl+p` | Command palette (every action below is also a command). |
+| Everywhere | `ctrl+p` | Command palette (every action below is also a command). On the Dashboard: `Palette: <name>` (§4). |
 | Everywhere | `esc` | Close overlay, clear filter, then go back. |
 | Everywhere | `ctrl+c` (also `ctrl+q`), then `ctrl+c` again / `esc` | Quit after the footer confirmation (no timer) / cancel. Running children keep running (§2). `ctrl+c` no longer copies (`super+c` does). |
 | Everywhere | `ctrl+n` | Notification center (§4): `↑↓`, `enter` opens, `c` clears all, `esc` / `ctrl+n` closes. |

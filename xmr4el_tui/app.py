@@ -2,9 +2,10 @@
 import threading
 import time
 from datetime import datetime
+from functools import partial
 
 from textual import events, work
-from textual.app import App
+from textual.app import App, SystemCommand
 from textual.binding import Binding
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -27,6 +28,7 @@ from xmr4el_tui.screens.stop_dialog import QuitDialog
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
 from xmr4el_tui.services.notifications import Notifications, incarnation
 from xmr4el_tui.widgets.context_footer import ContextFooter
+from xmr4el_tui.widgets.explorer import Explorer
 from xmr4el_tui.widgets.top_bar import TopBar
 
 RESCAN_SECONDS = 5
@@ -35,21 +37,25 @@ TOAST_SECONDS = 4       # below RESCAN_SECONDS: one scan's toast is gone before 
 TOAST_LINE = 88         # characters per toast line: two wrapped rows of the 46-column toast
 WORST_FIRST = ("error", "warning", "success", "information")
 
-# The one style (no theme picker). Every colour comes from theme.TOKENS; screens use only theme variables in app.tcss,
-# so another theme needs no CSS change.
-C = theme.TOKENS
-THEME = Theme(
-    name="xmr4el", dark=True, primary=C["accent"], accent=C["accent"], foreground=C["text"],
-    background=C["background"], surface=C["surface"], panel=C["panel"], success=C["success"],
-    warning=C["warning"], error=C["error"],
-    variables={"foreground-muted": C["text-muted"], "border": C["accent"], "border-blurred": C["panel-border"],
-               "block-cursor-background": C["accent"], "block-cursor-foreground": C["on-accent"],
-               "block-cursor-text-style": "bold", "block-cursor-blurred-background": C["cursor-blurred"],
-               "block-cursor-blurred-foreground": C["text"], "block-cursor-blurred-text-style": "none",
-               "block-hover-background": f"{C['text']} 8%", "footer-key-foreground": C["accent"],
-               "footer-description-foreground": C["text-muted"],
-               "screen-selection-background": C["text-selection"], "screen-selection-foreground": C["text"],
-               **theme.css_variables()})
+# One Textual theme per XMR4EL palette (theme.PALETTES; Textual's own themes are not offered). Every colour comes from
+# the palette; screens use only theme variables in app.tcss, so a palette needs no CSS change.
+def textual_theme(name):
+    C = theme.PALETTES[name]
+    return Theme(
+        name="xmr4el-" + name.lower().replace(" ", "-"), dark=C["dark"], primary=C["accent"], accent=C["accent"],
+        foreground=C["text"], background=C["background"], surface=C["surface"], panel=C["panel"],
+        success=C["success"], warning=C["warning"], error=C["error"],
+        variables={"foreground-muted": C["text-muted"], "border": C["accent"], "border-blurred": C["panel-border"],
+                   "block-cursor-background": C["accent"], "block-cursor-foreground": C["on-accent"],
+                   "block-cursor-text-style": "bold", "block-cursor-blurred-background": C["cursor-blurred"],
+                   "block-cursor-blurred-foreground": C["text"], "block-cursor-blurred-text-style": "none",
+                   "block-hover-background": f"{C['text']} 8%", "footer-key-foreground": C["accent"],
+                   "footer-description-foreground": C["text-muted"],
+                   "screen-selection-background": C["text-selection"], "screen-selection-foreground": C["text"],
+                   **theme.css_variables(C)})
+
+
+THEMES = {name: textual_theme(name) for name in theme.PALETTES}
 
 
 class Scanned(Message):
@@ -69,6 +75,7 @@ class XMR4ELApp(App):
                 Binding("escape", "escape", "cancel", show=False, priority=True)]
 
     def __init__(self, root):
+        self.palette = theme.use(theme.load(root))  # before the stylesheet reads the $xmr-* defaults
         super().__init__()
         self.root = root
         self.notices = Notifications()  # this session's notifications (memory only)
@@ -84,12 +91,13 @@ class XMR4ELApp(App):
         self.coordinators = []  # Popen of the batch coordinators this TUI started: reaped here, never owned
 
     def get_theme_variable_defaults(self):
-        """The theme tokens ($xmr-...) exist before THEME is applied (app.tcss is parsed first)."""
+        """The active palette's tokens ($xmr-...) exist before its theme is applied (app.tcss is parsed first)."""
         return theme.css_variables()
 
     def on_mount(self):
-        self.register_theme(THEME)
-        self.theme = THEME.name
+        for t in THEMES.values():
+            self.register_theme(t)
+        self.theme = THEMES[self.palette].name
         self.screen_change_signal.subscribe(self, self.screen_changed)
         self.push_screen(DashboardScreen())
         self.rescan()
@@ -369,8 +377,30 @@ class XMR4ELApp(App):
             self.say(f"Copied {len(text)} characters")
 
     def get_system_commands(self, screen):
-        """The palette without its theme picker: one style only."""
+        """The command palette: Textual's Theme picker is replaced by the XMR4EL palettes, offered on the Dashboard
+        only (nothing is open above it, so every visible colour switches; later screens are built in the new one)."""
         yield from (c for c in super().get_system_commands(screen) if c.title != "Theme")
+        for name in theme.PALETTES if isinstance(screen, DashboardScreen) else ():
+            yield SystemCommand(f"Palette: {name}", "Change XMR4EL's colours" + (" (current)" if name == self.palette
+                                else "; kept for the next start"), partial(self.set_palette, name))
+
+    def set_palette(self, name):
+        """Switch every colour now (CSS through the Textual theme, Rich styles through theme.TOKENS), redraw the
+        Dashboard from the last scan (its explorer relabelled in place), and keep the choice in
+        outputs/tui/settings.json."""
+        self.palette = theme.use(name)
+        self.theme = THEMES[self.palette].name
+        for screen in self.screen_stack:
+            screen.post_message(RunsChanged())
+            for tree in screen.query(Explorer):
+                tree.restyle()
+            screen.refresh(repaint=True)
+        try:
+            theme.save(self.root, self.palette)
+        except OSError as err:
+            self.say(f"Palette {self.palette} applied for this session; not saved: {err}", "warning")
+        else:
+            self.say(f"Palette: {self.palette}")
 
     def action_new_experiment(self):
         """New Experiment (Dataset Setup) over the current screen; already open: back to it. Not over a dialog. After a
