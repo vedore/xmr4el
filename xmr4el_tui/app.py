@@ -221,6 +221,17 @@ class XMR4ELApp(App):
             self.draft.resume = steps
         return bool(steps)
 
+    def batch_launched(self, batch_id):
+        """A launch ends the experiment: its screens close (kept in `draft.resume` for `c`), the batch monitor opens
+        over the Dashboard and `n` starts a new experiment."""
+        self.remember_workflow()
+        self.draft.launched = True
+        while not isinstance(self.screen, DashboardScreen):
+            self.pop_screen()
+        monitor = BatchMonitorScreen(batch_id)
+        self.push_screen(monitor)
+        self.say(f"Batch started: {self.draft.name}", "success", monitor)
+
     def resumable(self):
         d = self.draft
         return bool(d.resume or d.confirmed or d.trees)
@@ -230,6 +241,7 @@ class XMR4ELApp(App):
         if isinstance(self.screen, ModalScreen):
             return
         steps, self.draft.resume = self.draft.resume or [("setup", {"fix": None})], None
+        self.draft.launched = False
         for kind, kw in steps:
             self.push_screen({"setup": DatasetSetupScreen, "builder": ModelBuilderScreen,
                               "review": ReviewBatchScreen}[kind](**kw))
@@ -361,7 +373,10 @@ class XMR4ELApp(App):
         yield from (c for c in super().get_system_commands(screen) if c.title != "Theme")
 
     def action_new_experiment(self):
-        """New Experiment (Dataset Setup) over the current screen; already open: back to it. Not over a dialog."""
+        """New Experiment (Dataset Setup) over the current screen; already open: back to it. Not over a dialog. After a
+        launch: a new draft (the launched one is in its batch)."""
+        if self.draft.launched and not isinstance(self.screen, ModalScreen):
+            self.draft = ExperimentDraft()
         if self.draft.resume and not isinstance(self.screen, ModalScreen):
             self.action_resume_experiment()
             return

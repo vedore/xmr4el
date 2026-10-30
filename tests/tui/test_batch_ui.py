@@ -219,6 +219,23 @@ def test_resume_restores_review_batch_as_the_parent(tmp_path, monkeypatch):
     run_review(root, go, through_builder=False)
 
 
+def test_new_after_a_launch_starts_a_new_experiment(tmp_path, monkeypatch):
+    root = make_root(tmp_path)
+    with_runner(root, monkeypatch, 60)
+
+    async def go(app, pilot, screen):
+        launched = app.draft
+        await launch(app, pilot)
+        assert [n for n in stack_names(app) if n != "Screen"] == ["DashboardScreen", "BatchMonitorScreen"]
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        assert [n for n in stack_names(app) if n != "Screen"] == ["DashboardScreen", "DatasetSetupScreen"]
+        assert app.draft is not launched and not app.draft.trees and app.draft.confirmed is None
+    run_review(root, go, through_builder=False)
+
+
 def test_dashboard_monitor_cycles_keep_one_dashboard(tmp_path, monkeypatch):
     root = make_root(tmp_path)
     with_runner(root, monkeypatch, 60)
@@ -263,12 +280,16 @@ def test_a_second_batch_is_refused_while_one_runs(tmp_path, monkeypatch):
 
     async def go(app, pilot, screen):
         await launch(app, pilot)
-        app.go_to(screen, 0)
+        await pilot.press("escape")
         await pilot.pause()
+        await pilot.press("c")  # the launched experiment reopens
+        await settle(app, pilot)
+        review = app.screen
+        assert isinstance(review, ReviewBatchScreen)
         app.draft.id = "other"
         await pilot.press("l", "l")
         assert await until(pilot, lambda: "Another batch is running" in footer(app), 10)
-        assert app.screen is screen and len(list((root / "outputs/batches").glob("2*"))) == 1
+        assert app.screen is review and len(list((root / "outputs/batches").glob("2*"))) == 1
         stop_all(root)
     run_review(root, go)
 

@@ -41,6 +41,7 @@ class ExperimentDraft:
         self.slot = "transformer"  # Model Builder slot under the cursor, and the last feature slot visited
         self.feature_slot = "char_tfidf"
         self.resume = None      # [(screen kind, constructor kwargs)] of the New Experiment screens closed from a monitor
+        self.launched = False   # launched and not resumed since: `n` starts a new experiment, `c` still reopens this one
 
     def baseline(self, dataset):
         """What `dataset` shows without edits: its confirmed selection, else the recognized default."""

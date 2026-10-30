@@ -25,6 +25,8 @@ fixes F1-F5 and doc edits. Nothing pushed.
 - F2 Review `fix()` refused while a tree is carried. F3 `app.open_review` returns to the Review below instead of stacking.
 - F4 `Component.closed`: unknown kwargs for matcher/clustering block readiness.
 - F5 removed unused `process.check/CheckResult/Launches`, several `runs.*` helpers, `Scanned.reaped`.
+- `CHANGES_TO_TUI.md`: a launch ends the experiment (`app.batch_launched`): New Experiment screens close (kept for `c`),
+  Batch Monitor opens over the Dashboard, `n` starts a new draft (`draft.launched`). tests/tui 315 pass.
 
 **NEXT (in order)**
 1. User: commit/push `tui` (agent never pushes without OK).

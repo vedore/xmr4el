@@ -25,7 +25,6 @@ from textual.widgets.option_list import Option
 
 from xmr4el_tui import batch, components, review, theme
 from xmr4el_tui.screens import review_details
-from xmr4el_tui.screens.batch_monitor import BatchMonitorScreen
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.description import Rows
 from xmr4el_tui.widgets.top_bar import TopBar
@@ -476,8 +475,7 @@ class ReviewBatchScreen(Screen):
         self.app.coordinators.append(message.child)
         self.fill_head()
         self.app.rescan()
-        self.app.say(f"Batch started: {self.draft.name}", "success", self)
-        self.app.push_screen(BatchMonitorScreen(message.bdir.name))
+        self.app.batch_launched(message.bdir.name)
 
     # --- batch name ---------------------------------------------------------------------------------------------------------
     def action_rename_batch(self):
