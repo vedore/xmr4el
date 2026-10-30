@@ -11,15 +11,11 @@ Updated 2026-10-30. Branch `tui` (HEAD `b89cf23` + this STATUS commit), pushed t
 `CHANGES_TO_TUI.md` (user's request note, done). `b89cf23`: `docs/design/tui.md` rewritten to built behaviour only (old
 design in git at `58cdffd`; screens §5.1 Dashboard … §5.7 Batch), `tui_architecture.md` updated, docstring refs
 remapped; README badges, mermaid diagram, screenshots `docs/images/tui_*.svg` (Textual `save_screenshot`, root `.`).
-Uncommitted (user choices 2026-10-30): XMR4EL palette = five brand colours (paper, ink, terracotta, steel, olive)
-+ ochre warning / rose error. `theme.py`: `BRANDS` -> `build` (AA by construction) -> `PALETTES` Notebook (default),
-Notebook light, Classic; `use` switches `TOKENS` in place; style tables are `theme.Lazy`. `app.py`: one Textual theme
-per palette, Dashboard-only `ctrl+p` -> `Palette: <name>` (`set_palette`), saved in `outputs/tui/settings.json`.
-README: `docs/images/pipeline.svg` (paper figure) replaces mermaid, screenshots retaken, palette key note; tui.md §4
-Style / §5.1 / §7, architecture rules + layout. Tests: new `tests/tui/test_palette.py` (6); TUI suite 342 pass, ruff
-clean. Release worktree still has the older dark pipeline.svg + mermaid->image README edit uncommitted: sync
-docs/images, xmr4el_tui (theme, app, app.tcss, fmt, explorer, log_view, results/monitor_details), tests/tui
-(test_palette, test_dashboard), docs/design, README key note.
+Palette work committed: `tui` `729cd3d`, `release` `dac6eb2` (after `f988702`). XMR4EL palette = five brand
+colours + ochre / rose; `theme.py` BRANDS -> build (AA) -> PALETTES Notebook (shipped default), Notebook light, Classic;
+Dashboard `ctrl+p` -> `Palette: <name>`, saved in `outputs/tui/settings.json`. PR #1 was merged (upstream main
+`8d6bc94`) before `f988702` was pushed: both commits are in PR lasigeBioTM/XMR4EL#2 (`vedore:release` -> main),
+342 TUI tests pass on release, ruff clean. `origin` is the fork `vedore/xmr4el`.
 
 **Product state**
 - Backend (`xmr4el/`, `scripts/`): trains and evaluates XMR trees on local PubTator / grouped TSV. Unchanged by the TUI work
