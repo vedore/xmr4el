@@ -113,7 +113,7 @@ def dataset(issues):
 def differences(tree, reference, changes, width):
     """Reference and selected names, then only the settings that differ, by stage."""
     muted = theme.style("text-muted")
-    lines = [Line(Text.assemble(("REFERENCE  ", muted), reference.name), head=True),
+    lines = [Line(Text.assemble(("REFERENCE  ", muted), reference.name, ("  (oldest tree still in the batch)", muted)), head=True),
              Line(Text.assemble(("SELECTED   ", muted), (tree.name, theme.style("accent"))), head=True), blank()]
     if tree.id == reference.id:
         return lines + [Line(Text("This tree is the configuration reference.", muted), head=True)]

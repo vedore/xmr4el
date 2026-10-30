@@ -19,6 +19,7 @@ from sklearn.preprocessing import normalize
 from collections import defaultdict
 from typing import NamedTuple
 from uuid import uuid4
+from xmr4el.hierarchy.clusterers import BalancedKMeans
 from xmr4el.hierarchy.node import MLModel
 
 class NodeInput(NamedTuple):
@@ -215,7 +216,10 @@ class HierarchicalMLModel():
         Each node is saved to a temporary folder once trained (only the next layer's inputs stay in memory),
         then all nodes are reloaded into `hmodel`."""
         inputs = [NodeInput(X_train, Y_train, Z_train, local_to_global)]
+        # Private copy with the backend defaults resolved, so the halving below starts from the n_clusters the root
+        # actually trains with; the caller's (saved) config stays as written.
         clustering_config = deepcopy(self.clustering_config)
+        clustering_config["kwargs"] = {**BalancedKMeans.DEFAULTS, **clustering_config.get("kwargs", {})}
         last_layer_index = self.layers - 1
 
         with tempfile.TemporaryDirectory(prefix="ml_store_") as temp_dir:
@@ -238,7 +242,7 @@ class HierarchicalMLModel():
                     # Keep the saved caller config's n_clusters while halving it below the root.
                     kw = clustering_config["kwargs"]
                     clustering_config = {**clustering_config,
-                                         "kwargs": {**kw, "n_clusters": max(2, int(kw.get("n_clusters", 2)) // 2)}}
+                                         "kwargs": {**kw, "n_clusters": max(2, int(kw["n_clusters"]) // 2)}}
                     
                 for node_idx, node in enumerate(inputs):
                     node_start = time.perf_counter()

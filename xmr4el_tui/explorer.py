@@ -95,7 +95,7 @@ def tree_node(t, key, shorts):
     evals = unique([Node(("eval", r.id, e.split), "eval", e.split if r.kind == "train" else f"{e.split} · {r.name}",
                          eval_state(r, e), ref=(r, e)) for r in t.used_by for e in r.evals],
                    lambda n: fmt.stamp(n.ref[0].started), lambda n: n.ref[0].id)
-    notes = (["missing"] if not t.here else []) + (["moved"] if t.recorded_path else []) + (
+    notes = (["tree missing"] if not t.here else []) + (["moved"] if t.recorded_path else []) + (
         ["eval running"] if any(r.kind == "eval" and state_word(r) in ACTIVE for r in t.used_by) else [])
     short = shorts[t.id] if t.id else Path(t.path).name
     started = t.trained_by.started if t.trained_by else None

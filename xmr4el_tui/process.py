@@ -16,20 +16,9 @@ from xmr4el_tui.runs import RUNS_DIR, STATUS_KEYS, read_dict
 
 RUNNER = Path("scripts", "run_experiment.py")
 CONSOLE_DIR = RUNS_DIR / ".console"
-CHECK_KEYS = {"ok", "error", "model_config_sha256", "tree_id", "search"}
 BINDING_ERRORS = ("model_config_changed", "tree_changed")
 FINAL = ("completed", "failed", "stopped")  # recorded final states
 FORCE_WAIT = 10  # seconds a forced stop waits for the killed process to be gone before recording it
-
-
-@dataclass(frozen=True)
-class CheckResult:
-    revision: int             # the draft revision this check validated (stale results are ignored)
-    ok: bool
-    error: str | None
-    model_config_sha256: str | None
-    tree_id: str | None
-    search: dict              # split -> effective search
 
 
 @dataclass(frozen=True)
@@ -43,29 +32,6 @@ class Live:
 def runner_args(xmodel_path, *extra, runner=RUNNER):
     args = [sys.executable, str(runner), "-spec", "-", *extra]
     return args + (["-xmodel_path", xmodel_path] if xmodel_path else [])
-
-
-def check(root, spec, xmodel_path, revision, timeout=300):
-    """Run the runner's -check on `spec`. A startup failure, malformed response or an exit code that disagrees
-    with `ok` is a failed check, never a success."""
-    fail = lambda error: CheckResult(revision, False, error, None, None, {})
-    try:
-        out = subprocess.run(runner_args(xmodel_path, "-check"), cwd=root, input=json.dumps(spec),
-                             capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as err:
-        return fail(f"check did not run: {err}")
-    try:
-        response = json.loads(out.stdout)
-    except ValueError:
-        response = None
-    if not isinstance(response, dict) or set(response) != CHECK_KEYS or out.returncode != (0 if response["ok"]
-                                                                                         else 1):
-        tail = (out.stderr.strip().splitlines() or [""])[-1]
-        return fail(f"check failed (exit {out.returncode}): {tail or 'no valid response'}")
-    if response["ok"] is not True or not isinstance(response["search"], dict):
-        return fail(response["error"] or "check failed")
-    return CheckResult(revision, True, None, response["model_config_sha256"], response["tree_id"],
-                       response["search"])
 
 
 def spawn(root, spec, run_id, xmodel_path=None, config_sha=None, tree_id=None, runner=RUNNER):
@@ -202,32 +168,3 @@ def record_forced(run):
                                "error": "SIGKILL", "forced": True}, indent=2))
     os.replace(tmp, path)
     return "recorded stopped (forced)"
-
-
-class Launches:
-    """Runs this TUI started: the one owner of their Popen handles. A run's state still comes from its files; a
-    handle only tells what became of a launch that wrote no final status. Detached children outlive the TUI."""
-
-    def __init__(self, root):
-        self.root, self.children = root, {}  # run id -> Popen
-
-    def start(self, spec, run_id, **kwargs):
-        """spawn(); FileExistsError when the run id was used before."""
-        self.children[run_id] = spawn(self.root, spec, run_id, **kwargs)
-
-    def reap(self):
-        """[(run id, what happened)] for children that exited without a final status.json, each reported once;
-        finished children are reaped, running ones kept."""
-        out = []
-        for run_id, child in list(self.children.items()):
-            code = child.poll()
-            if code is None:
-                continue
-            del self.children[run_id]
-            status = read_dict(Path(self.root, RUNS_DIR, run_id, "status.json")) or {}
-            if status.get("status") in FINAL:
-                continue
-            rejected = rejection(self.root, run_id) if code == 3 else None
-            out.append((run_id, f"not started: {rejected['error']}" if rejected else
-                        f"exited {code} without a final status; see {CONSOLE_DIR / f'{run_id}.log'}"))
-        return out

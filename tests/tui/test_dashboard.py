@@ -107,7 +107,7 @@ def test_model_edge_cases(tmp_path):
     assert [c.label for c in dups] == ["dup", "dup"], "names are not identities"
     assert [c.detail for c in dups] == ["Oct 21 · bbbb2222", "Oct 20 · aaaa1111"], "date and short id on line 2"
     assert dups[0].descriptor == "SapBERT", "features recorded, no depth: no depth shown"
-    assert idx[("tree", "aaaa1111")][0].note == "missing"
+    assert idx[("tree", "aaaa1111")][0].note == "tree missing"
     unknown = idx[("dataset", None)][0]
     assert unknown.label == explorer.UNKNOWN_DATASET
     assert [c.label for c in unknown.children] == ["xmodel_cccc3333", "xmodel_lone"], "no training run: no dataset"
@@ -345,7 +345,7 @@ def test_sync_keeps_selection_and_writes_nothing(tmp_path):
         # the tree directory is deleted: the tree stays (runs record it) and says missing
         shutil.rmtree(root / f"outputs/saved_trees/xmodel_{TREE}")
         await rescan()
-        assert tree.index[("tree", TREE)][0].note == "missing"
+        assert tree.index[("tree", TREE)][0].note == "tree missing"
         assert "missing: outputs/saved_trees" in screen.query_one(Description).text()
         await pilot.press("enter", "left", "enter", "right", "escape")  # still navigable after refresh
         assert app.screen is screen and isinstance(app.focused, Explorer)
@@ -377,7 +377,7 @@ def test_scans_never_overlap_and_land_in_order(tmp_path):
             running[0] -= 1
             return made[-1]
         app.repo.snapshot = held
-        app.apply_scan = lambda snapshot, announce=False, reaped=(): applied.append(snapshot)
+        app.apply_scan = lambda snapshot, announce=False: applied.append(snapshot)
         app.rescan()
         await asyncio.to_thread(entered.wait, 10)
         for _ in range(3):

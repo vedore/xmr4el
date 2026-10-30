@@ -28,11 +28,16 @@ def explorer_width(want, total):
     return column_width(want, total, EXPLORER_SHARE, EXPLORER_MIN, EXPLORER_MAX_SHARE, RIGHT_MIN)
 
 
+def count_leaves(node):
+    """What a group or dataset row counts: the trees (Models, datasets) or runs below it, not its direct children."""
+    return 1 if not node.children else sum(count_leaves(c) for c in node.children)
+
+
 def node_label(node):
     t = Text(explorer.tree_title(node) if node.kind == "tree" else node.label,
              style="bold" if node.kind == "group" else "")
     if node.kind in ("group", "dataset"):
-        t.append(f"  {len(node.children)}", style="dim")
+        t.append(f"  {count_leaves(node)}", style="dim")
     if node.state:
         t.append("  ")
         t.append(STATE_SHORT[node.state], style=STATE_STYLE[node.state])
@@ -55,9 +60,7 @@ class Explorer(DragRightBorder, Selectable, FullRow, Tree):
     OPEN_KINDS = ("group", "dataset")  # expanded when first seen
     lit = None  # class defaults: Tree.__init__ already runs the cursor watcher
     rows, first, query, typing, index = (), (), "", False, {}
-    BINDINGS = [Binding("tab", "cursor_down", "next", show=False),
-                Binding("shift+tab", "cursor_up", "previous", show=False),
-                Binding("left", "collapse_or_parent", "collapse", show=False),
+    BINDINGS = [Binding("left", "collapse_or_parent", "collapse", show=False),
                 Binding("right", "expand", "expand", show=False),
                 Binding("slash", "search", "search"),
                 Binding("enter", "screen.describe", "describe")]

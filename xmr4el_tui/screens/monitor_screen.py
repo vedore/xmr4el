@@ -54,14 +54,16 @@ class RunMonitorScreen(Screen):
                 Binding("s", "cancel", "cancel run"),
                 Binding("c", "follow", "follow stage"),
                 Binding("f", "fullscreen", "fullscreen"),
-                Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
-                Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+                Binding("tab,ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False, priority=True),
+                Binding("shift+tab,ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False, priority=True),
                 Binding("less_than_sign", f"resize({-STEP})", "narrower left", show=False),
                 Binding("greater_than_sign", f"resize({STEP})", "wider left", show=False)]
 
-    def __init__(self, run_id, split=None):
-        """`run_id` must be in the app's snapshot; `split`: select that evaluation's stage first."""
+    def __init__(self, run_id, split=None, back="dashboard"):
+        """`run_id` must be in the app's snapshot; `split`: select that evaluation's stage first; `back`: where esc
+        goes, named in the footer."""
         super().__init__()
+        self._bindings.bind("escape", "back", back)
         self.run = next(r for r in self.app.snapshot.runs if r.id == run_id)
         self.initial = (f"eval:{split}",) if split else None
         # worker-only state

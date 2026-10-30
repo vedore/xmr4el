@@ -14,6 +14,7 @@ from fake_runs import COMMIT, make_run, patch_json, sha  # noqa: E402
 from xmr4el_tui import runs, theme  # noqa: E402
 from xmr4el_tui.app import XMR4ELApp  # noqa: E402
 from xmr4el_tui.screens.dashboard_screen import DashboardScreen  # noqa: E402
+from xmr4el_tui.screens.results_details import analysis  # noqa: E402
 from xmr4el_tui.screens.results_screen import ResultsScreen  # noqa: E402
 from xmr4el_tui.services import comparison as cmp  # noqa: E402
 from xmr4el_tui.widgets.explorer import Explorer, ResultsExplorer  # noqa: E402
@@ -86,11 +87,11 @@ def test_deltas(tmp_path):
     entries = [f[A], f[B], f[C]]
     compats = [cmp.BASELINE, cmp.assess(f[A], f[B]), cmp.assess(f[A], f[C])]
     perf = dict(cmp.rows("Performance", entries, compats))
-    assert perf["Acc@1_all"] == [("89.04%", None), ("90.04%", "+1.00"), ("89.04%", "+0.00")], "pp"
-    assert perf["Acc@1"][1] == ("93.46%", "+1.00") and perf["Acc@1"][2] == ("92.46%", cmp.NO_DELTA), "Caution: withheld"
-    assert perf["Acc@1_all"][2][1] == "+0.00" and perf["Coverage"][2][1] == "+0.00", "Caution keeps unrelated deltas"
+    assert perf["Acc@1_all"] == [("89.04%", None), ("90.04%", "+1.00pp"), ("89.04%", "+0.00pp")], "pp"
+    assert perf["Acc@1"][1] == ("93.46%", "+1.00pp") and perf["Acc@1"][2] == ("92.46%", cmp.NO_DELTA), "Caution: withheld"
+    assert perf["Acc@1_all"][2][1] == "+0.00pp" and perf["Coverage"][2][1] == "+0.00pp", "Caution keeps unrelated deltas"
     assert perf["MRR"][1] == ("0.9500", "+0.0041"), "MRR on its own scale"
-    assert perf["Coverage"][1] == ("96.30%", "+0.00") and perf["Labels"][1] == ("9,000", None)
+    assert perf["Coverage"][1] == ("96.30%", "+0.00pp") and perf["Labels"][1] == ("9,000", None)
     gen = dict(cmp.rows("Generalization", entries, compats))
     assert gen == {}, "no breakdown recorded: no rows, never zeros"
     eff = dict(cmp.rows("Efficiency", entries, compats))
@@ -461,7 +462,7 @@ def test_summary_is_compact_and_specs_group(tmp_path):
         await pilot.press("2")
         table = screen.query_one("#analysis-table")
         r5 = table.get_row_at(0)
-        assert r5[0] == "R@5" and r5[3].plain == "96.71% Δ —" and r5[2].plain.endswith("+0.00"), "value + Δ —"
+        assert r5[0] == "R@5" and r5[3].plain == "96.71% Δ —" and r5[2].plain.endswith("+0.00pp"), "value + Δ —"
         notes_text = str(screen.query_one("#analysis-notes").render())
         assert "Δ —" in notes_text and "clean git commit" not in notes_text, "legend once; reasons stay in Summary"
         await pilot.press("4")
@@ -570,3 +571,9 @@ def test_generalization_rows_visible_at_80x24(tmp_path):
         assert len(table.columns) == 5 and table.row_count > 3
         assert table.size.height - table.header_height - 1 >= 3, "three metric rows besides header and scrollbar"
     run_app(root, check, size=(80, 24))
+
+
+def test_generalization_without_a_breakdown_says_so(tmp_path):
+    f = facts(results_root(tmp_path))
+    _, body, notes = analysis("Generalization", [f[A], f[B]], [cmp.BASELINE, cmp.assess(f[A], f[B])], {})
+    assert not body and "not recorded" in notes[0]

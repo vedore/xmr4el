@@ -407,3 +407,17 @@ def test_dashboard_offers_new_experiment(tmp_path):
         assert any(b.binding.key == "n" for b in app.screen.active_bindings.values() if b.binding.show)
         assert "New Experiment (n)" in app.screen.query_one("Description").text()
     run_setup(make_root(tmp_path), go)
+
+
+def test_builder_refused_while_another_dataset_is_shown(tmp_path):
+    root = make_root(tmp_path)
+
+    async def go(app, pilot, screen):
+        await pilot.press("enter", "ctrl+s")
+        assert app.draft.confirmed.key == "datasets/A"
+        await pilot.press("escape", "down", "enter")  # Datasets, then B shown without confirming
+        assert app.draft.selected != "datasets/A"
+        await pilot.press("m")
+        await pilot.pause()
+        assert isinstance(app.screen, DatasetSetupScreen) and "this experiment uses A" in footer(app)
+    run_setup(root, go)

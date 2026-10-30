@@ -458,6 +458,51 @@ def test_fix_issue_opens_the_field_and_review_context_returns(tmp_path):
     run_review(make_root(tmp_path), go, configs=(BASE, bad))
 
 
+def test_review_edit_cycles_do_not_stack_screens(tmp_path):
+    async def go(app, pilot, screen):
+        depth = len(app.screen_stack)
+        screen.query_one(Queue).focus()
+        await pilot.press("down")
+        picked = screen.selected
+        for _ in range(3):
+            await pilot.press("e")  # Edit: the Builder over this Review
+            await settle(app, pilot)
+            builder = app.screen
+            assert isinstance(builder, ModelBuilderScreen) and builder.from_review
+            builder.query_one("#mb-review").focus()
+            await pilot.press("enter")  # Review Batch: back to the one below, not a new one
+            await settle(app, pilot)
+            assert app.screen is screen and len(app.screen_stack) == depth and screen.selected == picked
+        assert sum(isinstance(s, ReviewBatchScreen) for s in app.screen_stack) == 1
+    run_review(make_root(tmp_path), go, configs=(BASE, tweaked(("depth",), 3)), through_builder=True)
+
+
+def test_fix_issue_is_refused_while_a_tree_is_carried(tmp_path):
+    bad = tweaked(("clustering_config", "kwargs", "n_clusters"), "abc")
+
+    async def go(app, pilot, screen):
+        before = [t.id for t in app.draft.trees]
+        screen.query_one(Queue).focus()
+        await pilot.press("down", "space")  # carry the invalid tree
+        assert screen.grab
+        details = screen.query_one(DetailsList)
+        details.focus()  # what a mouse click on the Differences list does
+        await pilot.press("2")
+        details.scroll_to(y=0, animate=False)
+        await pilot.press("enter")  # the Fix Issue row
+        await settle(app, pilot)
+        assert app.screen is screen and screen.grab and "Space drops the tree first" in footer(app)
+        assert [t.id for t in app.draft.trees] == before
+        screen.query_one(Queue).focus()
+        await pilot.press("escape")  # cancel: no exception, order as before
+        assert screen.grab is None and [t.id for t in app.draft.trees] == before
+        details.focus()
+        await pilot.press("enter")  # outside a reorder the fix opens its editor
+        await settle(app, pilot)
+        assert isinstance(app.screen, ModelBuilderScreen)
+    run_review(make_root(tmp_path), go, configs=(BASE, bad))
+
+
 def test_cancelled_fix_leaves_the_issue_in_place(tmp_path):
     bad = tweaked(("depth",), 0)
 

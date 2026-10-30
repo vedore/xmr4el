@@ -40,8 +40,8 @@ class ResultsScreen(Screen):
     BINDINGS = [Binding("escape", "back", "back"),
                 *(Binding(str(i + 1), f"group({i})", "metric group" if i == 0 else name, show=i == 0,
                           key_display=f"1-{len(GROUP_NAMES)}") for i, name in enumerate(GROUP_NAMES)),
-                Binding("ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False),
-                Binding("ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False),
+                Binding("tab,ctrl+tab,right_square_bracket", "panel(1)", "next panel", show=False, priority=True),
+                Binding("shift+tab,ctrl+shift+tab,left_square_bracket", "panel(-1)", "previous panel", show=False, priority=True),
                 Binding("ctrl+r", "rescan", "rescan", show=False),
                 Binding("less_than_sign", f"resize({-STEP})", "narrower left", show=False),
                 Binding("greater_than_sign", f"resize({STEP})", "wider left", show=False)]

@@ -416,8 +416,11 @@ class ReviewBatchScreen(Screen):
         self.app.open_builder(review.Issue("open", review.CAUTION, "tree", "", tree=tree_id))
 
     def fix(self, issue):
-        """Fix Issue: the existing editor that owns the setting, over this screen."""
-        if issue.dest == "dataset":
+        """Fix Issue: the existing editor that owns the setting, over this screen. Refused while a tree is carried: an
+        editor can add trees, which the cancel order does not know."""
+        if issue.dest != "batch-name" and self.grab is not None:
+            self.app.say("Space drops the tree first (esc cancels).", screen=self)
+        elif issue.dest == "dataset":
             self.app.open_setup(issue)
         elif issue.dest == "batch-name":
             self.action_rename_batch()

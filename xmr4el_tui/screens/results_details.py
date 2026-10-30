@@ -14,7 +14,7 @@ from xmr4el_tui.theme import beam_color, color, style
 from xmr4el_tui.widgets.explorer import CAUTION_MARK, chip
 
 LEVEL_STYLE = {VERIFIED: style("success"), CAUTION: style("warning", "bold"), INCOMPATIBLE: style("error")}
-LEGEND = f"Δ: points vs Base (MRR: own scale) · {NO_DELTA}: not verifiably comparable"
+LEGEND = f"Δ: percentage points (pp) vs Base (MRR: own scale; Acc@1: in-vocabulary mentions, Acc@1_all: all loaded) · {NO_DELTA}: not verifiably comparable"
 HEADER_WIDTH = 24
 NAME_WIDTH = 30  # Summary evaluation column at most; longer names end in …
 LABEL_WIDTH = max(len(row[0]) for group in GROUPS.values() for row in group) + 3  # inspection: values in one column
@@ -123,6 +123,9 @@ def analysis(group, entries, compats, names):
     else:
         body = [(label, [cell(v, d) for v, d in cells]) for label, cells in found]
     notes = [GROUP_NOTES[group]] if group in GROUP_NOTES else []
+    if group == "Generalization" and not found:
+        notes.insert(0, "Generalization breakdown not recorded for these evaluations: evaluate again with a "
+                        "train_path to record seen/unseen groups.")
     notes += [f"{i}: {n}" for i, c in enumerate(compats) if i for n in c.notes]
     if any(d is not None for _, cells in found for _, d in cells):
         notes.append(LEGEND)

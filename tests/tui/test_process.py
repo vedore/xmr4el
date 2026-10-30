@@ -23,22 +23,6 @@ def fake_runner(root, body):
     script.write_text("import json, sys\n" + body)
 
 
-def test_check(tmp_path):
-    spec = {"name": "x", "evals": []}
-    fake_runner(tmp_path, f"spec = json.load(sys.stdin)\nprint(json.dumps({{**{OK!r}, 'tree_id': spec['name']}}))\n")
-    got = process.check(tmp_path, spec, None, revision=7)
-    assert got == process.CheckResult(7, True, None, "a" * 64, "x", {"dev": {"beam_size": 10}})
-    for body, msg in [("print('not json')", "no valid response"),
-                      (f"print(json.dumps({OK!r})); sys.exit(1)", "exit 1"),  # ok with a failing exit code
-                      ("print(json.dumps({'ok': True})); print('x', file=sys.stderr)", "exit 0): x"),
-                      ("print(json.dumps({'ok': False, 'error': 'missing input files', 'model_config_sha256': None,"
-                       " 'tree_id': None, 'search': {}})); sys.exit(1)", "missing input files"),
-                      ("raise SystemExit(2)", "exit 2")]:
-        fake_runner(tmp_path, body)
-        got = process.check(tmp_path, spec, "tree", revision=1)
-        assert not got.ok and msg in got.error and got.search == {}, (body, got)
-
-
 def test_spawn_and_rejection(tmp_path):
     fake_runner(tmp_path, "import os\nspec = json.load(sys.stdin)\n"
                           "print(json.dumps({'error': 'tree_changed', 'expected': 'a', 'actual': 'b'}))\n"
@@ -206,36 +190,6 @@ def test_term_ignored_then_force_stop(tmp_path):
     finally:
         child.kill()
         child.wait()
-
-
-def test_launch_console_never_overwritten_and_reaped_once(tmp_path):
-    fake_runner(tmp_path, "import time\nspec = json.load(sys.stdin)\n"
-                          "if spec['name'] == 'reject':\n"
-                          "    print(json.dumps({'error': 'model_config_changed'})); sys.exit(3)\n"
-                          "if spec['name'] == 'crash':\n"
-                          "    print('Traceback: boom'); sys.exit(1)\n"
-                          "if spec['name'] == 'slow':\n"
-                          "    time.sleep(30)\n")
-    launches = process.Launches(tmp_path)
-    for name in ("reject", "crash", "ok", "slow"):
-        launches.start({"name": name}, f"2026-10-23_15-00-00_{name}")
-    done = make_run(tmp_path, "ok", stamp="2026-10-23_15-00-00")  # wrote its final status
-    assert done.name == "2026-10-23_15-00-00_ok"
-    console = tmp_path / process.CONSOLE_DIR / "2026-10-23_15-00-00_crash.log"
-    with pytest.raises(FileExistsError):
-        launches.start({"name": "crash"}, "2026-10-23_15-00-00_crash")
-    for rid in ("reject", "crash", "ok"):
-        launches.children[f"2026-10-23_15-00-00_{rid}"].wait(timeout=30)
-    try:
-        got = dict(launches.reap())
-        assert got == {"2026-10-23_15-00-00_reject": "not started: model_config_changed",
-                       "2026-10-23_15-00-00_crash": "exited 1 without a final status; see "
-                                                    "outputs/runs/.console/2026-10-23_15-00-00_crash.log"}
-        assert "Traceback: boom" in console.read_text(), "the first launch's console is kept"
-        assert launches.reap() == [] and list(launches.children) == ["2026-10-23_15-00-00_slow"]
-    finally:
-        launches.children["2026-10-23_15-00-00_slow"].kill()
-        launches.children["2026-10-23_15-00-00_slow"].wait()
 
 
 def test_stop_refused_once_final_status_is_written(tmp_path):

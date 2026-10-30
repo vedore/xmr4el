@@ -250,7 +250,7 @@ def delta_text(x, y, kind):
     """`y - x` as shown: percentage points for "pct", the metric's scale for "mrr"; None when not a number pair."""
     if not (number(x) and number(y)) or kind not in ("pct", "mrr"):
         return None
-    return f"{(y - x) * 100:+.2f}" if kind == "pct" else f"{y - x:+.4f}"
+    return f"{(y - x) * 100:+.2f}pp" if kind == "pct" else f"{y - x:+.4f}"
 
 
 def rows(group, entries, compats):

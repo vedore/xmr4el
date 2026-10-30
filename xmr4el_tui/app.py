@@ -11,7 +11,7 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.worker import get_current_worker
 
-from xmr4el_tui import batch, explorer, process, theme
+from xmr4el_tui import batch, explorer, theme
 from xmr4el_tui.draft import ExperimentDraft
 from xmr4el_tui.messages import RunsChanged
 from xmr4el_tui.runs import state_word
@@ -25,7 +25,7 @@ from xmr4el_tui.screens.results_screen import ResultsScreen
 from xmr4el_tui.screens.review_batch import ReviewBatchScreen
 from xmr4el_tui.screens.stop_dialog import QuitDialog
 from xmr4el_tui.services.experiment_repository import ExperimentRepository, Snapshot
-from xmr4el_tui.services.notifications import Notice, Notifications, incarnation, subject
+from xmr4el_tui.services.notifications import Notifications, incarnation
 from xmr4el_tui.widgets.context_footer import ContextFooter
 from xmr4el_tui.widgets.top_bar import TopBar
 
@@ -55,9 +55,9 @@ THEME = Theme(
 class Scanned(Message):
     """A scan finished (posted from the scan thread: post_message is thread-safe and never blocks on shutdown)."""
 
-    def __init__(self, snapshot, announce, reaped=()):
+    def __init__(self, snapshot, announce):
         super().__init__()
-        self.snapshot, self.announce, self.reaped = snapshot, announce, reaped
+        self.snapshot, self.announce = snapshot, announce
 
 
 class XMR4ELApp(App):
@@ -81,7 +81,6 @@ class XMR4ELApp(App):
         self.snapshot = Snapshot()  # empty until the first scan (started on mount) lands
         self.scan_lock = threading.Lock()  # one scan at a time: it owns the repository's cache
         self.scan_wanted = self.scan_announce = False  # requests the running scan picks up
-        self.launches = process.Launches(root)
         self.coordinators = []  # Popen of the batch coordinators this TUI started: reaped here, never owned
 
     def get_theme_variable_defaults(self):
@@ -110,28 +109,19 @@ class XMR4ELApp(App):
                     self.scan_wanted, announce, self.scan_announce = False, self.scan_announce, False
                     snapshot = self.repo.snapshot(fresh=announce)
                     self.coordinators = [c for c in self.coordinators if c.poll() is None]
-                    reaped = self.launches.reap()  # reads status / console files: here, not on the UI thread
                     if not worker.is_cancelled:  # cancelled on quit: publish nothing
-                        self.post_message(Scanned(snapshot, announce, reaped))
+                        self.post_message(Scanned(snapshot, announce))
             finally:
                 self.scan_lock.release()
 
     def on_scanned(self, message):
-        self.apply_scan(message.snapshot, message.announce, message.reaped)
+        self.apply_scan(message.snapshot, message.announce)
 
-    def apply_scan(self, snapshot, announce=False, reaped=()):
-        """New snapshot to every screen; ended runs, failed launches and a new scan problem become notifications."""
-        new, at = [], snapshot.at or datetime.now()
-        by_id = {r.id: r for r in snapshot.runs}
-        for run_id, what in reaped:  # same key as the LOST transition the scan may also see: reported once
-            run = by_id.get(run_id)
-            inc = incarnation(run) if run else run_id
-            new.append(Notice((inc, "LOST"), "error" if what.startswith("not started") else "warning",
-                              "Launch failed" if what.startswith("not started") else "Run interrupted",
-                              subject(run, snapshot.runs) if run else run_id, what, at,
-                              ("monitor", run_id, inc) if run else None))
+    def apply_scan(self, snapshot, announce=False):
+        """New snapshot to every screen; ended runs and a new scan problem become notifications."""
+        at = snapshot.at or datetime.now()
         self.snapshot = snapshot
-        self.toast(self.notices.add(new) + self.notices.observe(snapshot.runs, at, snapshot.problem)
+        self.toast(self.notices.observe(snapshot.runs, at, snapshot.problem)
                    + self.notices.observe_batches(snapshot.batches, at))
         if announce:
             self.say(f"Rescanned outputs/runs/: {len(snapshot.runs)} runs" if snapshot.found
@@ -392,7 +382,13 @@ class XMR4ELApp(App):
         self.push_screen(DatasetSetupScreen(fix))
 
     def open_review(self):
-        self.push_screen(ReviewBatchScreen())
+        """Review Batch over the current screen; a Review already right below it (the Builder it opened) is returned to,
+        so Review / Edit cycles do not stack copies."""
+        below = self.screen_stack[-2] if len(self.screen_stack) > 1 else None
+        if isinstance(below, ReviewBatchScreen):
+            self.pop_screen()
+        else:
+            self.push_screen(ReviewBatchScreen())
 
     def action_help(self):
         if self.screen.query("HelpPanel"):

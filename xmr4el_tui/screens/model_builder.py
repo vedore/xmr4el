@@ -56,6 +56,12 @@ class AttrSelect(Select):
     BINDINGS = [Binding("up", "screen.field_step(-1)", show=False), Binding("down", "screen.field_step(1)", show=False)]
 
 
+class AttrInput(Input):
+    """A text box in the attribute list: up / down move to the previous / next parameter, before the scrolling
+    attribute list can take them (the caret keys stay left / right)."""
+    BINDINGS = [Binding("up", "screen.field_step(-1)", show=False), Binding("down", "screen.field_step(1)", show=False)]
+
+
 class JsonPreview(ScrollableContainer):
     """Read-only full configuration of the tree as Apply would commit it; scrolls on its own. y copies it."""
     BINDINGS = [Binding("y", "screen.copy_json", "copy JSON")]
@@ -67,9 +73,9 @@ class ModelBuilderScreen(Screen):
     tree N."""
     crumbs = ("Model Builder",)
     BINDINGS = [Binding("escape", "back", "back"), Binding("ctrl+s", "apply", "apply"),
-                Binding("u", "discard", "discard"), Binding("f2", "rename", show=False),
-                Binding("alt+left", "move_tree(-1)", show=False),
-                Binding("alt+right", "move_tree(1)", show=False),
+                Binding("u", "discard", "discard"), Binding("f2", "rename", "rename tree", show=False),
+                Binding("alt+left", "move_tree(-1)", "move tree earlier", show=False),
+                Binding("alt+right", "move_tree(1)", "move tree later", show=False),
                 Binding("tab", "local(1)", show=False), Binding("shift+tab", "local(-1)", show=False),
                 Binding("up", "field_step(-1)", show=False), Binding("down", "field_step(1)", show=False),
                 *(Binding(str(i), f"tree({i - 1})", f"tree {i}", show=False) for i in range(1, 10))]
@@ -247,6 +253,12 @@ class ModelBuilderScreen(Screen):
             self.fill_library(self.library_choice())
         else:
             self.fill_preview()
+            self.call_after_refresh(self.reveal_focus)
+
+    def reveal_focus(self):
+        """After a resize the focused parameter can lie outside the attribute list's viewport: scroll it back in."""
+        if self.editing is not None and self.focused is not None and self.panel_of(self.focused) == "attrs":
+            self.focused.scroll_visible(animate=False)
 
     def library_choice(self):
         box = self.query_one(Library)
@@ -309,7 +321,7 @@ class ModelBuilderScreen(Screen):
     def control(self, i, f, v):
         if f.kind == "range":
             pair = v if isinstance(v, list) and len(v) == 2 else ["", ""]
-            return [Input(components.show(x), id=f"mbf-{i}-{j}", compact=True, classes="mb-control mb-range",
+            return [AttrInput(components.show(x), id=f"mbf-{i}-{j}", compact=True, classes="mb-control mb-range",
                           placeholder=("min", "max")[j]) for j, x in enumerate(pair)]
         if f.kind in ("choice", "bool"):
             choices = YES_NO if f.kind == "bool" else f.choices
@@ -318,7 +330,7 @@ class ModelBuilderScreen(Screen):
             return [AttrSelect([(label, j) for j, (label, _) in enumerate(choices)], id=f"mbf-{i}", compact=True,
                            value=values.index(v) if known else Select.BLANK, allow_blank=not known,
                            classes="mb-control")]
-        return [Input(components.show(v), id=f"mbf-{i}", compact=True, classes="mb-control",
+        return [AttrInput(components.show(v), id=f"mbf-{i}", compact=True, classes="mb-control",
                       placeholder=PLACEHOLDER.get(f.path[-1], "required" if f.empty is None else "default"))]
 
     def field_of(self, widget_id):
@@ -406,6 +418,8 @@ class ModelBuilderScreen(Screen):
             self.fill_help(f)
         if self.panel_of(event.widget) == "attrs":
             self.attr_focus = event.widget
+        self.query_one("#mb-top").border_title = "Model Builder · Tree selection" \
+            if isinstance(event.widget, TreeTabs) else "Model Builder"
 
     def fill_help(self, f):
         """The parameter's name, what it does in XMR4EL, its JSON path and accepted values (fixed-height, scrolls)."""

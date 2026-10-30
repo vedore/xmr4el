@@ -13,8 +13,9 @@ history. Verification and remaining limits: [Step 6 audit](../audits/new_experim
   Everything else is stdlib-only (`tests/tui/test_runs.py` imports it under `python -S`), pure where
   possible, and tested without a terminal.
 - Every file read goes through `runs` / `progress` / `logs` / `services/experiment_repository.py`; renderers in
-  `screens/dashboard_details.py` and `screens/monitor_details.py` read no file. The UI thread reads no file either: scans and the selected
-  item's Details run in thread workers.
+  `screens/dashboard_details.py` and `screens/monitor_details.py` read no file. Dashboard scans, the selected item's Details and Results reads run in
+  thread workers. Dataset Setup (discovery, confirmation) and the file picker still list and stat files on the UI
+  thread; the 64 KiB dataset sniff is bounded, a full parse belongs to the runner.
 - Durable state includes run directories, `outputs/batches/` plans/status/locks and the dataset registry
   `outputs/tui/datasets.json`. The shared experiment draft and its navigation resume record are session memory.
 - Every file read tolerates missing or corrupt input, and fields of the wrong JSON type, and reports it as
@@ -36,11 +37,11 @@ xmr4el_tui/
   theme.py         the only colour values: semantic tokens (DARK), beam_color, $xmr-* CSS variables
   components.py    Model Builder registry (stdlib): slots, components, attribute fields (backend defaults and
                    ranges), parse / check / assign, slot problems, summaries, JSON lines by top-level key, template
-  process.py       -check, spawn, derived state, stop; Launches (owner of started children)
+  process.py       spawn, rejection, derived state, stop
   explorer.py      explorer model: trees by dataset -> evaluations, runs without a tree; keys, labels, tree
                    descriptor / detail / collision-safe short id, prune (search, Results filter)
   messages.py      RunsChanged (the app rescanned)
-  app.py           App: serialized, coalesced scan worker every 5 s; Snapshot; Launches reaping; global keys, theme
+  app.py           App: serialized, coalesced scan worker every 5 s; Snapshot; global keys, theme
   services/
     experiment_repository.py  Snapshot (runs, trees, Activity per recorded-running run) with the read cache
                    and incremental events tails; Details of the selected item
@@ -137,9 +138,6 @@ Functions:
 | `trees(root, runs) -> list[Tree]` | Group runs by `canonical(root, tree_path)`; a missing location joins the one existing location of its tree_id (several = copies: stays missing). |
 | `same_tree(runs, run) -> list[Run]` | Other runs with the same `tree_id` (details `also:`). |
 | `training_run(runs, tree_id) -> Run \| None` | The `kind == "train"` run that saved this tree (§11 derivation, eval-only defaults). |
-| `previous_completed(runs, run) -> Run \| None` | Newest COMPLETED run with the same name, older than `run` (§5.2 timings). |
-| `normalize_spec(recorded) -> (spec, xmodel_path)` | §10 round trip: drop `xmodel_path` from the copy, return it separately. |
-| `command_line(spec, xmodel_path) -> str` | Equivalent CLI for Inputs (`-spec -` with the normalized JSON). |
 
 Scan cost: about 5 small JSON reads per changed run; unchanged runs cost one directory listing.
 Rescan every 5 s and on `ctrl+r` (rereads every file), in one Textual thread at a time: a request during a
@@ -243,8 +241,7 @@ importing it; `tests/test_tui_components.py` (outside tests/tui) holds the two t
 `DashboardScreen.open_results(key)` pushes Results with that evaluation as baseline. `open_run(run_id, split)`
 pushes the Run monitor. Footer confirmations other than quit: `App.ask(question, key, verb)` / `App.asked(key)`
 (the same key again confirms, `esc` cancels, `ctrl+c` replaces it with the quit question). Used by Dataset Setup:
-`runs.datasets/split_files/training_files` (via `datasets.discover`). Backend kept for the launch steps:
-`process.check/Launches/rejection`, `runs.normalize_spec/command_line/model_configs`.
+`runs.datasets/split_files/training_files` (via `datasets.discover`). Launching goes through `batch.prepare/start` and the coordinator (`process.spawn/rejection`).
 
 Screens receive `RunsChanged` and re-render from the new `Run`, keeping selection,
 scroll and marks by run `id` (§7).
@@ -252,23 +249,17 @@ scroll and marks by run `id` (§7).
 ## 6. Process side (`process.py`, increment 2)
 
 ```python
-def check(root, spec, xmodel_path, revision) -> CheckResult   # spawns -check, parses one JSON object
 def spawn(root, spec, run_dir, xmodel_path, config_sha, tree_id) -> Popen  # + .console/<id>.launch.json
 def owned(run, rec) -> bool                   # the launch record matches run id, run dir and identity
 def derived_state(run, here) -> Live          # RUNNING | LOST | UNVERIFIED; stoppable only when the live
                                               # process leads its group and session (the recorded flag is no
                                               # proof) and owned() (a TUI launched it)
 def stop(run, force=False) -> str             # re-verifies identity first (§9); returns outcome
-class Launches                                # start() = spawn + keep the handle; reap() -> [(run id, what
-                                              # happened)] for exits without a final status (exit 3: rejection)
 ```
 
-- `check` runs in a thread worker; the app ignores results whose `revision` is not
-  the draft's current revision (§5.5).
 - `spawn`: argument list, `cwd=root`, `start_new_session=True`, stdin = spec JSON,
   stdout/stderr = `outputs/runs/.console/<run-id>.log`, created exclusively (a reused run id raises
-  `FileExistsError` before anything starts). The Popen goes into `App.launches` only so `reap()` collects it
-  and reports a launch that wrote no final status; the run's state always comes from files.
+  `FileExistsError` before anything starts). The coordinator owns the Popen; the run's state always comes from files.
 - Exit code 3 + the JSON line in the console log -> `BindingRejected` -> Setup (§10).
 
 ## 7. Changes outside the package
@@ -292,7 +283,7 @@ no numeric change, no retrain.
 - `fake_runs.make_run(root, name, *, kind, status, metrics, tree_id, tree_here,
   events, identity, corrupt=())` writes a run directory with the real file shapes.
 - Pure modules: every state in §4, the §11 matrix (hash / derived / unknown /
-  different), `normalize_spec` round trip, events with a torn last line.
+  different), events with a torn last line.
 - Screens: Textual `run_test(size=(80, 24))` + Pilot for §7 keys, focus restore,
   column dropping at 60 columns, `NO_COLOR`.
 - `evaluate_tree`: population hash equal for the same file and tree, different when

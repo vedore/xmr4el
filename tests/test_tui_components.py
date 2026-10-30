@@ -12,7 +12,7 @@ from xmr4el.features.reduction import DimensionModel
 from xmr4el.features.transformers import MODEL_NAMES
 from xmr4el.features.vectorizers import Vectorizer
 from xmr4el.hierarchy.clusterers import BalancedKMeans
-from xmr4el.learning.classifiers import ClassifierModel
+from xmr4el.learning.classifiers import ClassifierModel, JointOvRLogistic
 from xmr4el.xmodel import PREDICT_DEFAULTS, XModel
 from xmr4el_tui import components
 from xmr4el_tui.components import KMEANS_FIELDS, LOGREG_FIELDS, SEARCH_FIELDS, SVD_FIELDS, TFIDF_FIELDS
@@ -37,6 +37,24 @@ def test_defaults_mirror_the_backend():
         for f in s.extras:
             assert sig[f.path[0]].default == f.default, f.path
     assert MODEL_NAMES == components.MODEL_NAMES and BASE["features"] == components.HYBRID
+
+
+def test_closed_components_take_exactly_their_fields():
+    """`closed` kwargs are the backend's whole accepted set: the matcher's constructor arguments and the clustering
+    defaults. A key outside it blocks readiness; every key inside constructs the backend."""
+    sig = [n for n in inspect.signature(JointOvRLogistic).parameters]
+    closed = {c.type: [f.path[-1] for f in c.fields] for s in components.SLOTS for c in s.components if c.closed}
+    assert closed == {"jointlogisticregression": sig, "balancedkmeans": list(BalancedKMeans.DEFAULTS)}
+    JointOvRLogistic(**defaults(LOGREG_FIELDS))
+    for sid, key in (("matcher", "max_iterr"), ("hierarchy", "n_cluster")):
+        cfg = copy.deepcopy(BASE)
+        cfg[components.slot(sid).key]["kwargs"][key] = 10
+        found = components.problems(cfg)[sid]
+        assert [(f, key in m) for f, m in found] == [(None, True)], found
+        cfg[components.slot(sid).key]["kwargs"].pop(key)
+        assert not components.problems(cfg)
+    with pytest.raises(TypeError):
+        ClassifierModel.init_model({"type": "jointlogisticregression", "kwargs": {"max_iterr": 10}})
 
 
 @pytest.mark.parametrize("sid,name,bad", [

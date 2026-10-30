@@ -124,7 +124,7 @@ class PipelineGrid(Widget, can_focus=True):
                 Binding("left", "move(-1, 0)", show=False), Binding("right", "move(1, 0)", show=False),
                 Binding("up", "move(0, -1)", show=False), Binding("down", "move(0, 1)", show=False),
                 Binding("plus,equals_sign", "zoom(1)", "zoom", key_display="+/-"),
-                Binding("minus", "zoom(-1)", show=False), Binding("0", "zoom_fit", "fit"),
+                Binding("minus", "zoom(-1)", show=False), Binding("0", "zoom_fit", "auto density"),
                 Binding("1", "screen.tree(0)", "tree", key_display="1-9")]
 
     def __init__(self, **kwargs):
@@ -261,8 +261,8 @@ class PipelineGrid(Widget, can_focus=True):
 
 
 class ZoomBar(Widget):
-    """` -  Normal  +  Fit ` beside the tab strip: clicks zoom the grid; the keys + - 0 do the same on the grid."""
-    DEFAULT_CSS = "ZoomBar { width: 20; height: 1; }"
+    """` -  Normal  +  Auto ` beside the tab strip: clicks zoom the grid; the keys + - 0 do the same on the grid."""
+    DEFAULT_CSS = "ZoomBar { width: 22; height: 1; }"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -276,7 +276,7 @@ class ZoomBar(Widget):
         accent, muted = theme.style("accent", "bold"), theme.style("text-muted")
         fit = self.zoom == "fit"
         parts = [(" - ", accent, "out"), (f" {self.level.capitalize():<8} ", muted, None), (" + ", accent, "in"),
-                 (" Fit ", f"{theme.color('on-accent')} on {theme.color('accent')} bold" if fit else accent, "fit")]
+                 (" Auto ", f"{theme.color('on-accent')} on {theme.color('accent')} bold" if fit else accent, "fit")]
         out, x, self.spans = Text(no_wrap=True), 0, []
         for label, style, ref in parts:
             out.append(label, style)
@@ -299,15 +299,17 @@ class TreeTabs(Widget, can_focus=True):
     the grid (on `Add tree`: creates a tree and opens it), 1-9 jump to a tree, x removes the highlighted tree (asks), shift+left / right
     reorder it, F2 renames. A click on a tab shows it. Tabs after the ninth have no number: arrows reach them."""
     BINDINGS = [Binding("left", "cursor(-1)", "navigate", key_display="←→"),
-                Binding("right", "cursor(1)", show=False),
+                Binding("right", "cursor(1)", "navigate", show=False),
                 Binding("enter", "activate", "select"),
                 Binding("1", "screen.tree(0)", "tree", key_display="1-9"),
                 Binding("x", "screen.remove_tree", "remove"),
-                Binding("shift+left", "screen.move_tree(-1)", show=False),
-                Binding("shift+right", "screen.move_tree(1)", show=False),
-                Binding("n", "screen.add_tree", show=False), Binding("d", "screen.duplicate_tree", show=False),
-                Binding("delete", "screen.remove_tree", show=False),
-                Binding("y", "screen.confirm_remove", show=False)]
+                Binding("shift+left", "screen.move_tree(-1)", "move earlier", show=False),
+                Binding("shift+right", "screen.move_tree(1)", "move later", show=False),
+                Binding("n", "screen.add_tree", "add tree", show=False),
+                Binding("d", "screen.duplicate_tree", "duplicate"),
+                Binding("f2", "screen.rename", "rename"),
+                Binding("delete", "screen.remove_tree", "remove", show=False),
+                Binding("y", "screen.confirm_remove", "confirm remove", show=False)]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

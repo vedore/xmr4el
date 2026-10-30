@@ -214,7 +214,7 @@ class BatchMonitorScreen(Screen):
         if tree is None or self.run_of(tree) is None:
             self.app.say("This tree has no run to open yet.", screen=self)
         else:
-            self.app.push_screen(RunMonitorScreen(tree["run_id"]))
+            self.app.push_screen(RunMonitorScreen(tree["run_id"], back="batch monitor"))
 
     def check_action(self, action, parameters):
         return action != "stop" or self.info.state in ("running", "preparing")

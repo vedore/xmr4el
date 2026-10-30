@@ -56,7 +56,7 @@ class ExperimentRepository:
         self.last = Snapshot()  # last successful scan
 
     def snapshot(self, fresh=False):
-        """Read everything the Dashboard lists. Only reads files; `fresh` rereads every one (no cache)."""
+        """Read everything the Dashboard lists. Reads run and batch files; `batch.scan` can also persist a LOST reconciliation (lock-protected write). `fresh` rereads every one (no cache)."""
         at = datetime.now()
         if fresh:
             self.cache.clear()

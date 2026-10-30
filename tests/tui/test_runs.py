@@ -63,28 +63,6 @@ def test_scan_cache(tmp_path):
     assert [r.name for r in runs.scan(tmp_path, cache)] == ["y"] and set(cache) == {"2026-10-21_00-00-00_y"}
 
 
-def test_previous_completed(tmp_path):
-    make_run(tmp_path, "a", stamp="2026-10-01_00-00-00")
-    make_run(tmp_path, "a", stamp="2026-10-02_00-00-00")
-    make_run(tmp_path, "a", stamp="2026-10-03_00-00-00", status="failed")
-    make_run(tmp_path, "a", stamp="2026-10-04_00-00-00", status="running")
-    found = runs.scan(tmp_path)
-    assert runs.previous_completed(found, found[0]).id == "2026-10-02_00-00-00_a"
-    assert runs.previous_completed(found, found[-1]) is None
-
-
-def test_normalize_spec_round_trip(tmp_path):
-    train = json.loads((make_run(tmp_path, "t") / "spec.json").read_text())
-    ev = json.loads((make_run(tmp_path, "e", kind="eval") / "spec.json").read_text())
-    spec, path = runs.normalize_spec(train)
-    assert path is None and "xmodel_path" not in spec and "xmodel_path" in train
-    spec, path = runs.normalize_spec({**ev, "extra": 1})
-    assert path == ev["xmodel_path"] and spec["extra"] == 1  # unknown keys left for the runner
-    cmd = runs.command_line(spec, path)
-    assert cmd.startswith(f"python scripts/run_experiment.py -spec - -xmodel_path {path} <<'EOF'\n")
-    assert json.loads(cmd.split("\n", 1)[1].rsplit("\nEOF", 1)[0]) == spec
-
-
 def test_fmt(monkeypatch):
     assert (fmt.duration(59), fmt.duration(127), fmt.duration(3600 + 62), fmt.duration(None)) == (
         "0:59", "2:07", "1:01:02", "—")

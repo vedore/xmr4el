@@ -371,6 +371,10 @@ class DatasetSetupScreen(Screen):
         if self.draft.confirmed is None:
             self.app.say("Confirm a dataset first (ctrl+s).", "warning")
             return
+        d, _ = self.shown()
+        if d is not None and d.key != self.draft.confirmed.key:
+            self.app.say(f"Confirm {d.title} to continue: this experiment uses {self.draft.confirmed.name}.", "warning")
+            return
         if self.draft.edits:
             self.app.say("Unconfirmed dataset changes are not used: the Model Builder uses the confirmed dataset.")
         self.app.push_screen(ModelBuilderScreen())

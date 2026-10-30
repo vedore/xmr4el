@@ -57,6 +57,7 @@ class Component:
     type: str | None             # the config's "type" (None: predict_config, a custom transformer)
     fields: tuple
     base: dict = field(default_factory=dict)  # the slot config a newly chosen component starts from
+    closed: bool = False         # the backend takes exactly `fields` as kwargs (any other key fails or is ignored)
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,7 @@ SLOTS = (
     Slot("context_svd", "Context SVD", "Feature construction", "context_dimension_config", (SVD,)),
     Slot("hierarchy", "Hierarchy", "Hierarchy", "clustering_config", (
         Component("balancedkmeans", "Balanced KMeans", "Recursive balanced k-means over the PIFA label embeddings.",
-                  "balancedkmeans", KMEANS_FIELDS, {"type": "balancedkmeans", "kwargs": {}}),), (
+                  "balancedkmeans", KMEANS_FIELDS, {"type": "balancedkmeans", "kwargs": {}}, closed=True),), (
         Field(("depth",), "Tree depth", "int", 1, low=1, top=True,
               help="Layers of the hierarchy: every layer but the last clusters labels and routes; the last scores labels individually. Training fails if a node cannot split into clusters of at least the minimum leaf size."),
         Field(("min_leaf_size",), "Minimum leaf size", "int", 20, low=0, top=True,
@@ -203,7 +204,8 @@ SLOTS = (
     Slot("matcher", "Matcher", "Matcher", "matcher_config", (
         Component("jointlogisticregression", "Joint Logistic Regression",
                   "One-vs-rest L2 logistic regression per node, all labels solved jointly (torch L-BFGS).",
-                  "jointlogisticregression", LOGREG_FIELDS, {"type": "jointlogisticregression", "kwargs": {}}),)),
+                  "jointlogisticregression", LOGREG_FIELDS, {"type": "jointlogisticregression", "kwargs": {}},
+                  closed=True),)),
     Slot("search", "Search", "Search", "predict_config", (
         Component("beam", "Beam search", "Top-down beam search; the tree's default prediction settings.",
                   None, SEARCH_FIELDS, {}),)),
@@ -414,6 +416,11 @@ def slot_problems(config, slot_, component=None):
         what = got.get("type") if isinstance(got, dict) else got
         return [(None, f"No supported component ({'missing' if got is None else repr(what)}).")]
     out = [(f, err) for f in comp.fields + slot_.extras if (err := check(f, value(config, slot_, f)))]
+    kwargs = (config.get(slot_.key) or {}).get("kwargs") if slot_.key in config else None
+    if comp.closed and isinstance(kwargs, dict):
+        known = [f.path[-1] for f in comp.fields]
+        out += [(None, f"Unknown {comp.name} setting {k!r}; it takes {', '.join(known)}.") for k in kwargs
+                if k not in known]
     if comp.fields is TFIDF_FIELDS:
         lo, hi = (value(config, slot_, comp.fields[i]) for i in (4, 3))  # min_df, max_df
         if type(lo) is type(hi) and not check(comp.fields[3], hi) and not check(comp.fields[4], lo) and lo > hi:

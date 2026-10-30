@@ -704,3 +704,40 @@ def test_every_tab_stop_in_the_editor_is_visibly_focused(tmp_path):
         help_box = screen.query_one("#mb-help")
         assert help_box in stops and help_box.border_title  # the help panel is a stop, and says so when focused
     run_builder(make_root(tmp_path), go)
+
+
+# --- usability review repairs --------------------------------------------------------------------------------------
+def test_resize_keeps_the_focused_field_visible_and_arrows_move_fields(tmp_path):
+    async def go(app, pilot, screen):
+        await edit(pilot, screen, "transformer")
+        await pilot.press("down", "down", "down")
+        await pilot.resize_terminal(80, 24)
+        await pilot.pause()
+        box, here = screen.query_one("#mb-attrs"), app.focused
+        view = box.region.shrink(box.styles.gutter)
+        assert here.region.y >= view.y and here.region.bottom <= view.bottom, "focused field inside its viewport"
+        i = int(here.id.split("-")[1])
+        await pilot.press("up")  # an Input's arrow moves to the previous parameter, scrolled or not
+        assert app.focused.id != here.id and int(app.focused.id.split("-")[1]) == i - 1
+    run_builder(make_root(tmp_path), go)
+
+
+def test_long_confirmation_keeps_both_answers_at_80_columns(tmp_path):
+    async def go(app, pilot, screen):
+        app.ask("Remove " + "very long tree name " * 6 + "?", "y", "remove")
+        await pilot.pause()
+        text = footer(app)
+        assert "y remove" in text and "esc cancel" in text and "…" in text
+    run_builder(make_root(tmp_path), go, size=(80, 24))
+
+
+def test_tree_actions_are_described_in_help_and_the_mode_is_named(tmp_path):
+    for b in TreeTabs.BINDINGS:
+        assert b.description, b.key
+
+    async def go(app, pilot, screen):
+        screen.query_one(PipelineGrid).focus()
+        await pilot.press("escape")
+        assert isinstance(app.focused, TreeTabs)
+        assert screen.query_one("#mb-top").border_title == "Model Builder · Tree selection"
+    run_builder(make_root(tmp_path), go)

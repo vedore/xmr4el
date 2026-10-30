@@ -6,7 +6,6 @@ Every read tolerates missing or corrupt files and fields of the wrong JSON type:
 import json
 import os
 import re
-import shlex
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -275,13 +274,6 @@ def training_run(runs, tree_id):
     return next((r for r in runs if tree_id and r.kind == "train" and r.tree_id == tree_id), None)
 
 
-def previous_completed(runs, run):
-    """Newest COMPLETED run with the same name, older than `run`."""
-    older = [r for r in runs if r.name == run.name and r.recorded == "completed" and r.id != run.id
-             and r.started and run.started and r.started < run.started]
-    return max(older, key=lambda r: r.started, default=None)
-
-
 @dataclass(frozen=True)
 class Tree:
     id: str | None
@@ -344,15 +336,6 @@ def trees(root, all_runs):
     return out
 
 
-def model_configs(root):
-    """configs/*.json (experiment specs live in configs/experiments/)."""
-    return [str(p.relative_to(root)) for p in sorted(Path(root, "configs").glob("*.json"))]
-
-
-def experiment_specs(root):
-    return [str(p.relative_to(root)) for p in sorted(Path(root, "configs", "experiments").glob("*.json"))]
-
-
 def split_files(root, dataset):
     """{split: path} of a dataset directory, in SPLITS order."""
     try:
@@ -377,18 +360,3 @@ def datasets(root):
     found = {str(p.parent.relative_to(root)) for p in Path(root, "datasets").rglob("*")
              if (m := SPLIT_FILE.fullmatch(p.name)) and m[m.lastindex] != "train"} if Path(root, "datasets").is_dir() else ()
     return sorted(found, key=str.lower)
-
-
-def normalize_spec(recorded):
-    """Recorded spec.json -> (input spec, xmodel_path). xmodel_path is invocation metadata: dropped from the spec,
-    returned separately (None = training). Other keys are kept for the runner to accept or reject."""
-    spec = dict(recorded)
-    return spec, spec.pop("xmodel_path", None)
-
-
-def command_line(spec, xmodel_path):
-    """Shell command equivalent to the run: the normalized spec on stdin."""
-    args = ["python", "scripts/run_experiment.py", "-spec", "-"]
-    if xmodel_path is not None:
-        args += ["-xmodel_path", xmodel_path]
-    return f"{shlex.join(args)} <<'EOF'\n{json.dumps(spec, indent=2)}\nEOF"

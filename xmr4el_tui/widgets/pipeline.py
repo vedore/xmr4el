@@ -16,9 +16,7 @@ class Pipeline(DragRightBorder, Selectable, FullRow, Tree):
     ALLOW_MAXIMIZE = True
     # class defaults: Tree.__init__ already runs the cursor watcher. target: the row following last moved to
     following, target = True, None
-    BINDINGS = [Binding("tab", "cursor_down", "next", show=False),
-                Binding("shift+tab", "cursor_up", "previous", show=False),
-                Binding("left", "collapse_or_parent", "collapse", show=False),
+    BINDINGS = [Binding("left", "collapse_or_parent", "collapse", show=False),
                 Binding("right", "expand", "expand", show=False)]
 
     def __init__(self, **kwargs):
