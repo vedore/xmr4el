@@ -7,6 +7,17 @@ labels into a tree, trains a matcher per tree node, and searches the tree with a
 It is a research codebase: training and evaluation run from scripts on local files. It does not detect
 mentions; prediction takes mentions you supply.
 
+**What this repository contains**
+
+| Part | What it does |
+|---|---|
+| `xmr4el/` | Library: read data, encode, cluster, train the tree, predict, evaluate. |
+| `scripts/` | Command-line entry points: `train.py`, `evaluate.py`, `run_experiment.py`, data conversion, diagnostics, baselines. |
+| `xmr4el_tui/` | Optional terminal UI (extra `tui`). Reads run files, launches the existing runner; contains no training or evaluation code. |
+| `configs/` | Model configs and experiment specs (JSON). |
+
+**What it does not do:** mention detection, UMLS or knowledge-base lookups, document-level linking, serving.
+
 ## How it works
 
 1. **Read** PubTator annotations (or grouped TSV texts). Each annotation becomes `mention [SEP] context`
@@ -71,7 +82,7 @@ best = model.initial_labels[scores[0].toarray().argmax()]
 ```
 
 `scores` is a sparse (queries x labels) matrix; column `j` is `model.initial_labels[j]` (sorted label IDs).
-Search settings default to the tree's `predict_config`; `beam_size`, `topk` and `knn_beta` keyword
+Search settings default to the tree's `predict_config`; `beam_size`, `topk`, `knn_beta` and `leaf_candidates` keyword
 arguments override them.
 
 ## Input formats
@@ -126,7 +137,7 @@ Dataset recipes are in `scripts/README.md`.
 
 Reports acc@1, MRR, recall@k, candidate recall (`R@cand`) and vocabulary coverage. Metrics are computed on
 mentions whose gold label has training text (coverage is reported); `acc@1_all` counts the others as misses.
-`-beam_size`, `-topk` and `-knn_beta` override the saved search settings. `topk 0` keeps every candidate
+`-beam_size`, `-topk`, `-knn_beta` and `-leaf_candidates` override the saved search settings. `topk 0` keeps every candidate
 (at most 100 per visited leaf); with `topk > 0`, `R@cand` also counts ranking losses.
 
 `scripts/run_experiment.py -spec configs/experiments/<name>.json` trains and evaluates one spec and records
@@ -136,32 +147,27 @@ are in `docs/results.md`. Each `metrics_<split>.json` also records `eval_protoco
 dictionary answers); the TUI compares evaluations only through these. An input file that changes during a run
 fails it before metrics are written.
 
-Browse saved trees, their evaluations and active runs in the terminal (optional `tui` extra; reads
-run and tree metadata without loading a tree; New Experiment writes dataset registrations, batch snapshots
-and execution state, and launches the existing runner):
+## Terminal UI (optional)
+
+Browses saved trees, their evaluations and runs, monitors and cancels runs, compares evaluations, and launches
+experiment batches. It reads run and tree metadata without loading a tree, and starts the existing runner. It
+writes only dataset registrations (`outputs/tui/datasets.json`), batch plans/status and run execution state.
 
 ```bash
 uv sync --locked --extra tui
 .venv/bin/python -m xmr4el_tui            # or xmr4el-tui; --root <repo> when started elsewhere
 ```
 
-Dashboard: Explorer (Models > dataset > tree > evaluation, then runs without a saved tree), Description of
-the selected item, Active runs. `enter` describes, `tab` / `shift+tab` (also `]` / `[`, `ctrl+tab`) cycle panels, `ctrl+b` hides the
-explorer, `<` / `>` resize it, `ctrl+r` rereads every run file, `?` lists the keys, `ctrl+c` twice quits.
-Mouse drag selects text and copies it. It rescans every 5 s. `View Logs` in the Description opens a run's log.
+| Screen | Opened by | Purpose |
+|---|---|---|
+| Dashboard | start | Explorer (Models > dataset > tree > evaluation, then runs without a tree), Description of the selection, Active runs. Rescans every 5 s. `View Logs` opens a run's log. |
+| Run Monitor | `enter` on an active run, `right` in Description | Overview, Pipeline stages, Resources, Live logs. Cancel Run (`s`) sends SIGTERM after confirmation, only to runs this TUI launched. Runs started from a shell are monitor-only. |
+| Results | `r`, or `left` in Description, on an evaluation with metrics | Compares it (baseline) with up to three evaluations of the same test file: VERIFIED / CAUTION / INCOMPATIBLE; deltas only where recorded evidence allows. |
+| New Experiment | `n` | Dataset Setup (confirm dataset, files) -> Model Builder (`m`; one or more trees, eight pipeline slots, live JSON preview, `ctrl+s` applies) -> Review Batch (validation, queue) -> Launch Batch (detached coordinator, `xmr4el_tui/batch.py`, `coordinator.py`; one running batch at a time). |
 
-Run Monitor (`enter` on an active run, `right` in the Description): Run overview, Pipeline (stages, parts,
-hierarchy layers), Resources of the selected stage, Live logs (`/` search, `n` / `N`, `l` level, `f`
-fullscreen). `c` follows the current stage again, `esc` returns. Cancel Run (`s`) sends SIGTERM after a
-confirmation, only to a run this TUI (or an earlier one) launched; runs started from a shell are monitored only.
-Results (`r`, or `left` in the Description, on an evaluation with metrics) compares it, as the baseline, with up to
-three other evaluations of the same test file (VERIFIED / CAUTION / INCOMPATIBLE, deltas only where the
-recorded evidence allows them). New Experiment (`n`) starts with Dataset Setup: datasets recognized from
-`configs/experiments/*.json` and `datasets/`, or registered (saved in `outputs/tui/datasets.json`); `enter`
-configures one, the training file and Development / Test files can be changed with a file picker, `ctrl+s` confirms
-the dataset for the experiment; `m` then opens the Model Builder: one or more trees (tabs), each a hybrid
-pipeline of eight slots whose components are chosen and edited with a live JSON preview and applied with `ctrl+s`
-(Review Batch launches the batch through a detached coordinator: `xmr4el_tui/batch.py`, `coordinator.py`; one running batch at a time; tui.md §5.16).
+Keys: `?` lists them; `tab` / `shift+tab` cycle panels; `ctrl+b` hides the explorer, `<` / `>` resize it;
+`ctrl+r` rereads every run file; `ctrl+c` twice quits; mouse drag selects and copies text. Screen-by-screen
+contract: `docs/design/tui.md`; modules: `docs/design/tui_architecture.md`.
 
 ## Configuration
 
@@ -176,9 +182,10 @@ Model configs are JSON: `configs/xmr4el_base_config.json` (MedMentions) and
 | `context_window` | words on each side of the mention used as context |
 | `vectorizer_config`, `context_vectorizer_config` | TF-IDF of the mention / context |
 | `dimension_config`, `context_dimension_config` | SVD of those blocks (768 columns each in both configs) |
-| `clustering_config` | `balancedkmeans`: `n_clusters` per node, `iter_limit`, `seed` |
+| `clustering_config` | `balancedkmeans`: `n_clusters` per node, `iter_limit`, `refine_iter`, `seed` |
 | `depth`, `min_leaf_size` | fixed tree depth: every internal node is split; clusters below `min_leaf_size` labels are merged into the nearest larger one, and training fails if a node cannot form two clusters of that size (small datasets: lower `depth`, `min_leaf_size` or `n_clusters`) |
 | `matcher_config` | `jointlogisticregression`: `C`, `class_weight`, `tol`, `max_iter` |
+| `cut_half_cluster` | `true`: below the root, each layer halves `n_clusters` (minimum 2); code default `false` |
 | `predict_config` | default search: `beam_size`, `topk`, `knn_beta`; saved with the tree |
 
 Training resolves the transformer `revision` (default `main`) to its commit hash, offline to the locally
@@ -236,7 +243,7 @@ Checks on synthetic data (no corpus needed):
 
 ```bash
 .venv/bin/python -m pytest -q && \
-uvx ruff check xmr4el scripts tests && \
+uvx ruff check xmr4el xmr4el_tui scripts tests && \
 .venv/bin/python scripts/evaluate.py -selfcheck && \
 .venv/bin/python scripts/diagnose_routing.py -selfcheck && \
 .venv/bin/python scripts/diagnose_unseen.py -selfcheck && \
@@ -252,9 +259,13 @@ Layout:
 - `xmr4el/hierarchy/`: clustering, tree training, beam search, persistence.
 - `xmr4el/learning/`: one-vs-rest logistic matchers, mention-kNN scoring.
 - `xmr4el/xmodel.py`: public API (`XModel.train`, `predict`, `save`, `load`); `xmr4el/eval.py`: metrics.
+- `xmr4el/telemetry/`: run events and per-stage resource samples written by the runner.
+- `xmr4el/rerank.py`: experimental cross-encoder reranker (`scripts/train_reranker.py`, `evaluate.py`); not part of default prediction (`docs/archive/status_log.md` § R).
+- `xmr4el_tui/`: the terminal UI above.
 - `scripts/`: train, evaluate, experiment runner, data conversion, diagnostics, baselines (`scripts/README.md`).
-- `configs/`: model configs and experiment specs. [Documentation](docs/README.md): architecture,
-  pipeline notes, results, interface design, and historical audits.
+- `configs/`: model configs and experiment specs.
+- `docs/`: [index](docs/README.md): pipeline behavior, results, future work, TUI design, audits, archive.
+- `STATUS.md`: current state and next steps.
 
 The archived [architecture assessment](docs/archive/architecture.md) records the 2026-10-23 scope, cleanup
 decisions and remaining risks. TF-IDF, SVD, balanced k-means and joint

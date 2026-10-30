@@ -25,6 +25,8 @@ When analyzing this repo, assume the main logic is organized around these areas:
 - `xmr4el/hierarchy/node.py`, `hierarchy/tree.py`: tree node and hierarchical model (training, traversal, persistence)
 - `xmr4el/xmodel.py`: the `XModel` API; `xmr4el/eval.py`: evaluation metrics
 - `scripts/run_experiment.py`: spec-driven runner writing `outputs/runs/<run>/`
+- `xmr4el/telemetry/`: run events and resource samples (runner side)
+- `xmr4el/rerank.py`: experimental reranker, not in default prediction
 - `xmr4el_tui/`: Textual TUI over `outputs/runs/` (design `docs/design/tui.md`, code map `docs/design/tui_architecture.md`)
 
 Scripts live under `scripts/`, pytest checks under `tests/`, configs under `configs/`,

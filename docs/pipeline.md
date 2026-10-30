@@ -55,7 +55,7 @@ tuning. Neither route weighting nor `log_loss` alone establishes calibration acr
 
 ## Scale and external baseline
 
-- Then run a PECOS baseline on the same split, label mapping and instance features. Record hierarchy,
+- PECOS baseline: run it on the same split, label mapping and instance features. Record hierarchy,
   negative sampling, scoring, search budget, runtime and memory differences. Similar parameter names
   do not establish equivalent algorithms.
 - Custom layer feature augmentation remains in `prepare_layer`; the proposed scoring/matcher changes

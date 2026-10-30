@@ -11,14 +11,14 @@ see the [scripts guide](../scripts/README.md).
 | [Pipeline](pipeline.md) | Implemented behavior, validation, and pipeline observations. |
 | [Results](results.md) | Dated experiment results and reproduction commands; older sections describe their historical configurations. |
 | [Future work](future_work.md) | Open research problems and where to pick up. |
-| [Working status](../STATUS.md) | Detailed development state and session notes for this checkout. |
+| [Working status](../STATUS.md) | What is in flight, next steps, working and interpretation rules. History: `archive/status_log.md`. |
 
 ## Interface design
 
 | Document | Status |
 | --- | --- |
-| [TUI design](design/tui.md) | Interface design; increments 1-2 built (branch `tui`). |
-| [TUI architecture](design/tui_architecture.md) | Module layout, data model and build order for the TUI. |
+| [TUI design](design/tui.md) | Interface design (contract for screens, keys, files). Built: Dashboard, Run Monitor, Results, New Experiment (branch `tui`). |
+| [TUI architecture](design/tui_architecture.md) | Module layout, data model, rules, comparability evidence (§3a). Implemented. |
 
 ## Audits
 
@@ -28,6 +28,9 @@ fixed; use the pipeline document for current behavior.
 - [Tool readiness audit, 2026-10-09](audits/tool_readiness_audit.md)
 - [Comprehensive audit, 2026-10-16](audits/comprehensive_audit_2026-10-16.md)
 - [Code quality audit, 2026-10-16](audits/code_quality_audit_2026-10-16.md)
+- [TUI application UX audit, 2026-10-28](audits/tui_application_ux_integration_audit_2026-10-28.md)
+- [New Experiment Step 6 audit, 2026-10-29](audits/new_experiment_step6.md)
+- [Code quality and architecture review, 2026-10-30](audits/code_quality_architecture_review_2026-10-30.md)
 
 ## Archive and references
 

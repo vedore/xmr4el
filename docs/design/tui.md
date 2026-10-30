@@ -1,7 +1,8 @@
 # XMR4EL TUI design
 
-Status (2026-10-27): only the Dashboard is built (§7 Dashboard rows); the screens of §5 were removed and are to be
-rebuilt on the same backend. Earlier status: proposed (2026-10-23). Wireframe values come from the ten
+Status (2026-10-30): built: Dashboard, Run Monitor, Results, Dataset Setup, Model Builder, Review Batch, Batch Monitor
+(§5.11-§5.16, §7). The Runs/Run/Trees/Compare/Setup/Review screens of the first plan were removed; sections that
+describe them are design history. Proposed 2026-10-23. Wireframe values come from the ten
 runs in `outputs/runs/` (2026-10-20) unless marked *illustrative*.
 
 ## 1. Concept

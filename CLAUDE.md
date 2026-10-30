@@ -59,7 +59,7 @@ Saved trees are under `outputs/saved_trees/`.
 implemented-behavior table, synthetic checks and pipeline observations. Do not
 duplicate them here. Internal nodes set `fused_scores` from the matcher's cluster scores in
 `MLModel.train`, and `prepare_layer` consumes them; score fusion for that step
-(`fused_predict`) is future work (`docs/future_work.md` item 5).
+at predict time is future work (`docs/future_work.md` item 5).
 
 ## Development workflow
 
