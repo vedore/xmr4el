@@ -41,7 +41,7 @@ def test_text_encoder():
         context_dimension_config={"type": "sklearntruncatedsvd", "kwargs": {"n_components": 2, "random_state": 0}},
     )
     texts6 = ["aspirin [SEP] doc one", "aspirin [SEP] another doc", "tumour [SEP] doc one",
-              "aspirine [SEP] fever dose", "tumours [SEP] "]  # last: empty window
+              "aspirine [SEP] another doc", "tumours [SEP] "]  # last: empty window; two distinct contexts = rank 2 = the 2 SVD components
     with patch.object(TextEncoder, "_encode_text_using_transformer", staticmethod(fake_transformer)):
         X6 = enc6.encode(texts6)
         with tempfile.TemporaryDirectory() as d:
